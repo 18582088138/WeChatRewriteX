@@ -36,7 +36,7 @@ Base URL: `http://127.0.0.1:8000`。所有接口前缀 `/api`。运行时亦可�
 |---|---|---|
 | GET | `/api/articles/{aid}/draft?version=` | 取文案（默认最新版）+ 版本列表 |
 | GET | `/api/articles/{aid}/versions` | 版本列表 |
-| PUT | `/api/drafts/{draft_id}/edit` | 批量编辑。Body: `{ops: [{op, block_id, ...}]}`，op ∈ `update`(text) / `remove` / `replace_image`(asset_id) / `set_caption`(caption)。落盘新版本；改动超阈值自动触发复审 |
+| PUT | `/api/drafts/{draft_id}/edit` | 批量编辑。Body: `{ops: [{op, block_id, ...}]}`，op ∈ `update`(text) / `remove` / `replace_image`(asset_id) / `set_caption`(caption) / `update_meta`(field ∈ one_liner/keywords/title_candidates/title_selected)。落盘新版本；改动超阈值自动触发复审 |
 | POST | `/api/drafts/{draft_id}/regenerate` | 段落 AI 重生成。`{block_ids: [], instruction}` → 新版本 |
 | POST | `/api/drafts/{draft_id}/insert-refs` | 参考素材融合插入。`{material_ids: [], after_block_id?, instruction?}` → 新版本 |
 
@@ -45,7 +45,7 @@ Base URL: `http://127.0.0.1:8000`。所有接口前缀 `/api`。运行时亦可�
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/articles/{aid}/reviews/latest` | 最新审稿报告 + checklist（按 severity 排序） |
-| POST | `/api/review-items/{item_id}/resolve` | 处理条目。`{action: accept\|dismiss\|fix, note?}`；`fix` 对该块执行 AI 修复并生成新版本 |
+| POST | `/api/review-items/{item_id}/resolve` | 处理条目。`{action: accept\|dismiss\|fix, note?}`；`fix` 立即对该块 AI 修复并生成新版本（前端「采纳并修复」，成功后对应块高亮闪示）；`accept` 为标记待改并定位段落。定稿/发布态下的复审为「软审」：只出报告不动文章状态 |
 
 审稿六维：`layout`（规则）、`fact`/`attribution`/`compliance`/`ai_flavor`（LLM）、`originality`（SimHash/向量）。
 
