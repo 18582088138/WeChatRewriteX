@@ -71,23 +71,29 @@ settings(key, value_json)              -- UI 可改配置, 覆盖 settings.yaml
 prompt_templates(name, version, content, changelog, created_at)
 ```
 
-## 素材库文件布局
+## 素材库文件布局（v2，2026-10-24 按反馈修订）
+
+`data/` 是唯一数据根（与代码分离、整体 gitignore）。**每篇文章一个可读文件夹**（标题_短id），
+资源按中文分项存放；发布包也并入文章文件夹，用户打开一个文件夹即可拿到全部产物：
 
 ```
 data/library/
-├── common/                            # 公共素材库
-│   ├── images/  videos/  docs/
-│   └── inbox/                         # 手动拷入的落点, 摄取后归档到对应类型目录
-└── articles/
-    └── <article_id>/                  # 文章素材组
-        ├── source/                    # 原文不可变快照
-        │   ├── page.html  content.md  meta.json
-        ├── refs/                      # 3~5 篇参考, 每篇一个子目录 (同结构)
-        │   └── <material_id>/page.html content.md meta.json
-        ├── images/  videos/  docs/
-        ├── inbox/                     # 手动添加落点
-        └── notes.md                   # 收集报告: 主题/关键词/核心论点/清单
+├── common/                                # 公共素材库
+│   ├── 图片/  视频/  文档/
+│   └── inbox/                             # 手动拷入落点, 扫描即入库
+└── articles/<文章标题_短id>/               # 文章素材组 (名见 articles.lib_dir)
+    ├── 原文/  page.html content.md meta.json
+    ├── 参考/<material_id>/                 # 每篇参考一个子目录(同结构)
+    ├── 图片/  视频/  文档/
+    ├── inbox/                             # 本文手动添加落点
+    ├── exports/                           # 发布包: wechat_mp/ xhs/ weibo/ x/ xhs_cards/
+    └── notes.md                           # 收集报告
+
+data/drafts/<article_id>/                  # 文案版本 (应用内部数据, 非用户素材)
 ```
+
+> 说明：v1 为 `articles/<id>/{source,refs,images,...}` 英文目录 + 独立 `data/exports/`；
+> v2 改为标题命名 + 中文分项 + exports 并入，满足「统一文件夹、分项保存、不与代码混杂」。
 
 ### 素材摄取流水线（统一入口）
 

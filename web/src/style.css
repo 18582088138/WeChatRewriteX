@@ -2,30 +2,83 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * 设计 token（taste-skill app-screen 规范）：
+ * 平表面、1px 边线代替阴影、accent 克制（数据与品牌标记）、近黑主按钮、词色三层。
+ */
+:root {
+  --ground: #F9FAFB;
+  --surface: #FFFFFF;
+  --raised: #F5F6F7;
+  --active: #EEEEEE;
+  --border: #E8E8E8;
+  --rule: #F1F1F1;
+  --control: #D1D5DB;
+  --text: #141414;
+  --muted: #5F6368;
+  --faint: #6B6B6B;
+  --primary: #1D1F20;
+  --accent: #C63B24;            /* 朱红：品牌与关键数据 */
+  --accent-ink: #A32E1B;
+  --pill-pos-bg: #DCF1E4;  --pill-pos-ink: #14532D;
+  --pill-neg-bg: #FFEDEA;  --pill-neg-ink: #831C1E;
+  --pill-warn-bg: #FFF6E5; --pill-warn-ink: #8A5A00;
+  --pill-info-bg: #EDEFF2; --pill-info-ink: #4B5563;
+  --pill-new-bg: #E5EDF9;  --pill-new-ink: #1E3A5F;
+  --radius-card: 8px;
+  --radius-control: 6px;
+  --gap: 16px;
+  --card-pad: 20px;
+}
+
 html { -webkit-font-smoothing: antialiased; }
-body { @apply bg-paper text-ink-900 font-sans; }
+body {
+  background: var(--ground);
+  color: var(--text);
+  font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif;
+  font-size: 14px;
+}
+.num { font-variant-numeric: tabular-nums; }
 
-/* 阅读排版（编辑器预览 / 发布预览共用） */
-.reader p { @apply leading-[1.9] text-[15px] text-ink-700 mb-4 text-justify; }
-.reader h1 { @apply text-[22px] font-bold mb-5 leading-snug; }
-.reader h2 { @apply text-[18px] font-bold mt-7 mb-3 leading-snug; }
-.reader h3 { @apply text-[16px] font-bold mt-6 mb-2; }
-.reader blockquote { @apply border-l-4 border-slate-300 bg-slate-50 px-4 py-3 my-4 text-ink-500 text-sm leading-relaxed rounded-r-lg; }
-.reader img { @apply rounded-xl my-5 mx-auto max-w-full; }
-.reader .caption { @apply text-center text-xs text-ink-400 -mt-3 mb-5; }
-.reader hr { @apply my-7 border-slate-200; }
+/* —— 面板：1px 边线、无阴影、8px 圆角 —— */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
 
-/* Naive UI 与 Tailwind 共存微调 */
-.n-config-provider { height: 100%; }
+/* —— 阅读排版（编辑器预览 / 审稿预览）—— */
+.reader p { line-height: 1.9; font-size: 15px; color: #2A2926; margin-bottom: 1em; text-align: justify; }
+.reader h1 { font-size: 22px; font-weight: 700; margin: 0 0 20px; line-height: 1.35; letter-spacing: -0.01em; }
+.reader h2 { font-size: 17px; font-weight: 700; margin: 28px 0 12px; line-height: 1.4; }
+.reader h3 { font-size: 15px; font-weight: 700; margin: 22px 0 10px; }
+.reader blockquote {
+  border-left: 3px solid var(--accent);
+  background: var(--raised);
+  padding: 10px 16px; margin: 0 0 16px;
+  color: #4A463D; font-size: 14px; line-height: 1.8;
+}
+.reader img { border-radius: 6px; margin: 20px auto 4px; max-width: 100%; }
+.reader .caption { text-align: center; font-size: 12px; color: var(--faint); margin: 4px 0 20px; }
+.reader hr { margin: 28px 0; border: none; border-top: 1px solid var(--border); }
 
-/* 块编辑器交互 */
-.block-item { @apply relative rounded-lg transition-colors duration-150; }
-.block-item:hover { @apply bg-slate-50; }
-.block-item.selected { @apply bg-accent-soft ring-1 ring-accent/40; }
-.block-item.editing { @apply bg-white ring-1 ring-accent shadow-card; }
-.block-item.highlight-review { @apply bg-amber-50 ring-1 ring-amber-300; }
+/* —— 块编辑器 —— */
+.block-item { position: relative; border-radius: 6px; transition: background .12s; }
+.block-item:hover { background: var(--raised); }
+.block-item.selected { background: #FDF0EC; outline: 1px solid #F0C4B8; }
+.block-item.editing { background: var(--surface); outline: 1px solid var(--control); }
+.block-item.flash-fixed { animation: flashFix 2.4s ease-out; }
+@keyframes flashFix {
+  0% { background: #FCE8E2; outline: 1px solid var(--accent); }
+  100% { background: transparent; outline: 1px solid transparent; }
+}
+.highlight-review { background: #FFF6E5 !important; outline: 1px solid #F0D49A; }
 
-/* 滚动条 */
+/* —— 滚动条 —— */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { @apply bg-slate-300 rounded-full; }
+::-webkit-scrollbar-thumb { background: #D4D4D8; border-radius: 999px; }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* —— Naive UI 细节归位 —— */
+.n-tabs .n-tabs-nav { border-bottom: 1px solid var(--border); }
+.n-config-provider { height: 100%; }

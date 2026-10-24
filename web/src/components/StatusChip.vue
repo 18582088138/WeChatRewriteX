@@ -4,20 +4,21 @@ import { computed } from 'vue'
 const props = defineProps<{ status: string; uiStatus?: string }>()
 
 const ui = computed(() => props.uiStatus || props.status)
+// taste: 状态用「浅色底 + 同色深字」的 pill，不用饱和色
 const style = computed(() => {
   switch (ui.value) {
-    case 'New': return 'bg-sky-100 text-sky-700'
-    case 'Process': return 'bg-amber-100 text-amber-700'
-    case 'Done': return 'bg-emerald-100 text-emerald-700'
-    default: return 'bg-rose-100 text-rose-700'
+    case 'New': return 'background: var(--pill-new-bg); color: var(--pill-new-ink);'
+    case 'Process': return 'background: var(--pill-warn-bg); color: var(--pill-warn-ink);'
+    case 'Done': return 'background: var(--pill-pos-bg); color: var(--pill-pos-ink);'
+    default: return 'background: var(--pill-neg-bg); color: var(--pill-neg-ink);'
   }
 })
 const dot = computed(() => {
   switch (ui.value) {
-    case 'New': return 'bg-sky-500'
-    case 'Process': return 'bg-amber-500 animate-pulse'
-    case 'Done': return 'bg-emerald-500'
-    default: return 'bg-rose-500'
+    case 'New': return 'background:#3B6699;'
+    case 'Process': return 'background:#C99014;'
+    case 'Done': return 'background:#247B50;'
+    default: return 'background:#C4242A;'
   }
 })
 
@@ -30,9 +31,9 @@ const label = computed(() => STAGE_LABEL[props.status] || ui.value)
 </script>
 
 <template>
-  <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
-        :class="style">
-    <span class="w-1.5 h-1.5 rounded-full" :class="dot"></span>
+  <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs"
+        :style="style">
+    <span class="w-1.5 h-1.5 rounded-full inline-block" :style="dot"></span>
     {{ label }}
   </span>
 </template>

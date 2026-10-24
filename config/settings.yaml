@@ -39,7 +39,7 @@ cards:
   theme: tech-note
   width: 1080
   height: 1440
-  max_chars_per_page: 300
+  max_chars_per_page: 380      # 编辑部快报版式下单页容量（38px/1.9 行高实测）
   min_font_px: 26
 
 # ---- 平台变体 ----

@@ -30,6 +30,11 @@ def init_db() -> None:
     data_dir().mkdir(parents=True, exist_ok=True)
     with connect() as conn:
         conn.executescript(_SCHEMA)
+        # 轻量迁移：老库补 lib_dir 列
+        try:
+            conn.execute("ALTER TABLE articles ADD COLUMN lib_dir TEXT")
+        except sqlite3.OperationalError:
+            pass
         _init_fts(conn)
 
 

@@ -34,7 +34,7 @@ DEFAULTS: dict[str, Any] = {
         "recheck_on_edit": {"enabled": True, "min_changed_blocks": 3, "min_word_delta_pct": 20},
     },
     "pipeline": {"auto": False, "concurrency": {"llm": 2, "download": 4}},
-    "cards": {"theme": "tech-note", "width": 1080, "height": 1440, "max_chars_per_page": 300, "min_font_px": 26},
+    "cards": {"theme": "tech-note", "width": 1080, "height": 1440, "max_chars_per_page": 380, "min_font_px": 26},
     "variants": {
         "wechat_mp": {"word_range": [1200, 1800]},
         "xhs": {"max_chars": 1000, "pages": [3, 9]},

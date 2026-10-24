@@ -26,7 +26,11 @@ def save_new_version(doc: DraftDoc, origin: str) -> DraftDoc:
 
 
 def apply_ops(doc: DraftDoc, ops: list[dict]) -> int:
-    """应用编辑操作，返回改动计数。op: update|remove|replace_image|set_caption。"""
+    """应用编辑操作，返回改动计数。
+
+    op: update(块文本) | remove | replace_image | set_caption | update_meta(元信息)。
+    update_meta 的 field ∈ title_selected | one_liner | keywords | title_candidates。
+    """
     changed = 0
     for op in ops:
         kind = op.get("op", "update")
@@ -46,6 +50,23 @@ def apply_ops(doc: DraftDoc, ops: list[dict]) -> int:
             b = bk.get_block(doc, bid)
             if b and b.type in (BlockType.IMAGE, BlockType.VIDEO):
                 b.caption = op.get("caption") or ""
+                changed += 1
+        elif kind == "update_meta":
+            field, value = op.get("field"), op.get("value")
+            if field == "one_liner" and isinstance(value, str):
+                doc.meta.one_liner = value.strip()
+                changed += 1
+            elif field == "keywords" and isinstance(value, list):
+                doc.meta.keywords = [str(x).strip() for x in value if str(x).strip()][:8]
+                changed += 1
+            elif field == "title_candidates" and isinstance(value, list):
+                doc.meta.title_candidates = [str(x).strip() for x in value
+                                             if str(x).strip()][:5]
+                changed += 1
+            elif field == "title_selected" and isinstance(value, str):
+                # 把选中标题挪到候选首位（发布/卡片取 [0]）
+                cands = [c for c in doc.meta.title_candidates if c != value]
+                doc.meta.title_candidates = [value.strip()] + cands
                 changed += 1
     return changed
 

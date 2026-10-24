@@ -14,7 +14,8 @@ from ..storage import dao, library
 from ..services.crawl import registry as crawl_registry
 from ..services.crawl.base import CrawlError, RawArticle
 from ..services.media import download as media_download
-from ..services.search.registry import get_searcher
+from ..services.media import stock as stock_media
+from ..services.search.registry import get_paper_searcher, get_searcher
 from ..services.rag import index as rag_index
 from .base import AgentBase
 
@@ -34,14 +35,15 @@ class CollectorAgent(AgentBase):
         article = dao.get_article(article_id)
         if not article:
             raise ValueError(f"文章不存在: {article_id}")
-        library.ensure_dirs(article_id)
 
-        raw = self._fetch_primary(article)
+        raw = self._fetch_primary(article)          # 先拿标题，再建目录（文件夹用标题命名）
+        library.ensure_dirs(article_id)
         primary_mid = self._store_primary(article_id, raw)
         self._collect_images(raw, article_id, primary_mid)
 
         extract = self._extract_topic(raw)
         refs = self._search_and_fetch_refs(article_id, raw, extract)
+        media_stats = self._enrich_media(article_id, extract)
 
         report = CollectionReport(
             topic=extract.topic, keywords=extract.keywords,
@@ -53,7 +55,7 @@ class CollectorAgent(AgentBase):
         if len(refs) < int(config.get("collect.ref_count.scarce_min", 1)):
             report.scarce = True
 
-        notes = self._render_notes(article, raw, extract, refs)
+        notes = self._render_notes(article, raw, extract, refs, media_stats)
         notes_path = library.write_notes(article_id, notes)
         report.notes_path = str(notes_path)
 
@@ -105,44 +107,57 @@ class CollectorAgent(AgentBase):
 
     def _search_and_fetch_refs(self, article_id: str, raw: RawArticle,
                                extract: TopicExtract) -> list[tuple[str, str, str]]:
-        """返回 [(material_id, ref_type, url)]。"""
-        searcher = get_searcher()
+        """网络搜索 + arXiv 论文两路并集，目标凑齐 min~max 篇。返回 [(mid, ref_type, url)]。"""
+        web = get_searcher()
         window = int(config.get("collect.search_window_days", 3))
         ref_min, ref_max = (int(config.get("collect.ref_count.min", 3)),
                             int(config.get("collect.ref_count.max", 5)))
         out: list[tuple[str, str, str]] = []
-        if searcher.name == "null":
-            return out
-
-        queries = []
-        if extract.keywords:
-            queries.append(" ".join(extract.keywords[:3]))
-        if extract.topic:
-            queries.append(extract.topic)
-        for fq in (extract.foundational_queries or [])[:1]:
-            if config.get("collect.allow_foundational", True):
-                queries.append(fq)
-
         seen_urls = {raw.url}
-        for qi, q in enumerate(queries):
-            if len(out) >= ref_max:
-                break
-            is_foundational = qi == len(queries) - 1 and extract.foundational_queries
-            results = searcher.search(q, max_results=6,
-                                      days_window=None if is_foundational else window)
+
+        def _take(results, ref_type: RefType, cap: int) -> None:
             for r in results:
-                if len(out) >= ref_max:
+                if len(out) >= cap:
                     break
                 if r.url in seen_urls:
                     continue
                 seen_urls.add(r.url)
-                mid = self._fetch_ref(article_id, r.url,
-                                      RefType.FOUNDATIONAL if is_foundational
-                                      else RefType.REFERENCE)
+                mid = self._fetch_ref(article_id, r.url, ref_type)
                 if mid:
-                    out.append((mid, RefType.FOUNDATIONAL.value if is_foundational
-                                else RefType.REFERENCE.value, r.url))
+                    out.append((mid, ref_type.value, r.url))
+
+        # 1) 网络参考（窗口内）
+        queries: list[str] = []
+        if extract.keywords:
+            queries.append(" ".join(extract.keywords[:3]))
+        if extract.topic:
+            queries.append(extract.topic)
+        for e in extract.entities[:2]:
+            queries.append(e)
+        for q in queries:
+            if len(out) >= ref_max:
+                break
+            _take(web.search(q, max_results=6, days_window=window), RefType.REFERENCE, ref_max)
+
+        # 2) 原始论文/基础资料（允许跳出窗口；AI 要闻基本总能关联到论文）
+        if config.get("collect.allow_foundational", True) and len(out) < ref_max:
+            paper_q = (extract.foundational_queries or [])[:1]
+            if not paper_q and extract.keywords:
+                paper_q = [" ".join(extract.keywords[:2])]
+            for q in paper_q:
+                if len(out) >= ref_max:
+                    break
+                _take(get_paper_searcher().search(q, max_results=2),
+                      RefType.FOUNDATIONAL, ref_max)
         return out
+
+    def _enrich_media(self, article_id: str, extract: TopicExtract) -> dict:
+        """原文媒体不足时，用可商用图/视频库按主题补齐（配图/视频策略的兜底）。"""
+        try:
+            kw = extract.keywords or ([extract.topic] if extract.topic else [])
+            return stock_media.enrich_media(article_id, kw)
+        except Exception:
+            return {"images": 0, "videos": 0}
 
     def _fetch_ref(self, article_id: str, url: str, ref_type: RefType) -> str | None:
         try:
@@ -166,7 +181,7 @@ class CollectorAgent(AgentBase):
 
     @staticmethod
     def _render_notes(article: dict, raw: RawArticle, extract: TopicExtract,
-                      refs: list[tuple[str, str, str]]) -> str:
+                      refs: list[tuple[str, str, str]], media_stats: dict | None = None) -> str:
         lines = [
             f"# 收集报告：{raw.title or article['url']}", "",
             f"- 原文: {raw.url}",
@@ -180,4 +195,8 @@ class CollectorAgent(AgentBase):
         ]
         for mid, rt, url in refs:
             lines.append(f"- [{rt}] {mid} — {url}")
+        if media_stats:
+            lines += ["", "## 媒体补充",
+                      f"- 补充配图 {media_stats.get('images', 0)} 张 / 视频 "
+                      f"{media_stats.get('videos', 0)} 个（可商用素材库）"]
         return "\n".join(lines) + "\n"

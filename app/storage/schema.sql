@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS articles (
   style_pack    TEXT,
   target_word_count INTEGER,
   user_notes    TEXT DEFAULT '',
+  lib_dir       TEXT,                      -- 素材文件夹名(标题_短id)
   error         TEXT,
   created_at    TEXT DEFAULT (datetime('now', 'localtime')),
   updated_at    TEXT DEFAULT (datetime('now', 'localtime'))

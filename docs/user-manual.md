@@ -27,7 +27,9 @@ python -m app --host 0.0.0.0           # 局域网/手机访问（请同时在 .
 
 1. **录入链接**：首页右上角「+ 录入链接」，粘贴公众号/新闻/arXiv 链接。录入即自动开始收集。
 2. **看素材**：卡片进入工作台 → 「素材库」tab。可粘贴网址/上传文件补充素材；也可以直接把文件拷进
-   `data/library/articles/<文章id>/inbox/`（公共库拷 `data/library/common/inbox/`），再点「扫描 inbox」。
+   `data/library/articles/<文章标题>/inbox/`（公共库拷 `data/library/common/inbox/`），再点「扫描 inbox」。
+   每篇文章的素材（原文/参考/图片/视频）都在 `data/library/articles/<文章标题_短id>/` 这一个文件夹里，
+   按「原文/参考/图片/视频/文档」分项存放。
 3. **洗稿**：顶部点「开始洗稿」，生成 v1 草稿。
 4. **编辑**：「创作」tab。默认阅览模式；**双击段落**进入编辑（失焦自动存为新版本）；**单击选中**后右侧可
    AI 重写/缩写/扩写/自定义指令；**双击图片**可从素材库换图。素材库勾选文本段落 →「融合插入到文案」
@@ -35,8 +37,9 @@ python -m app --host 0.0.0.0           # 局域网/手机访问（请同时在 .
 5. **审稿**：「审稿」tab 查看六维 checklist（排版/事实/来源/合规/撞稿/AI味）。逐条「AI 修复 / 采纳标记 /
    忽略」；点击条目会在右侧文档高亮对应段落。处理完点「定稿」。**存在阻断项（blocker）时默认禁止定稿**，
    确认无误后可强制定稿（会留痕）。
-6. **发布**：「发布」tab 勾选平台 →「生成发布包」。到 `data/exports/<文章id>/<平台>/` 按 README.txt
-   手动发布。公众号直接浏览器打开 `article.html` 全选复制进编辑器；小红书按序上传 `cards/` 下 PNG。
+6. **发布**：「发布」tab 勾选平台 →「生成发布包」。发布包就在文章素材文件夹里的 `exports/<平台>/`，
+   按其中 README.txt 手动发布。公众号直接浏览器打开 `article.html` 全选复制进编辑器；
+   小红书按序上传 `cards/` 下 PNG。
 
 ## 3. 常用配置（设置页 / `config/settings.yaml`）
 
@@ -68,8 +71,8 @@ python -m app --host 0.0.0.0           # 局域网/手机访问（请同时在 .
 
 ```
 config/            提示词与参数（可手改，热生效）
-data/library/      素材库（common 公共库 + articles/<id> 文章素材组）
+data/library/common/                      公共素材库
+data/library/articles/<文章标题_短id>/     文章文件夹: 原文/参考/图片/视频/文档 + inbox + exports(发布包)
 data/drafts/       文案版本落盘（vNNN.md / .json + runs/ Agent 运行记录）
-data/exports/      发布包
 docs/design/       设计文档 · docs/api.md 接口 · docs/user-manual.md 本手册
 ```

@@ -16,7 +16,8 @@ TRANSITIONS: dict[ArticleStatus, set[ArticleStatus]] = {
     ArticleStatus.DRAFTED: {ArticleStatus.REVIEWING, ArticleStatus.WRITING},
     ArticleStatus.REVIEWING: {ArticleStatus.REVIEWED, ArticleStatus.FAILED},
     ArticleStatus.REVIEWED: {ArticleStatus.EDITING, ArticleStatus.FINALIZED},
-    ArticleStatus.EDITING: {ArticleStatus.REVIEWING, ArticleStatus.FINALIZED},
+    ArticleStatus.EDITING: {ArticleStatus.REVIEWING, ArticleStatus.FINALIZED,
+                            ArticleStatus.WRITING},   # 编辑后可整篇重写
     ArticleStatus.FINALIZED: {ArticleStatus.PUBLISHING, ArticleStatus.DONE,
                               ArticleStatus.EDITING, ArticleStatus.REVIEWING},
     ArticleStatus.PUBLISHING: {ArticleStatus.DONE, ArticleStatus.FAILED},

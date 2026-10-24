@@ -93,10 +93,12 @@ function insertSelected() {
 <template>
   <div>
     <div class="flex items-center gap-2 mb-4 flex-wrap">
-      <div class="bg-white rounded-full shadow-card p-1 flex">
+      <div class="panel p-0.5 flex" style="border-radius: 8px;">
         <button v-for="s in [['article', '本文章素材'], ['common', '公共素材库']]" :key="s[0]"
-                class="px-4 h-8 rounded-full text-sm transition-colors"
-                :class="scope === s[0] ? 'bg-ink-900 text-white' : 'text-ink-500'"
+                class="px-4 h-8 rounded-md text-sm transition-colors"
+                :style="scope === s[0]
+                  ? 'background: var(--active); color: var(--text); font-weight: 600;'
+                  : 'color: var(--muted);'"
                 @click="scope = s[0] as any">{{ s[1] }}</button>
       </div>
       <div class="flex-1"></div>
@@ -111,46 +113,60 @@ function insertSelected() {
       </NButton>
     </div>
 
-    <NEmpty v-if="!materials.length" description="暂无素材。收集完成后素材会出现在这里，也可手动添加。"
-            class="py-16" />
+    <div v-if="!materials.length" class="panel py-16 text-center">
+      <p class="text-[15px]" style="color: var(--muted);">暂无素材。</p>
+      <p class="text-sm mt-2" style="color: var(--faint);">
+        收集完成后素材会出现在这里；也可粘贴网址、上传文件，或拷入 inbox 文件夹后点「扫描 inbox」。
+      </p>
+    </div>
 
     <div v-for="g in groups" :key="g.kind" class="mb-6">
-      <div class="text-sm font-semibold text-ink-500 mb-2">{{ KIND_LABEL[g.kind] }} · {{ g.items.length }}</div>
+      <div class="text-sm font-semibold mb-2" style="color: var(--muted);">
+        {{ KIND_LABEL[g.kind] }} · <span class="num">{{ g.items.length }}</span>
+      </div>
 
       <!-- 图片网格 -->
       <div v-if="g.kind === 'image'" class="grid grid-cols-3 md:grid-cols-5 gap-3">
         <div v-for="m in g.items" :key="m.id" class="relative group">
-          <div class="aspect-square rounded-xl overflow-hidden bg-slate-100 shadow-card">
+          <div class="aspect-square rounded-md overflow-hidden panel" style="background: var(--raised);">
             <img v-if="m.url" :src="api.absUrl(m.url)"
                  class="w-full h-full object-cover" loading="lazy" />
           </div>
           <div class="absolute top-1.5 left-1.5 flex gap-1">
-            <span v-if="m.watermark === 1" class="px-1.5 py-0.5 rounded text-[10px] bg-rose-500 text-white">水印</span>
+            <span v-if="m.watermark === 1" class="px-1.5 py-0.5 rounded text-[11px]"
+                  style="background: var(--pill-warn-bg); color: var(--pill-warn-ink);">水印</span>
             <span v-if="m.fetch_status === 'too_small'"
-                  class="px-1.5 py-0.5 rounded text-[10px] bg-slate-500 text-white">过小</span>
+                  class="px-1.5 py-0.5 rounded text-[11px]"
+                  style="background: var(--pill-info-bg); color: var(--pill-info-ink);">过小</span>
           </div>
-          <button class="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/50 text-white text-xs
+          <button class="absolute top-1.5 right-1.5 w-6 h-6 rounded-full text-xs
                          opacity-0 group-hover:opacity-100 transition-opacity"
+                  style="background: rgba(20,20,20,.6); color: #fff;"
                   @click="remove(m)">×</button>
-          <div class="text-[11px] text-ink-400 mt-1 truncate">{{ m.title || m.id }}</div>
+          <div class="text-xs mt-1 truncate" style="color: var(--faint);">{{ m.title || m.id }}</div>
         </div>
       </div>
 
       <!-- 其他类型列表 -->
-      <div v-else class="space-y-2">
+      <div v-else class="panel divide-y" style="--tw-divide-opacity: 1; border-color: var(--rule);">
         <div v-for="m in g.items" :key="m.id"
-             class="bg-white rounded-xl shadow-card px-4 py-3 flex items-center gap-3">
+             class="px-4 py-3 flex items-center gap-3"
+             style="border-color: var(--rule);">
           <NCheckbox v-if="m.kind === 'text'" :checked="selected.has(m.id)"
                      @update:checked="toggleSelect(m.id)" />
           <div class="flex-1 min-w-0">
             <div class="text-sm font-medium truncate">{{ m.title || m.id }}</div>
-            <div class="text-xs text-ink-400 flex items-center gap-2 mt-0.5 flex-wrap">
-              <NTag v-if="m.ref_type" size="tiny" :bordered="false">{{ REF_LABEL[m.ref_type] || m.ref_type }}</NTag>
+            <div class="text-xs flex items-center gap-2 mt-0.5 flex-wrap" style="color: var(--faint);">
+              <span v-if="m.ref_type" class="px-1.5 py-0.5 rounded"
+                    style="background: var(--pill-info-bg); color: var(--pill-info-ink);">
+                {{ REF_LABEL[m.ref_type] || m.ref_type }}</span>
               <span v-if="m.source_url" class="truncate max-w-md">{{ m.source_url }}</span>
-              <span v-if="m.fetch_status !== 'ok'" class="text-rose-500">{{ m.fetch_status }}</span>
+              <span v-if="m.note" class="truncate">{{ m.note }}</span>
+              <span v-if="m.fetch_status !== 'ok'" style="color: var(--pill-neg-ink);">{{ m.fetch_status }}</span>
             </div>
           </div>
-          <button class="text-ink-400 hover:text-rose-500 text-lg px-2" @click="remove(m)">×</button>
+          <button class="text-lg px-2 hover:opacity-70" style="color: var(--faint);"
+                  @click="remove(m)">×</button>
         </div>
       </div>
     </div>

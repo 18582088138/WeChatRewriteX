@@ -97,20 +97,21 @@ def blocks_to_mp_html(doc: DraftDoc) -> str:
     esc = html.escape
     parts = []
     for b in doc.blocks:
+        text = bk.sanitize_block_text(b.text)
         if b.type == BlockType.HEADING:
             size = {1: 22, 2: 18, 3: 16}.get(b.level, 16)
             parts.append(
                 f'<h{b.level} style="font-size:{size}px;font-weight:700;color:#1f2937;'
-                f'margin:28px 0 14px;line-height:1.4;">{esc(b.text)}</h{b.level}>')
+                f'margin:28px 0 14px;line-height:1.4;">{esc(text)}</h{b.level}>')
         elif b.type == BlockType.PARAGRAPH:
             parts.append(
                 f'<p style="font-size:15px;line-height:1.9;color:#3f3f46;'
-                f'margin:0 0 16px;text-align:justify;">{esc(b.text)}</p>')
+                f'margin:0 0 16px;text-align:justify;">{esc(text)}</p>')
         elif b.type == BlockType.QUOTE:
             parts.append(
                 f'<blockquote style="margin:0 0 16px;padding:12px 16px;'
                 f'border-left:4px solid #d4d4d8;background:#fafafa;color:#52525b;'
-                f'font-size:14px;line-height:1.8;">{esc(b.text)}</blockquote>')
+                f'font-size:14px;line-height:1.8;">{esc(text)}</blockquote>')
         elif b.type == BlockType.IMAGE and b.asset_id:
             m = dao.get_material(b.asset_id)
             if m and m.get("path"):
@@ -132,7 +133,8 @@ def export_variants(article_id: str, platforms: list[str]) -> dict:
     if not draft:
         raise ValueError("没有草稿，先完成洗稿")
     doc = DraftDoc.model_validate_json(draft["doc_json"])
-    root = config.data_dir() / "exports" / article_id
+    # 发布包落在文章素材文件夹内：data/library/articles/<标题_短id>/exports/<平台>/
+    root = library.exports_dir(article_id)
     root.mkdir(parents=True, exist_ok=True)
 
     results: dict[str, dict] = {}

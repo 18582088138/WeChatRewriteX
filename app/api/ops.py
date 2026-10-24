@@ -95,12 +95,14 @@ def publish_jobs(aid: str) -> dict:
 
 @router.get("/articles/{aid}/exports")
 def list_exports(aid: str) -> dict:
-    root = config.data_dir() / "exports" / aid
+    from ..storage import library
+    root = library.exports_dir(aid)
     if not root.exists():
-        return {"files": []}
+        return {"files": [], "lib_dir": str(library.article_dir(aid))}
     files = [str(p.relative_to(config.data_dir())) for p in sorted(root.rglob("*"))
              if p.is_file()]
-    return {"root": str(root), "files": files}
+    return {"root": str(root), "files": files,
+            "lib_dir": str(library.article_dir(aid))}
 
 
 @router.post("/articles/{aid}/cards")

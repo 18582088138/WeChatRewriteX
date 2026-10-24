@@ -47,16 +47,17 @@ function saveToken() {
 
 <template>
   <div class="min-h-screen">
-    <header class="sticky top-0 z-10 bg-paper/80 backdrop-blur border-b border-slate-200">
-      <div class="max-w-3xl mx-auto px-4 h-14 flex items-center gap-3">
-        <button class="text-ink-400 hover:text-ink-900 text-sm" @click="router.push('/articles')">← 返回</button>
-        <div class="font-semibold">设置</div>
+    <header style="background: var(--surface); border-bottom: 1px solid var(--border);">
+      <div class="max-w-3xl mx-auto px-6 h-12 flex items-center gap-3">
+        <button class="text-sm h-8 px-2 rounded-md hover:bg-[var(--raised)]"
+                style="color: var(--muted);" @click="router.push('/articles')">← 文章</button>
+        <h1 class="font-semibold text-[15px]">设置</h1>
       </div>
     </header>
 
-    <main v-if="data" class="max-w-3xl mx-auto px-4 py-6 space-y-4">
+    <main v-if="data" class="max-w-3xl mx-auto px-6 py-6 space-y-4">
       <!-- 服务状态 -->
-      <section class="bg-white rounded-2xl shadow-card p-5">
+      <section class="panel p-5">
         <div class="font-semibold mb-3">服务状态</div>
         <div class="flex flex-wrap gap-2">
           <NTag :type="data.llm_available ? 'success' : 'error'" :bordered="false">
@@ -79,7 +80,7 @@ function saveToken() {
       </section>
 
       <!-- 收集 -->
-      <section class="bg-white rounded-2xl shadow-card p-5 space-y-4">
+      <section class="panel p-5 space-y-4">
         <div class="font-semibold">收集</div>
         <div class="flex items-center gap-3 text-sm">
           <span class="w-44 text-ink-500">关联搜索窗口（天）</span>
@@ -102,7 +103,7 @@ function saveToken() {
       </section>
 
       <!-- 洗稿与审稿 -->
-      <section class="bg-white rounded-2xl shadow-card p-5 space-y-4">
+      <section class="panel p-5 space-y-4">
         <div class="font-semibold">洗稿与审稿</div>
         <div class="flex items-center gap-3 text-sm">
           <span class="w-44 text-ink-500">目标词数</span>
@@ -129,7 +130,7 @@ function saveToken() {
       </section>
 
       <!-- 访问令牌 -->
-      <section class="bg-white rounded-2xl shadow-card p-5 space-y-3">
+      <section class="panel p-5 space-y-3">
         <div class="font-semibold">访问令牌（局域网/手机访问时）</div>
         <div class="text-xs text-ink-400">
           在 .env 设置 APP_ACCESS_TOKEN 后，前端在此填入同一令牌；本机 127.0.0.1 可不设。
@@ -142,7 +143,7 @@ function saveToken() {
       </section>
 
       <!-- 风格包 -->
-      <section class="bg-white rounded-2xl shadow-card p-5">
+      <section class="panel p-5">
         <div class="font-semibold mb-2">语言风格包</div>
         <div class="text-sm text-ink-500">
           当前：<NTag size="small" :bordered="false">tech-evangelist · 技术传火人</NTag>

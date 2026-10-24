@@ -55,6 +55,7 @@ class RewriterAgent(AgentBase):
                                    stage="rewriter.draft", max_tokens=8000)
             doc = self._payload_to_doc(article_id, result.parsed)
             doc = self._enforce_word_count(doc, style, word_target, article_id)
+            self._ensure_images(doc, images)
             doc.meta.xhs_pages = self._paginate_xhs(doc)
 
         version = dao.next_version(article_id)
@@ -92,7 +93,7 @@ class RewriterAgent(AgentBase):
                     for x in result.parsed.blocks}
         for i, b in enumerate(targets):
             if i in by_index and by_index[i]:
-                b.text = by_index[i]
+                b.text = bk.sanitize_block_text(by_index[i])
         return doc
 
     def insert_references(self, article_id: str, doc: DraftDoc, material_ids: list[str],
@@ -143,15 +144,33 @@ class RewriterAgent(AgentBase):
 
     @staticmethod
     def _available_images(article_id: str) -> list[dict]:
+        """可用图片：含水印图（拍板 #7：暂可用，排在最后），只排除下载失败/过小。"""
         mats = dao.list_materials(article_id=article_id, kind="image")
         out = []
         for m in mats:
-            if m.get("watermark") == 1 or m.get("fetch_status") != "ok":
+            if m.get("fetch_status") != "ok":
                 continue
             out.append({"id": m["id"], "title": m.get("title") or "",
                         "width": m.get("width"), "height": m.get("height"),
+                        "watermark": m.get("watermark"),
                         "source": m.get("source_url") or ""})
+        out.sort(key=lambda x: x.get("watermark") or 0)   # 无水印发前，水印垫底
         return out
+
+    @staticmethod
+    def _ensure_images(doc: DraftDoc, images: list[dict]) -> None:
+        """文案必须有配图：LLM 没配图时按序补插（首图第二段后，次图 2/3 处）。
+        升序插入并累计偏移，保持原顺序与下标正确。"""
+        if not images or any(b.type == BlockType.IMAGE for b in doc.blocks):
+            return
+        paras = [i for i, b in enumerate(doc.blocks) if b.type == BlockType.PARAGRAPH]
+        if not paras:
+            return
+        spots = sorted({paras[min(1, len(paras) - 1)], paras[int(len(paras) * 0.66)]})
+        for offset, (img, pos) in enumerate(zip(images, spots)):
+            doc.blocks.insert(pos + 1 + offset, Block(
+                id=bk.new_block_id(), type=BlockType.IMAGE, asset_id=img["id"],
+                caption=img.get("title") or "配图", source="素材库"))
 
     def _payload_to_doc(self, article_id: str, payload: DraftPayload) -> DraftDoc:
         blocks = bk.blocks_from_llm(payload.model_dump())

@@ -25,6 +25,8 @@ def _get_agents(llm=None):
 def _set_status(article_id: str, dst: ArticleStatus, error: str | None = None) -> None:
     art = dao.get_article(article_id)
     src = ArticleStatus(art["status"])
+    if src == dst:
+        return  # 幂等：任务重试时阶段入口态与目标态相同
     transition(src, dst)  # 非法迁移抛 InvalidTransition
     dao.set_article_status(article_id, dst, error)
     events.bus.publish(events.STATUS_CHANGED, article_id,
@@ -53,13 +55,19 @@ def run_stage(stage: str, article_id: str, llm=None) -> dict:
         _set_status(article_id, ArticleStatus.DRAFTED)
         result = {"version": doc.version, "word_count": doc.meta.word_count}
     elif stage == "review":
-        _set_status(article_id, ArticleStatus.REVIEWING)
+        # 定稿/发布后的复审是「软审」：只出报告不改动状态，避免把已定稿文章拽回编辑态
+        soft = ArticleStatus(art["status"]) in (ArticleStatus.FINALIZED, ArticleStatus.DONE,
+                                                ArticleStatus.PUBLISHING)
+        if not soft:
+            _set_status(article_id, ArticleStatus.REVIEWING)
         events.bus.publish(events.REVIEW_STARTED, article_id)
         review_id, items, scores = agents["review"].run(article_id)
-        _set_status(article_id, ArticleStatus.REVIEWED)
-        # 审稿完成即进入人工编辑态（人工关卡）
-        _set_status(article_id, ArticleStatus.EDITING)
-        result = {"review_id": review_id, "items": len(items), "scores": scores}
+        if not soft:
+            _set_status(article_id, ArticleStatus.REVIEWED)
+            # 审稿完成即进入人工编辑态（人工关卡）
+            _set_status(article_id, ArticleStatus.EDITING)
+        result = {"review_id": review_id, "items": len(items), "scores": scores,
+                  "soft": soft}
     else:
         raise ValueError(f"未知阶段: {stage}")
 
@@ -89,11 +97,14 @@ def mark_failed(article_id: str | None, error: str) -> None:
     events.bus.publish(events.JOB_FAILED, article_id, error=error[:500])
 
 
-# 阶段准入：当前状态 → 允许启动的阶段
+# 阶段准入：当前状态 → 允许启动的阶段。含自身进行态以支持失败重试的幂等。
 STAGE_ENTRY = {
-    "collect": {ArticleStatus.NEW, ArticleStatus.COLLECTED, ArticleStatus.FAILED},
-    "rewrite": {ArticleStatus.COLLECTED, ArticleStatus.DRAFTED, ArticleStatus.EDITING},
-    "review": {ArticleStatus.DRAFTED, ArticleStatus.EDITING},
+    "collect": {ArticleStatus.NEW, ArticleStatus.COLLECTED, ArticleStatus.FAILED,
+                ArticleStatus.COLLECTING},
+    "rewrite": {ArticleStatus.COLLECTED, ArticleStatus.DRAFTED, ArticleStatus.EDITING,
+                ArticleStatus.WRITING, ArticleStatus.FAILED},
+    "review": {ArticleStatus.DRAFTED, ArticleStatus.EDITING, ArticleStatus.REVIEWING,
+               ArticleStatus.FINALIZED, ArticleStatus.FAILED},
 }
 
 

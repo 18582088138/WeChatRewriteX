@@ -1,7 +1,9 @@
 name: tech-note
-label: 科技笔记（深色封面 + 浅色内容页）
+label: 编辑部快报（纸面 · 墨色 · 朱红点缀）
 size: { width: 1080, height: 1440 }
-padding_px: 72
-body_font_px: 40
+padding_px: 84
+body_font_px: 38
 min_font_px: 26
-accent: "#2563eb"
+accent: "#C63B24"
+ink: "#1B1A17"
+paper: "#FBFAF7"

@@ -3,57 +3,86 @@
 <head>
 <meta charset="utf-8">
 <style>
+  /* 编辑部快报：纸面/墨色/朱红。纯色域、大字号、无渐变无阴影（taste 规范）。 */
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
-         background: #f3f4f6; }
+         background: #e9e6df; }
   .page { width: {{WIDTH}}px; height: {{HEIGHT}}px; overflow: hidden;
-          position: relative; background: #ffffff; display: flex;
+          position: relative; background: {{PAPER}}; display: flex;
           flex-direction: column; page-break-after: always; }
-  .page.cover { background: linear-gradient(150deg, #0f172a 0%, #1e3a8a 100%);
-                color: #fff; justify-content: center; padding: {{PAD}}px; }
-  .cover .kicker { font-size: 30px; letter-spacing: 6px; color: #93c5fd;
-                   margin-bottom: 36px; }
-  .cover h1 { font-size: 84px; line-height: 1.25; font-weight: 800; }
-  .cover .one-liner { margin-top: 48px; font-size: 36px; line-height: 1.6;
-                      color: #cbd5e1; }
-  .cover .badge { position: absolute; bottom: {{PAD}}px; left: {{PAD}}px;
-                  font-size: 26px; color: #64748b; }
-  .page.content { padding: {{PAD}}px; }
-  .content .page-title { font-size: 52px; font-weight: 800; color: #0f172a;
-                         line-height: 1.3; margin-bottom: 28px;
-                         border-left: 12px solid {{ACCENT}}; padding-left: 24px; }
-  .content .body { flex: 1; overflow: hidden; }
-  .content p { font-size: {{BODY}}px; line-height: 1.85; color: #1f2937;
-               margin-bottom: 1.1em; text-align: justify; }
-  .content p.quote { color: #475569; border-left: 6px solid #cbd5e1;
-                     padding-left: 20px; font-style: italic; }
-  .content .img-wrap { display: flex; align-items: center; justify-content: center;
-                       flex: 1; }
-  .content img { max-width: 100%; max-height: 100%; border-radius: 16px;
-                 object-fit: contain; }
-  .content .caption { text-align: center; color: #94a3b8; font-size: 26px;
-                      margin-top: 18px; }
-  .pageno { position: absolute; right: {{PAD}}px; bottom: 40px;
-            font-size: 26px; color: #94a3b8; }
+
+  /* —— 封面：整版墨色域 —— */
+  .cover { background: {{INK}}; color: #F5F2EA; padding: {{PAD}}px;
+           justify-content: space-between; }
+  .cover-top { display: flex; justify-content: space-between; align-items: center; }
+  .brand { display: flex; align-items: center; gap: 16px; font-size: 28px;
+           letter-spacing: 2px; color: #B9B4A9; }
+  .brand-mark { width: 22px; height: 22px; background: {{ACCENT}}; }
+  .cover-date { font-size: 26px; color: #8A8577; }
+  .cover-mid { margin: 60px 0; }
+  .cover-kicker { display: inline-block; background: {{ACCENT}}; color: #fff;
+                  font-size: 26px; letter-spacing: 4px; padding: 10px 22px;
+                  margin-bottom: 44px; }
+  .cover h1 { font-size: 92px; line-height: 1.18; font-weight: 800;
+              letter-spacing: -0.02em; max-height: 4.72em; overflow: hidden; }
+  .cover .one-liner { font-size: 36px; line-height: 1.7; color: #B9B4A9;
+                      margin-top: 44px; max-width: 90%; }
+  .cover-bottom { display: flex; justify-content: space-between; align-items: flex-end;
+                  border-top: 1px solid #3A382F; padding-top: 32px; }
+  .chips { display: flex; gap: 14px; flex-wrap: wrap; }
+  .chip { font-size: 24px; color: #B9B4A9; border: 1px solid #3A382F;
+          padding: 8px 18px; border-radius: 999px; }
+  .cover-total { font-size: 24px; color: #8A8577; }
+
+  /* —— 内容页：纸面 —— */
+  .content { padding: {{PAD}}px; }
+  .sec-head { display: flex; align-items: flex-start; gap: 22px; margin-bottom: 36px; }
+  .sec-no { background: {{ACCENT}}; color: #fff; font-size: 30px; font-weight: 700;
+            padding: 6px 14px; margin-top: 14px; }
+  .sec-title { font-size: 56px; font-weight: 800; color: {{INK}}; line-height: 1.3;
+               letter-spacing: -0.01em; max-height: 2.7em; overflow: hidden; }
+  .body { flex: 1; overflow: hidden; }
+  .body p { font-size: {{BODY}}px; line-height: 1.9; color: #2A2926;
+            margin-bottom: 1.15em; text-align: justify; }
+  .body p.quote { border-left: 8px solid {{ACCENT}}; padding-left: 28px;
+                  color: #4A463D; font-size: {{BODY}}px; }
+  .foot { display: flex; justify-content: space-between; align-items: center;
+          border-top: 1px solid #E5E1D8; padding-top: 24px; margin-top: 24px; }
+  .foot .logo { font-size: 24px; color: #8A8577; letter-spacing: 1px; }
+  .pageno { font-size: 24px; color: #8A8577; font-variant-numeric: tabular-nums; }
+
+  /* —— 图片页 —— */
+  .imgpage { padding: 0; }
+  .imgpage img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .imgpage .capband { position: absolute; left: 0; right: 0; bottom: 0;
+                      background: {{INK}}; color: #F5F2EA; padding: 30px {{PAD}}px;
+                      font-size: 28px; line-height: 1.5; }
+  .imgpage .capband .credit { color: #8A8577; font-size: 22px; margin-top: 8px; }
 </style>
 </head>
 <body>
 {{PAGES}}
 <script>
-// 溢出自动适配：逐页缩小正文字号直到不溢出或到下限
+// 溢出自动适配：正文逐页缩字号；封面标题超长时降字号保 4 行内完整显示
 (function () {
   var minFont = {{MINFONT}};
   document.querySelectorAll('.page.content .body').forEach(function (body) {
     var size = {{BODY}};
     while (body.scrollHeight > body.clientHeight && size > minFont) {
       size -= 2;
-      body.querySelectorAll('p').forEach(function (p) {
-        p.style.fontSize = size + 'px';
-      });
+      body.querySelectorAll('p').forEach(function (p) { p.style.fontSize = size + 'px'; });
     }
     body.dataset.fontPx = size;
     body.dataset.overflow = (body.scrollHeight > body.clientHeight) ? '1' : '0';
   });
+  var h1 = document.querySelector('.cover h1');
+  if (h1) {
+    var t = 92;
+    while (h1.scrollHeight > h1.clientHeight + 4 && t > 52) {
+      t -= 6;
+      h1.style.fontSize = t + 'px';
+    }
+  }
 })();
 </script>
 </body>

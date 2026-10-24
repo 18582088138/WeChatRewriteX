@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NTabPane, NTabs, useDialog, useMessage } from 'naive-ui'
+import { NButton, NTabPane, NTabs, useMessage } from 'naive-ui'
 import { api } from '../api'
 import { useAppStore } from '../stores/app'
 import type { Article } from '../types'
@@ -14,7 +14,6 @@ import PublishPanel from '../components/PublishPanel.vue'
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
-const dialog = useDialog()
 const store = useAppStore()
 
 const aid = route.params.id as string
@@ -23,7 +22,6 @@ const tab = ref('create')
 const busy = ref(false)
 const editorRef = ref<InstanceType<typeof BlockEditor> | null>(null)
 
-/** 素材面板勾选参考段落 → 跳到创作 tab 并打开融合插入弹窗 */
 async function onInsertRefs(ids: string[]) {
   tab.value = 'create'
   await nextTick()
@@ -35,7 +33,6 @@ async function load() {
 }
 onMounted(async () => {
   await load()
-  // 根据状态落在合适 tab
   const s = article.value?.status
   if (['EDITING', 'REVIEWED'].includes(s || '')) tab.value = 'review'
   else if (['FINALIZED', 'DONE', 'PUBLISHING'].includes(s || '')) tab.value = 'publish'
@@ -46,7 +43,6 @@ watch(() => store.workbenchTick, load)
 
 const status = computed(() => article.value?.status || '')
 
-/** 当前可执行的阶段动作 */
 const actions = computed(() => {
   const s = status.value
   const list: { key: string; label: string; stage?: string; primary?: boolean }[] = []
@@ -72,12 +68,9 @@ async function runStage(stage: string) {
   }
 }
 
-const STEPS = [
-  { key: 'New', label: '收集' },
-  { key: 'Process', label: '创作 · 审稿' },
-  { key: 'Done', label: '定稿 · 发布' },
-]
-const stepIndex = computed(() => {
+// 阶段指示：当前步用 accent，其余中性（taste: 色彩只给数据与当前态）
+const STAGES = ['收集资料', '创作与审稿', '定稿发布']
+const stageIndex = computed(() => {
   const u = article.value?.ui_status
   return u === 'New' ? 0 : u === 'Process' ? 1 : 2
 })
@@ -85,27 +78,27 @@ const stepIndex = computed(() => {
 
 <template>
   <div class="min-h-screen">
-    <header class="sticky top-0 z-10 bg-paper/80 backdrop-blur border-b border-slate-200">
-      <div class="max-w-6xl mx-auto px-4 h-14 flex items-center gap-3">
-        <button class="text-ink-400 hover:text-ink-900 text-sm" @click="router.push('/articles')">← 列表</button>
-        <div class="font-semibold truncate flex-1 text-[15px]">
+    <header style="background: var(--surface); border-bottom: 1px solid var(--border);">
+      <div class="max-w-[1200px] mx-auto px-6 h-12 flex items-center gap-3">
+        <button class="text-sm h-8 px-2 rounded-md hover:bg-[var(--raised)]"
+                style="color: var(--muted);" @click="router.push('/articles')">← 文章</button>
+        <span class="text-xs" style="color: var(--faint);">/</span>
+        <div class="font-medium truncate flex-1 text-[14px]">
           {{ article?.title || article?.url || '…' }}
         </div>
         <StatusChip v-if="article" :status="article.status" :ui-status="article.ui_status" />
       </div>
     </header>
 
-    <main class="max-w-6xl mx-auto px-4 py-5">
-      <!-- 进度 + 阶段动作 -->
-      <div class="bg-white rounded-2xl shadow-card px-5 py-4 mb-4 flex items-center gap-4 flex-wrap">
+    <main class="max-w-[1200px] mx-auto px-6 py-5">
+      <!-- 阶段与动作 -->
+      <div class="flex items-center gap-5 mb-5 flex-wrap">
         <div class="flex items-center gap-2 text-sm">
-          <template v-for="(s, i) in STEPS" :key="s.key">
-            <div class="flex items-center gap-2">
-              <span class="w-6 h-6 rounded-full grid place-items-center text-xs font-semibold"
-                    :class="i <= stepIndex ? 'bg-accent text-white' : 'bg-slate-200 text-ink-400'">{{ i + 1 }}</span>
-              <span :class="i <= stepIndex ? 'text-ink-900 font-medium' : 'text-ink-400'">{{ s.label }}</span>
-            </div>
-            <span v-if="i < STEPS.length - 1" class="text-slate-300 mx-1">——</span>
+          <template v-for="(s, i) in STAGES" :key="s">
+            <span :style="i === stageIndex
+                    ? 'color: var(--accent); font-weight: 600;'
+                    : i < stageIndex ? 'color: var(--text);' : 'color: var(--faint);'">{{ s }}</span>
+            <span v-if="i < STAGES.length - 1" style="color: var(--control);">→</span>
           </template>
         </div>
         <div class="flex-1"></div>
@@ -114,7 +107,8 @@ const stepIndex = computed(() => {
                  @click="runStage(act.stage!)">{{ act.label }}</NButton>
       </div>
 
-      <div v-if="article?.error" class="bg-rose-50 text-rose-600 rounded-xl px-4 py-3 mb-4 text-sm">
+      <div v-if="article?.error" class="mb-4 px-4 py-3 text-sm rounded-md"
+           style="background: var(--pill-neg-bg); color: var(--pill-neg-ink);">
         上次任务失败：{{ article.error }}
       </div>
 

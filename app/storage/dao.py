@@ -105,20 +105,31 @@ def get_material_text(mid: str) -> str:
 
 
 def search_materials_fts(query_str: str, limit: int = 20) -> list[tuple[str, str]]:
-    """返回 (material_id, snippet)。FTS 不可用时降级 LIKE。"""
-    if db.fts_available():
+    """返回 (material_id, snippet)。FTS 不可用时降级 LIKE。
+
+    MATCH 查询一律转成带引号的短语并转义内部引号，防止标点触发 FTS5 语法错误；
+    任何 FTS 错误都回退 LIKE，不让检索失败炸掉审稿。
+    """
+    def _like() -> list[tuple[str, str]]:
+        rows = db.query(
+            "SELECT material_id, substr(content,1,200) AS snip "
+            "FROM material_texts WHERE content LIKE ? LIMIT ?",
+            (f"%{query_str}%", limit),
+        )
+        return [(r["material_id"], r["snip"]) for r in rows]
+
+    if not db.fts_available():
+        return _like()
+    phrase = '"' + query_str.replace('"', '""') + '"'
+    try:
         rows = db.query(
             "SELECT material_id, snippet(material_fts,1,'','','…',8) AS snip "
             "FROM material_fts WHERE material_fts MATCH ? LIMIT ?",
-            (query_str, limit),
+            (phrase, limit),
         )
         return [(r["material_id"], r["snip"]) for r in rows]
-    like = f"%{query_str}%"
-    rows = db.query(
-        "SELECT material_id, substr(content,1,200) AS snip FROM material_texts WHERE content LIKE ? LIMIT ?",
-        (like, limit),
-    )
-    return [(r["material_id"], r["snip"]) for r in rows]
+    except Exception:
+        return _like()
 
 
 def all_material_texts(article_id: str | None = None) -> list[tuple[str, str]]:

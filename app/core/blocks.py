@@ -78,11 +78,11 @@ def to_markdown(doc: DraftDoc) -> str:
     lines: list[str] = []
     for b in doc.blocks:
         if b.type == BlockType.HEADING:
-            lines.append("#" * max(1, min(b.level, 6)) + " " + b.text)
+            lines.append("#" * max(1, min(b.level, 6)) + " " + sanitize_block_text(b.text))
         elif b.type == BlockType.PARAGRAPH:
-            lines.append(b.text)
+            lines.append(sanitize_block_text(b.text))
         elif b.type == BlockType.QUOTE:
-            lines.append("> " + b.text.replace("\n", "\n> "))
+            lines.append("> " + sanitize_block_text(b.text).replace("\n", "\n> "))
         elif b.type == BlockType.IMAGE:
             cap = b.caption or ""
             lines.append(f"![{cap}](asset://{b.asset_id})")
@@ -96,11 +96,31 @@ def to_markdown(doc: DraftDoc) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
+_CITE_MARK = re.compile(r"\[\^(mat_[A-Za-z0-9]+)\]")
+
+
+def strip_citation_markers(text: str) -> tuple[str, list[str]]:
+    """把 LLM 写在正文里的 [^mat_xxx] 引用标记剥离成 citations 字段。
+
+    LLM 常把「块上标注 citations」误解为行内脚注；正文不允许残留该标记。
+    """
+    ids = _CITE_MARK.findall(text)
+    clean = _CITE_MARK.sub("", text)
+    clean = re.sub(r"[ \t]+([，。！？；：,.!?;:])", r"\1", clean)  # 标记残留的空隙
+    return clean.strip(), ids
+
+
+def sanitize_block_text(text: str) -> str:
+    """只剥离标记不收集（编辑期重生成/插入用）。"""
+    return strip_citation_markers(text)[0]
+
+
 def blocks_from_llm(payload: dict) -> list[Block]:
     """解析洗稿 Agent 的 JSON 输出为块列表并分配 id。
 
     接受结构: {"blocks": [{"type": "heading|paragraph|quote|image|divider",
     "text": ..., "level": 2, "asset_hint": "素材id或描述", "citations": [...]}]}
+    文本中的 [^mat_xxx] 行内标记会被剥离并入 citations。
     """
     out: list[Block] = []
     for raw in payload.get("blocks", []):
@@ -109,16 +129,18 @@ def blocks_from_llm(payload: dict) -> list[Block]:
             bt = BlockType(t)
         except ValueError:
             bt = BlockType.PARAGRAPH
+        clean_text, inline_cites = strip_citation_markers(str(raw.get("text", "")))
+        citations = list(dict.fromkeys(list(raw.get("citations", [])) + inline_cites))
         out.append(
             Block(
                 id=new_block_id(),
                 type=bt,
                 level=int(raw.get("level", 2)),
-                text=str(raw.get("text", "")),
+                text=clean_text,
                 asset_id=raw.get("asset_id"),
                 caption=raw.get("caption"),
                 source=raw.get("source"),
-                citations=list(raw.get("citations", [])),
+                citations=citations,
             )
         )
     return out
