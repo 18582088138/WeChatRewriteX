@@ -1,0 +1,78 @@
+# WeChatRewritingAssistant 主配置（非密钥；密钥在 .env）
+# 优先级: 本文件 < 数据库 settings 表（GUI 设置页修改）。键路径用 a.b.c 寻址。
+
+# ---- 收集 ----
+collect:
+  search_window_days: 3        # 关联搜索时间窗口: 原文发布日前后 N 天
+  allow_foundational: true     # 允许窗口外补入原始论文/基础科普
+  ref_count: { min: 3, max: 5, scarce_min: 1 }   # 参考篇数; 稀缺主题下限
+  image_min_width: 400         # 过滤过小图片
+  watermark_check: heuristic   # heuristic | vision | off (vision 需配置 vision 档模型)
+
+# ---- 洗稿 ----
+rewrite:
+  style_pack: tech-evangelist
+  target_word_count: 1500      # 公众号默认目标词数
+  originality_guard: true      # prompt 级防逐句改写约束
+
+# ---- 审稿 ----
+review:
+  block_on_blocker: true       # 存在 blocker 时禁止定稿(可强制定稿并留痕)
+  originality:
+    simhash_warn: 0.35         # 字面相似度 ≥ 此值 → warn
+    simhash_block: 0.55        # ≥ 此值 → blocker
+    embedding_warn: 0.75       # 语义相似度(需 embedding 可用) ≥ 此值 → warn
+    embedding_block: 0.85      # ≥ 此值 → blocker
+  ai_flavor_score_max: 3       # LLM rubric 1~5, ≥4 判 warn
+  recheck_on_edit:
+    enabled: true
+    min_changed_blocks: 3
+    min_word_delta_pct: 20
+
+# ---- 流水线 ----
+pipeline:
+  auto: false                  # true: collect→rewrite→review 自动连跑到 REVIEWED
+  concurrency: { llm: 2, download: 4 }
+
+# ---- 卡片组图 ----
+cards:
+  theme: tech-note
+  width: 1080
+  height: 1440
+  max_chars_per_page: 300
+  min_font_px: 26
+
+# ---- 平台变体 ----
+variants:
+  wechat_mp: { word_range: [1200, 1800] }
+  xhs:       { max_chars: 1000, pages: [3, 9] }
+  weibo:     { max_chars: 140 }
+  x:         { max_tweets: 6 }
+
+# ---- LLM 渠道与路由 ----
+# channel.provider 决定 base_url 预设(deepseek/volcengine/openai)与 env_key
+llm:
+  channels:
+    - { name: deepseek, provider: deepseek, env_key: DEEPSEEK_API_KEY, priority: 1 }
+    - { name: ark,      provider: volcengine, env_key: ARK_API_KEY,   priority: 2 }
+    - { name: openrouter, provider: openrouter, env_key: OPENROUTER_API_KEY, priority: 3 }
+    - { name: openai,   provider: openai,   env_key: OPENAI_API_KEY,  priority: 4 }
+  routing:
+    summarize: { model: deepseek/deepseek-chat, temperature: 0.3 }
+    rewrite:   { model: deepseek/deepseek-chat, temperature: 0.7 }
+    compress:  { model: deepseek/deepseek-chat, temperature: 0.3 }
+    review:    { model: deepseek/deepseek-chat, temperature: 0.2 }
+    vision:    { model: volcengine/doubao-vision-pro-32k, temperature: 0.2 }
+  embedding:   { model: volcengine/doubao-embedding-large, dimension: 2560 }
+  cost_log: true
+
+# ---- 存储 ----
+storage:
+  data_dir: data
+  material_size_limit_mb: 500
+
+# ---- Hooks（事件 → 命令; {article_id} 等占位符会被替换）----
+hooks: {}
+# 示例:
+# hooks:
+#   draft.finalized: ["python scripts/notify.py {article_id}"]

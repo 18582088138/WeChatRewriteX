@@ -1,0 +1,137 @@
+"""文章与流水线控制路由。"""
+from __future__ import annotations
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+
+from ..core import config, events
+from ..core.models import ArticleStatus
+from ..core.statemachine import ui_status
+from ..pipeline import orchestrator, queue
+from ..storage import dao
+
+router = APIRouter(prefix="/api/articles", tags=["articles"])
+jobs_router = APIRouter(prefix="/api/jobs", tags=["jobs"])
+
+
+class CreateArticle(BaseModel):
+    url: str
+    user_notes: str = ""
+    style_pack: str | None = None
+    target_word_count: int | None = None
+    auto_collect: bool = True
+
+
+class Advance(BaseModel):
+    stage: str          # collect | rewrite | review
+
+
+class Finalize(BaseModel):
+    force: bool = False
+
+
+def _shape(row: dict) -> dict:
+    out = dict(row)
+    st = ArticleStatus(row["status"])
+    out["ui_status"] = ui_status(st)
+    out["progress"] = queue.progress(row["id"])
+    return out
+
+
+@router.post("")
+def create_article(body: CreateArticle) -> dict:
+    if not body.url.strip():
+        raise HTTPException(400, "url 不能为空")
+    art = dao.create_article(body.url.strip(), user_notes=body.user_notes,
+                             style_pack=body.style_pack,
+                             target_word_count=body.target_word_count)
+    events.bus.publish(events.ARTICLE_ADDED, art["id"])
+    job_id = None
+    if body.auto_collect:
+        job_id = queue.enqueue("collect", art["id"])
+    return {"article": _shape(art), "collect_job": job_id}
+
+
+@router.get("")
+def list_articles(status: str | None = None, q: str | None = None) -> dict:
+    rows = dao.list_articles(status_ui=status if status in ("New", "Process", "Done") else None,
+                             q=q)
+    return {"articles": [_shape(r) for r in rows]}
+
+
+@router.get("/{aid}")
+def article_detail(aid: str) -> dict:
+    art = dao.get_article(aid)
+    if not art:
+        raise HTTPException(404, "文章不存在")
+    out = _shape(art)
+    out["materials_count"] = len(dao.list_materials(article_id=aid))
+    out["versions"] = dao.list_drafts(aid)
+    out["latest_review"] = dao.latest_review(aid)
+    out["publish_jobs"] = dao.list_publish_jobs(aid)
+    return out
+
+
+@router.post("/{aid}/advance")
+def advance(aid: str, body: Advance) -> dict:
+    art = dao.get_article(aid)
+    if not art:
+        raise HTTPException(404, "文章不存在")
+    if body.stage not in ("collect", "rewrite", "review"):
+        raise HTTPException(400, "stage 必须是 collect/rewrite/review")
+    status = ArticleStatus(art["status"])
+    if not orchestrator.can_start(body.stage, status):
+        raise HTTPException(409, f"当前状态 {status.value} 不能启动 {body.stage}")
+    if body.stage == "rewrite":
+        texts = [m for m in dao.list_materials(article_id=aid, kind="text")
+                 if m["fetch_status"] == "ok"]
+        if not texts:
+            raise HTTPException(409, "素材库为空，先完成收集")
+    if body.stage == "review" and not dao.latest_draft(aid):
+        raise HTTPException(409, "没有草稿，先完成洗稿")
+    job_id = queue.enqueue(body.stage, aid)
+    return {"job_id": job_id, "stage": body.stage}
+
+
+@router.post("/{aid}/finalize")
+def finalize(aid: str, body: Finalize) -> dict:
+    art = dao.get_article(aid)
+    if not art:
+        raise HTTPException(404, "文章不存在")
+    draft = dao.latest_draft(aid)
+    if not draft:
+        raise HTTPException(409, "没有草稿")
+    review = dao.latest_review(aid)
+    blockers = 0
+    if review:
+        blockers = dao.pending_blockers(review["id"])
+    if blockers and not body.force and config.get("review.block_on_blocker", True):
+        raise HTTPException(409, f"存在 {blockers} 个未处理 blocker，禁止定稿")
+    dao.set_draft_status(draft["id"], "finalized")
+    from ..core.statemachine import transition
+    cur = ArticleStatus(art["status"])
+    if cur == ArticleStatus.REVIEWED:
+        dao.set_article_status(aid, ArticleStatus.EDITING)
+        cur = ArticleStatus.EDITING
+    transition(cur, ArticleStatus.FINALIZED)
+    dao.set_article_status(aid, ArticleStatus.FINALIZED)
+    events.bus.publish(events.DRAFT_FINALIZED, aid, version=draft["version"],
+                       forced=bool(body.force and blockers))
+    return {"ok": True, "version": draft["version"], "forced_blockers": blockers if body.force else 0}
+
+
+@router.post("/{aid}/reopen")
+def reopen(aid: str) -> dict:
+    art = dao.get_article(aid)
+    if not art:
+        raise HTTPException(404, "文章不存在")
+    cur = ArticleStatus(art["status"])
+    if cur not in (ArticleStatus.FINALIZED, ArticleStatus.DONE):
+        raise HTTPException(409, "仅定稿/完成后可回炉编辑")
+    dao.set_article_status(aid, ArticleStatus.EDITING)
+    return {"ok": True}
+
+
+@jobs_router.get("")
+def list_jobs(article_id: str | None = None, limit: int = 50) -> dict:
+    return {"jobs": dao.list_jobs(article_id, limit)}

@@ -1,0 +1,7 @@
+name: tech-note
+label: 科技笔记（深色封面 + 浅色内容页）
+size: { width: 1080, height: 1440 }
+padding_px: 72
+body_font_px: 40
+min_font_px: 26
+accent: "#2563eb"

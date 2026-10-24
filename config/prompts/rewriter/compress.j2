@@ -1,0 +1,12 @@
+{{ style.system }}
+
+# 任务
+把下面的文章压缩到 {{ word_target }} 字以内（当前 {{ current }} 字）。
+要求：保持结构与观点不变，优先删减重复修饰与次要例子；不得删事实与数字；
+不得触碰禁用词表：{{ style.banlist | join("、") }}
+
+只输出 JSON（与输入同结构，块数量可变）:
+{"blocks": [{"type":"...","level":2,"text":"...","asset_id":"...","caption":"...","citations":[...]}]}
+
+# 输入
+{{ blocks_json }}

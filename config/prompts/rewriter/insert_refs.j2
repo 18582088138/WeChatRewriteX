@@ -1,0 +1,23 @@
+{{ style.system }}
+
+# 任务
+用户从参考资料中勾选了若干片段，希望融合改写后插入文章。要求：
+- 用文章当前的语言风格，把参考片段改写融合成 1~2 个段落块；
+- 保留事实与数字，citations 标注来源素材 id；
+- 与插入点前后文衔接自然，不重复已有内容；
+- 用户指令：{{ instruction or "自然融入，补充背景" }}
+- 遵守禁用词表：{{ style.banlist | join("、") }}
+
+只输出 JSON: {"blocks": [{"type":"paragraph","text":"...","citations":["mat_xxx"]}]}
+
+# 插入点前文
+{{ before }}
+
+# 插入点后文
+{{ after }}
+
+# 参考片段（素材 id + 内容）
+{% for r in refs %}
+## [{{ r.id }}]
+{{ r.content }}
+{% endfor %}

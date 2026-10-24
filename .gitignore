@@ -1,0 +1,20 @@
+# secrets & local config
+.env
+
+# runtime data
+data/
+
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# node / frontend
+node_modules/
+web/dist/
+web/node_modules/
+
+# os
+.DS_Store
+Thumbs.db

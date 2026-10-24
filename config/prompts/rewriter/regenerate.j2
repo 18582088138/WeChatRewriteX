@@ -1,0 +1,21 @@
+{{ style.system }}
+
+# 任务
+改写下面选中的 {{ blocks|length }} 个段落块。要求：
+- 遵循用户指令：{{ instruction or "改善表达，更自然流畅" }}
+- 与上下文衔接自然，不改变事实，不新增无出处数字；
+- 遵守禁用词表：{{ style.banlist | join("、") }}
+
+只输出 JSON: {"blocks": [{"index": 0, "text": "改写后文本"}, ...]}，
+index 与输入块一一对应，数量必须一致，不要增减块。
+
+# 上下文（前）
+{{ before }}
+
+# 待改写块
+{% for b in blocks %}
+[{{ loop.index0 }}] ({{ b.type }}) {{ b.text }}
+{% endfor %}
+
+# 上下文（后）
+{{ after }}
