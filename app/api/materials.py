@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ..core import events
@@ -37,6 +38,23 @@ def article_materials(aid: str, scope: str = "article", kind: str | None = None)
 @router.get("/materials/common")
 def common_materials(kind: str | None = None) -> dict:
     return {"materials": [_with_abs(m) for m in dao.list_materials(scope="common", kind=kind)]}
+
+
+@router.get("/materials/{mid}/file")
+def material_file(mid: str) -> FileResponse:
+    """按素材 id 直接取文件（编辑器图片块用）。"""
+    m = dao.get_material(mid)
+    if not m:
+        raise HTTPException(404, "素材不存在")
+    p = library.material_abs_path(m.get("path"))
+    if not p or not p.exists():
+        raise HTTPException(404, "文件不存在")
+    return FileResponse(p)
+
+
+@router.get("/materials/{mid}/text")
+def material_text(mid: str) -> dict:
+    return {"material_id": mid, "content": dao.get_material_text(mid)}
 
 
 @router.post("/articles/{aid}/materials/upload")

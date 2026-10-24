@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html { -webkit-font-smoothing: antialiased; }
+body { @apply bg-paper text-ink-900 font-sans; }
+
+/* 阅读排版（编辑器预览 / 发布预览共用） */
+.reader p { @apply leading-[1.9] text-[15px] text-ink-700 mb-4 text-justify; }
+.reader h1 { @apply text-[22px] font-bold mb-5 leading-snug; }
+.reader h2 { @apply text-[18px] font-bold mt-7 mb-3 leading-snug; }
+.reader h3 { @apply text-[16px] font-bold mt-6 mb-2; }
+.reader blockquote { @apply border-l-4 border-slate-300 bg-slate-50 px-4 py-3 my-4 text-ink-500 text-sm leading-relaxed rounded-r-lg; }
+.reader img { @apply rounded-xl my-5 mx-auto max-w-full; }
+.reader .caption { @apply text-center text-xs text-ink-400 -mt-3 mb-5; }
+.reader hr { @apply my-7 border-slate-200; }
+
+/* Naive UI 与 Tailwind 共存微调 */
+.n-config-provider { height: 100%; }
+
+/* 块编辑器交互 */
+.block-item { @apply relative rounded-lg transition-colors duration-150; }
+.block-item:hover { @apply bg-slate-50; }
+.block-item.selected { @apply bg-accent-soft ring-1 ring-accent/40; }
+.block-item.editing { @apply bg-white ring-1 ring-accent shadow-card; }
+.block-item.highlight-review { @apply bg-amber-50 ring-1 ring-amber-300; }
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { @apply bg-slate-300 rounded-full; }
+::-webkit-scrollbar-track { background: transparent; }
