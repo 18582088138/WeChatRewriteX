@@ -80,6 +80,11 @@ def find_material_by_sha(sha256: str) -> dict | None:
     return db.query_one("SELECT * FROM materials WHERE sha256=?", (sha256,))
 
 
+def find_materials_by_sha(sha256: str) -> list[dict]:
+    # 同 sha256 的全部记录（复制会合法产生多行）
+    return db.query("SELECT * FROM materials WHERE sha256=?", (sha256,))
+
+
 def list_materials(scope: str | None = None, article_id: str | None = None,
                    kind: str | None = None) -> list[dict]:
     sql, params = "SELECT * FROM materials WHERE 1=1", []
@@ -146,17 +151,19 @@ def all_material_texts(article_id: str | None = None) -> list[tuple[str, str]]:
 
 # ---------- drafts ----------
 
-def save_draft(doc: DraftDoc, origin: str = "agent", status: str = "editing") -> dict:
+def save_draft(doc: DraftDoc, origin: str = "agent", status: str = "editing",
+               note: str = "") -> dict:
     from ..core.blocks import doc_word_count
     db.execute(
         """INSERT INTO drafts(id,article_id,version,doc_json,keywords_json,one_liner,
-                              title_candidates_json,word_count,status,parent_version,origin)
-           VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                              title_candidates_json,word_count,status,parent_version,origin,note)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             doc.id, doc.article_id, doc.version, doc.model_dump_json(),
             json.dumps(doc.meta.keywords, ensure_ascii=False), doc.meta.one_liner,
             json.dumps(doc.meta.title_candidates, ensure_ascii=False),
-            doc_word_count(doc), status, doc.version - 1 if doc.version > 1 else None, origin,
+            doc_word_count(doc), status, doc.version - 1 if doc.version > 1 else None,
+            origin, note,
         ),
     )
     return get_draft(doc.article_id, doc.version)
@@ -270,11 +277,12 @@ def checkpoint_at(article_id: str, version: int) -> dict | None:
 def list_draft_versions(article_id: str) -> list[dict]:
     """版本时间线：checkpoint + 每次编辑的变更组，供版本下拉。"""
     cps = db.query(
-        "SELECT id, version, origin, status, word_count, created_at FROM drafts "
+        "SELECT id, version, origin, status, word_count, created_at, note FROM drafts "
         "WHERE article_id=?", (article_id,))
     out = [{"version": c["version"], "origin": c["origin"], "status": c["status"],
             "word_count": c["word_count"], "created_at": c["created_at"],
-            "checkpoint": True, "draft_id": c["id"]} for c in cps]
+            "checkpoint": True, "draft_id": c["id"], "note": c.get("note") or "",
+            "saved": c["origin"] == "manual"} for c in cps]
     groups = db.query(
         "SELECT seq, origin, MIN(created_at) AS created_at, COUNT(*) AS n FROM draft_changes "
         "WHERE article_id=? GROUP BY seq ORDER BY seq DESC", (article_id,))

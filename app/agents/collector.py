@@ -257,6 +257,11 @@ class CollectorAgent(AgentBase):
             return {"images": 0, "videos": 0}
 
     def _fetch_ref(self, article_id: str, url: str, ref_type: RefType) -> str | None:
+        # 持久去重：素材库已有同源文章则复用（跨收集运行有效）
+        dup = next((m for m in dao.list_materials(article_id=article_id, kind="text")
+                    if m.get("source_url") == url), None)
+        if dup:
+            return dup["id"]
         try:
             raw = crawl_registry.fetch(url)
         except CrawlError:

@@ -66,6 +66,21 @@ def _diff_blocks(old: DraftDoc, new: DraftDoc) -> list[dict]:
     return changes
 
 
+def save_named_version(article_id: str, note: str = "") -> DraftDoc:
+    """【保存版本】（V1.4 主动保存模式）：当前 HEAD 落为命名版本，进可回滚列表。"""
+    head = dao.latest_draft(article_id)
+    if not head:
+        raise ValueError("没有草稿")
+    doc = DraftDoc.model_validate_json(head["doc_json"])
+    doc.version = dao.next_version(article_id)
+    doc.id = f"{article_id}-v{doc.version}"
+    row = dao.save_draft(doc, origin="manual", note=note.strip())
+    library.save_draft_files(doc, bk.to_markdown(doc))
+    events.bus.publish(events.DRAFT_SAVED, article_id, version=doc.version,
+                       origin="manual", checkpoint=True)
+    return DraftDoc.model_validate_json(row["doc_json"])
+
+
 def save_new_version(doc: DraftDoc, origin: str, checkpoint: bool = False) -> DraftDoc:
     """保存：默认只记块级变更；checkpoint=True 时写稀疏全量快照（创建/定稿/回滚）。"""
     seq = dao.next_version(doc.article_id)

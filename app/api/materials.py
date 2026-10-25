@@ -142,12 +142,25 @@ def copy_to_article(mid: str, body: CopyToArticle) -> dict:
         raise HTTPException(404, "文章不存在")
     if m["scope"] == "article" and m.get("article_id") == body.article_id:
         return {"material_id": mid, "copied": False, "reason": "已在本文素材库"}
+    # 去重：本文库已有同 sha256 或同源链接的素材则跳过（反馈 四.3）
+    if m.get("sha256"):
+        dup = next((x for x in dao.find_materials_by_sha(m["sha256"])
+                    if x["scope"] == "article" and x.get("article_id") == body.article_id), None)
+        if dup:
+            return {"material_id": dup["id"], "copied": False,
+                    "reason": "本文库已存在同文件，已跳过"}
+    if m.get("source_url"):
+        same_src = next((x for x in dao.list_materials(scope="article", article_id=body.article_id)
+                         if x.get("source_url") == m["source_url"]), None)
+        if same_src:
+            return {"material_id": same_src["id"], "copied": False,
+                    "reason": "本文库已存在同来源链接，已跳过"}
     new_id = new_id_fn("material")
     db.execute(
         """INSERT INTO materials
         (id,scope,article_id,kind,path,sha256,phash,source_url,source_material_id,
          watermark,width,height,duration,ref_type,fetch_status,note,title,meta_json)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (new_id, "article", body.article_id, m["kind"], m.get("path"), m.get("sha256"),
          m.get("phash"), m.get("source_url"), m.get("source_material_id"), m.get("watermark"),
          m.get("width"), m.get("height"), m.get("duration"), m.get("ref_type"),
@@ -170,15 +183,17 @@ def copy_to_common(mid: str) -> dict:
     if m["scope"] == "common":
         return {"material_id": mid, "copied": False, "reason": "已在公共素材库"}
     if m.get("sha256"):
-        dup = dao.find_material_by_sha(m["sha256"])
-        if dup and dup["scope"] == "common":
-            return {"material_id": dup["id"], "copied": False, "reason": "公共库已存在同文件，已跳过"}
+        dup = next((x for x in dao.find_materials_by_sha(m["sha256"])
+                    if x["scope"] == "common"), None)
+        if dup:
+            return {"material_id": dup["id"], "copied": False,
+                    "reason": "公共库已存在同文件，已跳过"}
     new_id = new_id_fn("material")
     db.execute(
         """INSERT INTO materials
         (id,scope,article_id,kind,path,sha256,phash,source_url,source_material_id,
          watermark,width,height,duration,ref_type,fetch_status,note,title,meta_json)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (new_id, "common", None, m["kind"], m.get("path"), m.get("sha256"),
          m.get("phash"), m.get("source_url"), m.get("source_material_id"), m.get("watermark"),
          m.get("width"), m.get("height"), m.get("duration"), m.get("ref_type"),

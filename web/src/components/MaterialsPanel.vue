@@ -95,6 +95,17 @@ const grouped = computed(() => {
 
 /* ---------- 选择 / 操作 ---------- */
 
+function groupAllSelected(g: { items: Material[] }): boolean {
+  return g.items.every(m => selected.value.has(m.id))
+}
+function toggleGroup(g: { items: Material[] }) {
+  const ids = g.items.map(m => m.id)
+  const all = groupAllSelected(g)
+  const next = new Set(selected.value)
+  for (const id of ids) all ? next.delete(id) : next.add(id)
+  selected.value = next
+}
+
 function toggle(id: string) {
   selected.value.has(id) ? selected.value.delete(id) : selected.value.add(id)
   selected.value = new Set(selected.value)
@@ -358,6 +369,10 @@ async function currentSelection(): Promise<string[]> {
       <div v-for="g in grouped" :key="g.key" class="mb-6">
         <div class="text-sm font-semibold mb-2 flex items-center gap-2"
              style="color: var(--muted);">
+          <span class="inline-flex items-center" @click.stop @mousedown.stop>
+            <NCheckbox :checked="groupAllSelected(g)"
+                       @update:checked="toggleGroup(g)" />
+          </span>
           <button class="hover:underline truncate text-left font-semibold"
                  @click="onGroupTitleClick(g)">{{ g.title }}</button>
           <span class="num text-xs" style="color: var(--faint);">{{ g.items.length }}</span>

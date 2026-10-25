@@ -32,7 +32,8 @@ def init_db() -> None:
         conn.executescript(_SCHEMA)
         # 轻量迁移：老库补 lib_dir 列 + sha256 唯一索引降级为普通索引
         for ddl in ("ALTER TABLE articles ADD COLUMN lib_dir TEXT",
-                    "ALTER TABLE articles ADD COLUMN selected_json TEXT DEFAULT '[]'"):
+                    "ALTER TABLE articles ADD COLUMN selected_json TEXT DEFAULT '[]'",
+                    "ALTER TABLE drafts ADD COLUMN note TEXT DEFAULT ''"):
             try:
                 conn.execute(ddl)
             except sqlite3.OperationalError:

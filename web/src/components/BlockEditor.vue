@@ -48,10 +48,10 @@ function edgeLeave() {
 function panelLeave(side: 'left' | 'right') {
   if (wide.value) return
   if (openTimer) { clearTimeout(openTimer); openTimer = null }
-  closeTimer = setTimeout(() => {              // 2s 防抖收回
+  closeTimer = setTimeout(() => {              // 0.8s 防抖收回
     if (side === 'left') leftOpen.value = false
     else rightOpen.value = false
-  }, 2000)
+  }, 800)
 }
 function panelEnter() {
   if (closeTimer) { clearTimeout(closeTimer); closeTimer = null }
@@ -77,10 +77,31 @@ const wholeArticle = ref(false)
 const lightboxUrl = ref('')
 const imgModal = ref(false)
 const imgBlockId = ref('')
+const saveVersionModal = ref(false)
+const saveVersionNote = ref('')
 const insertModal = ref(false)
 const insertIds = ref<string[]>([])
 const insertInstruction = ref('')
 const dropTargetId = ref<string | null>(null)   // 拖拽插入位置指示
+const editingCaptionId = ref<string | null>(null)
+const captionText = ref('')
+
+function startCaptionEdit(b: Block) {
+  if (!isLatest.value || finalized.value) return
+  editingCaptionId.value = b.id
+  captionText.value = b.caption || ''
+}
+async function saveCaption(b: Block) {
+  if (editingCaptionId.value !== b.id) return
+  editingCaptionId.value = null
+  if (captionText.value === (b.caption || '')) return
+  try {
+    const r = await api.put(`/api/drafts/${draftId.value}/edit`,
+      { ops: [{ op: 'set_caption', block_id: b.id, caption: captionText.value }] })
+    message.success(`图注已保存（v${r.version}）`)
+    await load()
+  } catch (e: any) { message.error(e.message) }
+}
 
 /* 标题&副标题（置顶块） + 底部信息窗（总结/关键词/参考链接） */
 const metaTitle = ref('')
@@ -91,8 +112,23 @@ const metaKeywords = ref('')
 const metaRefLinks = ref('')
 const metaEditing = ref<string | null>(null)
 
+/** 视频素材封面：子图片作为缩略图（反馈 五.1） */
+const coverOf = computed(() => {
+  const map: Record<string, string> = {}
+  for (const m of sessionMaterials.value) {
+    if (m.kind === 'image' && m.source_material_id && m.url && !map[m.source_material_id]) {
+      map[m.source_material_id] = api.absUrl(m.url)
+    }
+  }
+  return map
+})
+
+const headVersion = computed(() =>
+  versions.value.length ? Math.max(...versions.value.map(v => v.version)) : 0)
 const isLatest = computed(() =>
-  !versions.value.length || doc.value?.version === versions.value[0]?.version)
+  !versions.value.length || doc.value?.version === headVersion.value)
+/** 回滚列表只展示用户主动保存的版本（反馈 六.3） */
+const savedVersions = computed(() => versions.value.filter(v => v.saved))
 const finalized = computed(() => versions.value[0]?.status === 'finalized')
 const textBlocks = computed(() =>
   doc.value?.blocks.filter(b => ['heading', 'paragraph', 'quote'].includes(b.type)) ?? [])
@@ -317,6 +353,13 @@ function doRollback(v: number) {
 /* ================= 标题/副标题/信息窗保存 ================= */
 async function saveTitle() {
   if (!draftId.value || !metaTitle.value.trim()) return
+  const d = doc.value
+  const curTitle = (d?.meta.title_candidates || [])[0] || ''
+  const curAlts = (d?.meta.title_candidates || []).slice(1).join('\n')
+  if (d && metaTitle.value === curTitle && metaTitleAlts.value === curAlts) {
+    metaEditing.value = null
+    return
+  }
   const ops: any[] = [
     { op: 'update_meta', field: 'title_selected', value: metaTitle.value.trim() },
     { op: 'update_meta', field: 'title_candidates',
@@ -333,6 +376,10 @@ async function saveTitle() {
 
 async function saveSubtitle() {
   if (!draftId.value) return
+  if (doc.value && metaSubtitle.value === (doc.value.meta.subtitle || '')) {
+    metaEditing.value = null
+    return
+  }
   try {
     const r = await api.put(`/api/drafts/${draftId.value}/edit`,
       { ops: [{ op: 'update_meta', field: 'subtitle', value: metaSubtitle.value }] })
@@ -344,6 +391,20 @@ async function saveSubtitle() {
 
 async function saveMeta(field: 'one_liner' | 'keywords' | 'ref_links') {
   if (!draftId.value) return
+  const d = doc.value
+  if (d) {
+    if (field === 'one_liner' && metaOneLiner.value === (d.meta.one_liner || '')) {
+      metaEditing.value = null; return
+    }
+    if (field === 'keywords') {
+      const cur = (d.meta.keywords || []).map(k => `#${k}`).join('，')
+      if (metaKeywords.value === cur) { metaEditing.value = null; return }
+    }
+    if (field === 'ref_links') {
+      const cur = (d.meta.ref_links || []).map(x => `${x.title} | ${x.url}`).join('\n')
+      if (metaRefLinks.value === cur) { metaEditing.value = null; return }
+    }
+  }
   let op: any
   if (field === 'one_liner') {
     op = { op: 'update_meta', field: 'one_liner', value: metaOneLiner.value }
@@ -383,6 +444,18 @@ async function replaceImage(m: Material) {
   } catch (e: any) { message.error(e.message) }
 }
 
+/* ================= 保存版本（V1.4 主动保存模式） ================= */
+async function saveNamedVersion() {
+  try {
+    const r = await api.post(`/api/articles/${props.articleId}/versions/save`,
+                             { note: saveVersionNote.value })
+    message.success(`已保存版本 v${r.version}` + (r.note ? `（${r.note}）` : ''))
+    saveVersionModal.value = false
+    saveVersionNote.value = ''
+    await load()
+  } catch (e: any) { message.error(e.message) }
+}
+
 /* ================= 融合插入（素材页触发） ================= */
 function openInsertRefs(ids: string[]) {
   insertIds.value = ids
@@ -409,12 +482,8 @@ async function runInsert() {
 <template>
   <div class="create-wb" :class="{ narrow: !wide }" @click="onClickOutside">
     <!-- 左边缘标记（窄屏收起态的视觉提示） -->
-    <div v-if="!leftOpen" class="edge-marker left" @mouseenter="edgeHover('left')" @mouseleave="edgeLeave">
-      <span>创<br>作<br>素<br>材</span>
-    </div>
-    <div v-if="!rightOpen" class="edge-marker right" @mouseenter="edgeHover('right')" @mouseleave="edgeLeave">
-      <span>工<br>具</span>
-    </div>
+    <div v-if="!leftOpen" class="edge-marker left" @mouseenter="edgeHover('left')" @mouseleave="edgeLeave" />
+    <div v-if="!rightOpen" class="edge-marker right" @mouseenter="edgeHover('right')" @mouseleave="edgeLeave" />
 
     <!-- ============ 左侧【创作素材】窗口 ============ -->
     <aside class="side-panel left-panel panel" :class="{ hidden: !leftOpen }"
@@ -433,6 +502,11 @@ async function runInsert() {
           <img v-if="m.kind === 'image' && m.url" :src="api.absUrl(m.url)"
                class="w-full aspect-video object-cover rounded-t-md cursor-zoom-in"
                @click.stop="lightboxUrl = api.absUrl(m.url)" />
+          <div v-else-if="m.kind === 'video' && coverOf[m.id]" class="relative">
+            <img :src="coverOf[m.id]" class="w-full aspect-video object-cover rounded-t-md" />
+            <span class="absolute inset-0 grid place-items-center text-white text-xs"
+                  style="background: rgba(0,0,0,.35);">▶ 视频</span>
+          </div>
           <div v-else class="px-2 py-3 text-xs" style="color: var(--muted);">
             {{ { text: '文章', video: '视频', audio: '音频', doc: '文档', link: '链接' }[m.kind] || m.kind }} ·
             {{ m.title || m.id }}
@@ -500,7 +574,12 @@ async function runInsert() {
               <blockquote v-else-if="b.type === 'quote'">{{ b.text }}</blockquote>
               <div v-else-if="b.type === 'image'" class="my-3">
                 <img v-if="b.asset_id" :src="assetUrl(b.asset_id)" class="rounded-md max-w-full" />
-                <div class="caption">{{ b.caption }}</div>
+                <div v-if="editingCaptionId !== b.id" class="caption"
+                     :title="isLatest && !finalized ? '双击编辑图注' : ''"
+                     @dblclick.stop="startCaptionEdit(b)">{{ b.caption || '（双击添加图注）' }}</div>
+                <input v-else v-model="captionText" class="caption-input" v-focus
+                       @click.stop @keyup.enter="saveCaption(b)" @keyup.esc="editingCaptionId = null"
+                       @blur="saveCaption(b)" />
               </div>
               <div v-else-if="b.type === 'video'" class="my-3 rounded-md h-40 grid place-items-center text-sm"
                    style="background: var(--raised); color: var(--muted);">视频素材（发布包获取）</div>
@@ -540,13 +619,27 @@ async function runInsert() {
         </div>
         <div>
           <div class="text-xs font-semibold mb-2" style="color: var(--muted);">版本管理</div>
-          <NSelect size="small" :value="doc?.version" @update:value="(v: number) => load(v)"
-                   :options="versions.map(v => ({
-                     label: `v${v.version} · ${({ agent: 'AI', human: '人工', auto_fix: 'AI修复', insert_refs: '资料插入', rollback: '回滚' } as any)[v.origin] || v.origin}${v.checkpoint ? ' · 快照' : ''}${v.status === 'finalized' ? ' · 定稿' : ''}${v.changes ? ` · ${v.changes}块改动` : ''}`,
-                     value: v.version }))" />
-          <div class="text-[11px] mt-1.5" style="color: var(--faint);">块级增量版本：只记变更块，历史可重建。</div>
-          <NButton size="tiny" block tertiary class="mt-2" :disabled="!doc || isLatest || finalized"
-                   @click="doc && doRollback(doc.version)">回滚到当前查看的版本</NButton>
+          <NButton size="tiny" block type="primary" :disabled="!doc || finalized"
+                   @click="saveVersionModal = true">保存版本</NButton>
+          <div class="text-[11px] mt-1.5" style="color: var(--faint);">
+            编辑实时写入临时草稿；点「保存版本」才生成可回滚记录。</div>
+          <div class="mt-2 space-y-1.5">
+            <div v-if="!savedVersions.length" class="text-[11px]" style="color: var(--faint);">
+              暂无已保存版本</div>
+            <div v-for="v in savedVersions" :key="v.version"
+                 class="flex items-center gap-1.5 text-xs rounded-md px-2 py-1.5"
+                 style="border: 1px solid var(--rule);">
+              <button class="hover:underline font-medium" @click="load(v.version)">v{{ v.version }}</button>
+              <span class="truncate flex-1" style="color: var(--muted);"
+                    :title="v.note">{{ v.note || '（无备注）' }}</span>
+              <span class="num" style="color: var(--faint);">{{ (v.created_at || '').slice(5, 16) }}</span>
+              <button class="hover:underline shrink-0" style="color: var(--accent-ink);"
+                      @click="doRollback(v.version)">回滚</button>
+            </div>
+          </div>
+          <div v-if="!isLatest" class="mt-2 text-[11px]" style="color: var(--pill-warn-ink);">
+            正在查看历史版本（只读）。<button class="hover:underline" @click="load()">回到最新</button>
+          </div>
         </div>
         <NButton block type="primary" size="small" :disabled="!doc" @click="emit('goto-review')">去审稿 →</NButton>
       </div>
@@ -589,6 +682,18 @@ async function runInsert() {
         </div>
       </div>
     </div>
+
+    <!-- 保存版本弹窗 -->
+    <NModal v-model:show="saveVersionModal" preset="card" title="保存版本" class="!max-w-md">
+      <div class="space-y-3">
+        <NInput v-model:value="saveVersionNote" placeholder="版本备注（可选），如：标题定稿前"
+                @keyup.enter="saveNamedVersion" />
+        <div class="flex justify-end gap-2">
+          <NButton size="small" @click="saveVersionModal = false">取消</NButton>
+          <NButton size="small" type="primary" @click="saveNamedVersion">保存</NButton>
+        </div>
+      </div>
+    </NModal>
 
     <!-- AI 重写弹窗 -->
     <NModal v-model:show="aiModal" preset="card"
@@ -681,13 +786,13 @@ export default {
   border: 1px solid var(--control); background: var(--surface);
   display: flex; align-items: center; justify-content: center;
   cursor: pointer;
+  box-shadow: 0 0 0 1px var(--control), 4px 0 14px rgba(20,20,20,.12);
 }
 .edge-marker.left { left: 0; border-left: none; border-radius: 0 8px 8px 0; }
 .edge-marker.right { right: 0; border-right: none; border-radius: 8px 0 0 8px; }
-.edge-marker span {
-  writing-mode: vertical-rl; font-size: 10px; color: var(--faint); letter-spacing: 2px;
-}
-.edge-marker:hover { border-color: var(--accent); }
+
+.edge-marker:hover { border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 4px 0 16px rgba(198,59,36,.18); }
 
 /* 标题 & 副标题（置顶块样式规范） */
 .doc-title { font-size: 24px; font-weight: 800; line-height: 1.3; letter-spacing: -0.01em; }
@@ -716,11 +821,11 @@ export default {
 
 /* 底部信息窗口 */
 .bottom-info {
-  grid-column: 1 / -1; display: grid;
-  grid-template-columns: 1.2fr 1fr 1.4fr; gap: 0; margin-top: 12px;
+  grid-column: 1 / -1; display: flex; flex-direction: column;
+  gap: 0; margin-top: 12px;
 }
 .info-cell { padding: 12px 16px; }
-.info-cell + .info-cell { border-left: 1px solid var(--rule); }
+.info-cell + .info-cell { border-top: 1px solid var(--rule); }
 .info-cell:hover { background: var(--raised); }
 .info-label { font-size: 11px; color: var(--faint); margin-bottom: 4px; }
 .info-value { font-size: 13px; line-height: 1.5; }
@@ -728,5 +833,8 @@ export default {
 .info-input { width: 100%; font-size: 13px; border: 1px solid var(--control);
   border-radius: 6px; padding: 6px 8px; outline: none; background: var(--surface); }
 .info-input:focus { border-color: var(--ink-900); }
+.caption-input { display: block; margin: 4px auto 0; width: 70%; text-align: center;
+  font-size: 12px; border: 1px solid var(--control); border-radius: 6px; padding: 4px 8px;
+  outline: none; background: var(--surface); }
 .text-faint { color: var(--faint); }
 </style>

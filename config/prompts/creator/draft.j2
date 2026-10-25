@@ -20,7 +20,7 @@
 - 不得逐句改写任何一篇素材（查重红线）：重述事实 + 补充背景 + 给出解读；
 - 关键事实必须带 citations；每个关键论点至少引用一个素材 id；
 - 开头用场景/反问/比喻钩子，第一段说清「发生了什么 + 为什么值得读」；
-- 配图：从「可用图片」中选择 2~4 张插入合适位置（type=image，asset_id 取自列表），
+- 配图：从「可用图片」中选择 2~4 张插入合适位置（type=image，asset_id 取自列表）；有演示类视频素材时可插 1 个（type=video）；
   并写一句 caption；没有合适图片就不配，禁止虚构图片。
 
 # 硬约束补充
@@ -52,6 +52,13 @@
 {% else %}
 （无可用图片）
 {% endfor %}
+
+{% if videos %}
+# 可用视频（type=video，素材为已下载实体文件）
+{% for v in videos %}
+- {{ v.id }}: {{ v.title }} {{ v.duration }}s
+{% endfor %}
+{% endif %}
 
 {% if user_notes %}
 # 用户备注

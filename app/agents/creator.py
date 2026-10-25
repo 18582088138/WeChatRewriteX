@@ -41,7 +41,9 @@ class CreatorAgent(AgentBase):
             raise ValueError(f"文章不存在: {article_id}")
         style = self.load_style_pack(article.get("style_pack"))
         evidence = self._evidence_pack(article_id, selected_material_ids)
-        images = self._available_images(article_id, selected_material_ids)
+        media = self._available_media(article_id, selected_material_ids)
+        images = media["images"]
+        videos = media["videos"]
         word_target = int(article.get("target_word_count")
                           or config.get("create.target_word_count", 1500))
         self._evidence_now = evidence            # 供 ref_links 使用
@@ -50,7 +52,7 @@ class CreatorAgent(AgentBase):
             doc = self._degraded_doc(article_id, evidence)
         else:
             prompt = self.prompt("draft", style=style, word_target=word_target,
-                                 evidence=evidence, images=images,
+                                 evidence=evidence, images=images, videos=videos,
                                  user_notes=article.get("user_notes") or "")
             result = self.complete("create", [{"role": "user", "content": prompt}],
                                    schema=DraftPayload, article_id=article_id,
@@ -158,6 +160,31 @@ class CreatorAgent(AgentBase):
     @staticmethod
     def _available_images(article_id: str,
                           selected_ids: list[str] | None = None) -> list[dict]:
+        """兼容名：返回图片列表。"""
+        return CreatorAgent._available_media(article_id, selected_ids)["images"]
+
+    @staticmethod
+    def _available_media(article_id: str,
+                         selected_ids: list[str] | None = None) -> dict:
+        """可用媒体：图片 + 已下载视频（实体文件可插入正文）。水印图垫底。"""
+        mats = dao.list_materials(article_id=article_id)
+        if selected_ids:
+            keep = set(selected_ids)
+            mats = [m for m in mats if m["id"] in keep]
+        images, videos = [], []
+        for m in mats:
+            if m.get("fetch_status") != "ok":
+                continue
+            item = {"id": m["id"], "title": m.get("title") or "",
+                    "width": m.get("width"), "height": m.get("height"),
+                    "watermark": m.get("watermark"), "duration": m.get("duration"),
+                    "source": m.get("source_url") or ""}
+            if m["kind"] == "image":
+                images.append(item)
+            elif m["kind"] == "video" and m.get("path"):
+                videos.append(item)
+        images.sort(key=lambda x: x.get("watermark") or 0)
+        return {"images": images, "videos": videos}
         """可用图片：含水印图（拍板 #7：暂可用，排在最后），只排除下载失败/过小。
         勾选集合给定时只从勾选图片中取。"""
         mats = dao.list_materials(article_id=article_id, kind="image")
@@ -179,7 +206,9 @@ class CreatorAgent(AgentBase):
     def _ensure_images(doc: DraftDoc, images: list[dict]) -> None:
         """文案必须有配图：LLM 没配图时按序补插（首图第二段后，次图 2/3 处）。
         升序插入并累计偏移，保持原顺序与下标正确。"""
-        if not images or any(b.type == BlockType.IMAGE for b in doc.blocks):
+        if any(b.type in (BlockType.IMAGE, BlockType.VIDEO) for b in doc.blocks):
+            return
+        if not images:
             return
         paras = [i for i, b in enumerate(doc.blocks) if b.type == BlockType.PARAGRAPH]
         if not paras:
@@ -195,7 +224,7 @@ class CreatorAgent(AgentBase):
         # 校验图片块 asset_id 存在性，不存在则丢弃该块（防幻觉配图）
         valid = []
         for b in blocks:
-            if b.type == BlockType.IMAGE:
+            if b.type in (BlockType.IMAGE, BlockType.VIDEO):
                 if b.asset_id and dao.get_material(b.asset_id):
                     valid.append(b)
                 continue

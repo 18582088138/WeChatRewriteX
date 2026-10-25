@@ -29,6 +29,10 @@ class InsertRefs(BaseModel):
     instruction: str = ""
 
 
+class SaveVersion(BaseModel):
+    note: str = ""
+
+
 class Rollback(BaseModel):
     version: int
 
@@ -53,6 +57,16 @@ def get_draft(aid: str, version: int | None = None) -> dict:
 @router.get("/articles/{aid}/versions")
 def versions(aid: str) -> dict:
     return {"versions": dao.list_draft_versions(aid)}
+
+
+@router.post("/articles/{aid}/versions/save")
+def save_version(aid: str, body: SaveVersion) -> dict:
+    """主动保存版本（V1.4）：当前 HEAD 落为命名版本，进可回滚列表。"""
+    try:
+        doc = draft_service.save_named_version(aid, body.note)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return {"version": doc.version, "note": body.note}
 
 
 @router.post("/articles/{aid}/rollback")

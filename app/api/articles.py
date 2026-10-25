@@ -133,7 +133,7 @@ def finalize(aid: str, body: Finalize) -> dict:
         raise HTTPException(409, f"存在 {blockers} 个未处理 blocker，禁止定稿")
     # 定稿 = 落一个稀疏 checkpoint（块级增量版本下，checkpoint 只在 创建/定稿/回滚 时产生）
     from ..services import draft_service
-    cp = draft_service.save_checkpoint(aid, origin="human", status="finalized")
+    cp = draft_service.save_checkpoint(aid, origin="finalized", status="finalized")
     from ..core.statemachine import transition
     cur = ArticleStatus(art["status"])
     if cur == ArticleStatus.REVIEWED:

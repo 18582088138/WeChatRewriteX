@@ -60,7 +60,8 @@ CREATE TABLE IF NOT EXISTS drafts (
   word_count    INTEGER DEFAULT 0,
   status        TEXT DEFAULT 'editing',    -- editing|finalized
   parent_version INTEGER,
-  origin        TEXT DEFAULT 'agent',      -- agent|human|auto_fix|insert_refs
+  origin        TEXT DEFAULT 'agent',      -- agent|human|auto_fix|insert_refs|manual|finalized|rollback
+  note          TEXT DEFAULT '',           -- 主动保存版本的备注（V1.4）
   created_at    TEXT DEFAULT (datetime('now', 'localtime')),
   UNIQUE(article_id, version)
 );

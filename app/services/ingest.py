@@ -8,7 +8,15 @@ from ..services.media import download as media_download
 
 
 def ingest_url(article_id: str, url: str, ref_type: str | None = None) -> dict:
-    """抓取一个链接：正文 + 前 5 图 + 视频/音频入库。返回摘要。"""
+    """抓取一个链接：正文 + 前 5 图 + 视频/音频入库。返回摘要。
+
+    去重（反馈 四.3）：同项目已有同源链接素材直接返回既有 id，不重复抓取入库。"""
+    from ..storage import dao as _dao
+    dup = next((m for m in _dao.list_materials(scope="article", article_id=article_id)
+                if m.get("source_url") == url and m["kind"] == "text"), None)
+    if dup:
+        return {"material_id": dup["id"], "title": dup.get("title"),
+                "media": 0, "skipped": True}
     raw = crawl_registry.fetch(url)  # CrawlError 由调用方处理
     folder = library.save_ref_snapshot(article_id, "", raw.html or "", raw.markdown,
                                        {"url": url, "title": raw.title,
