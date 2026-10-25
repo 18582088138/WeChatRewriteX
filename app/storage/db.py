@@ -30,9 +30,14 @@ def init_db() -> None:
     data_dir().mkdir(parents=True, exist_ok=True)
     with connect() as conn:
         conn.executescript(_SCHEMA)
-        # 轻量迁移：老库补 lib_dir 列
+        # 轻量迁移：老库补 lib_dir 列 + sha256 唯一索引降级为普通索引
         try:
             conn.execute("ALTER TABLE articles ADD COLUMN lib_dir TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("DROP INDEX IF EXISTS idx_materials_sha")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_materials_sha ON materials(sha256)")
         except sqlite3.OperationalError:
             pass
         _init_fts(conn)

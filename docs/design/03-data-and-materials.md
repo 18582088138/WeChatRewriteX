@@ -77,29 +77,31 @@ settings(key, value_json)              -- UI 可改配置, 覆盖 config/setting
 -- publish_targets 表已建, 一阶段发布走 exporter, 二阶段接 API/RPA 时启用
 ```
 
-## 素材库文件布局（v2，2026-10-24 按反馈修订）
+## 素材库文件布局（v3，2026-10-25 第二阶段修订）
 
-`data/` 是唯一数据根（与代码分离、整体 gitignore）。**每篇文章一个可读文件夹**（标题_短id），
-资源按中文分项存放；发布包也并入文章文件夹，用户打开一个文件夹即可拿到全部产物：
+`resource/` 是唯一数据根（与代码分离、gitignore、运行时自动创建）。**每篇文章一个项目文件夹**
+（初始名 = 输入文章标题-日期时间；创作 Agent 定题后改名为 拟定标题-日期时间）：
 
 ```
-data/library/
-├── common/                                # 公共素材库
-│   ├── 图片/  视频/  文档/
-│   └── inbox/                             # 手动拷入落点, 扫描即入库
-└── articles/<文章标题_短id>/               # 文章素材组 (名见 articles.lib_dir)
-    ├── 原文/  page.html content.md meta.json
-    ├── 参考/<material_id>/                 # 每篇参考一个子目录(同结构)
-    ├── 图片/  视频/  文档/
-    ├── inbox/                             # 本文手动添加落点
-    ├── exports/                           # 发布包: wechat_mp/ xhs/ weibo/ x/ xhs_cards/
-    └── notes.md                           # 收集报告
-
-data/drafts/<article_id>/                  # 文案版本 (应用内部数据, 非用户素材)
+resource/
+├── app.db  style_reference/                  # 范文库（风格蒸馏用）
+├── common/                                   # 公共素材库
+│   ├── reference/<文章标题>/                  # 公共文章素材（与项目内同级结构）
+│   ├── 图片/  视频/  音频/  其他/
+│   └── inbox/                                # 手动拷入落点，扫描即入库
+└── <输入文章标题-YYYYMMDD-HHmm>/              # 文章项目文件夹
+    ├── reference/
+    │   ├── <输入文章标题>/  page.html content.md meta.json
+    │   └── <参考文章标题>/                    # 与输入文章同级，不做来源隔离
+    ├── 图片/  视频/  音频/  其他/
+    ├── inbox/                                # 本文手动添加落点
+    ├── exports/<platform>/                   # 发布包（xhs_cards/ 也在此）
+    ├── drafts/                               # 文案版本 vNNN.md/.json + runs/
+    └── notes.md                              # 收集报告
 ```
 
-> 说明：v1 为 `articles/<id>/{source,refs,images,...}` 英文目录 + 独立 `data/exports/`；
-> v2 改为标题命名 + 中文分项 + exports 并入，满足「统一文件夹、分项保存、不与代码混杂」。
+> 历史：v1 `articles/<id>` 英文目录；v2 `data/library/` 标题命名中文分项；v3 改 `resource/` 根
+> + 项目文件夹（reference 同级 + 产出并入），满足「统一目录、分项保存、创作后随标题改名」。
 
 ### 素材摄取流水线（统一入口）
 
@@ -150,7 +152,7 @@ data/drafts/<article_id>/                  # 文案版本 (应用内部数据, �
 
 **导出**：Markdown（编辑器展示与落盘）、公众号 HTML（doocs/md 主题渲染）、小红书分页 JSON（卡片生成器输入）、微博/X 文本变体。导出是单向的，编辑只改块模型。
 
-## 检索（供洗稿与审稿）
+## 检索（供创作与审稿）
 
 - 全文：SQLite FTS5（中文用 trigram 分词）覆盖所有文本素材与原文快照。
 - 向量：文本块与图片说明 → embedding（可配 bge / provider embedding API）→ sqlite-vec 存储；用于「段落选图」「claims 找证据」「撞稿语义比对」。

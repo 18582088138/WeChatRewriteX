@@ -9,8 +9,8 @@ collect:
   image_min_width: 400         # 过滤过小图片
   watermark_check: heuristic   # heuristic | vision | off (vision 需配置 vision 档模型)
 
-# ---- 洗稿 ----
-rewrite:
+# ---- 创作 ----
+create:
   style_pack: tech-evangelist
   target_word_count: 1500      # 公众号默认目标词数
   originality_guard: true      # prompt 级防逐句改写约束
@@ -59,7 +59,7 @@ llm:
     - { name: openai,   provider: openai,   env_key: OPENAI_API_KEY,  priority: 4 }
   routing:
     summarize: { model: deepseek/deepseek-chat, temperature: 0.3 }
-    rewrite:   { model: deepseek/deepseek-chat, temperature: 0.7 }
+    create:    { model: deepseek/deepseek-chat, temperature: 0.7 }
     compress:  { model: deepseek/deepseek-chat, temperature: 0.3 }
     review:    { model: deepseek/deepseek-chat, temperature: 0.2 }
     vision:    { model: volcengine/doubao-vision-pro-32k, temperature: 0.2 }
@@ -68,7 +68,7 @@ llm:
 
 # ---- 存储 ----
 storage:
-  data_dir: data
+  data_dir: resource
   material_size_limit_mb: 500
 
 # ---- Hooks（事件 → 命令; {article_id} 等占位符会被替换）----

@@ -12,7 +12,7 @@ from ..core import config, events
 from ..core.models import CollectionReport, RefType
 from ..storage import dao, library
 from ..services.crawl import registry as crawl_registry
-from ..services.crawl.base import CrawlError, RawArticle
+from ..services.crawl.base import CrawlError, ImageRef, RawArticle
 from ..services.media import download as media_download
 from ..services.media import stock as stock_media
 from ..services.search.registry import get_paper_searcher, get_searcher
@@ -70,26 +70,59 @@ class CollectorAgent(AgentBase):
 
     def _fetch_primary(self, article: dict) -> RawArticle:
         raw = crawl_registry.fetch(article["url"])
-        library.save_article_snapshot(article["id"], raw.html or "", raw.markdown, {
+        dao.update_article(article["id"], title=raw.title, source_site=raw.site,
+                           published_at=raw.published_at)   # 先落标题（文件夹命名要用）
+        folder = library.save_article_snapshot(article["id"], raw.html or "", raw.markdown, {
             "url": raw.url, "title": raw.title, "published_at": raw.published_at,
             "author": raw.author, "site": raw.site, "extra": raw.extra,
         })
-        dao.update_article(article["id"], title=raw.title, source_site=raw.site,
-                           published_at=raw.published_at)
+        self._primary_folder = folder
         return raw
 
     def _store_primary(self, article_id: str, raw: RawArticle) -> str:
         return library.ingest_text(
             raw.markdown, title=raw.title or "原文", scope="article",
             article_id=article_id, source_url=raw.url, ref_type=RefType.PRIMARY.value,
-            meta={"author": raw.author, "site": raw.site, "published_at": raw.published_at})
+            meta={"author": raw.author, "site": raw.site, "published_at": raw.published_at},
+            folder=getattr(self, "_primary_folder", None))
 
     def _collect_images(self, raw: RawArticle, article_id: str, source_mid: str) -> list[str]:
-        if not raw.images:
-            return []
-        return media_download.fetch_images(
-            raw.images, scope="article", article_id=article_id,
-            source_material_id=source_mid, page_url=raw.url)
+        saved = []
+        if raw.images:
+            saved += media_download.fetch_images(
+                raw.images, scope="article", article_id=article_id,
+                source_material_id=source_mid, page_url=raw.url)
+        for v in (getattr(raw, "videos", None) or []):
+            url = v.url if hasattr(v, "url") else str(v)
+            if "readtemplate" in url or (hasattr(v, "vid") and v.vid.startswith("wxv_")):
+                # wxv_ 视频号：降级为「链接 + 封面」素材；重收时按来源链接去重
+                dup = next((m for m in dao.list_materials(
+                    scope="article", article_id=article_id, kind="video")
+                    if m.get("source_url") == url), None)
+                if dup:
+                    link_mid = dup["id"]
+                else:
+                    link_mid = dao.insert_material(
+                        scope="article", article_id=article_id, kind="video",
+                        source_url=url, source_material_id=source_mid,
+                        title=f"内嵌视频 {v.vid or ''}".strip(),
+                        note="视频号内嵌视频（浏览器可播，服务端暂不取流）")
+                    saved.append(link_mid)
+                poster = getattr(v, "poster", "")
+                if poster:
+                    media_download.fetch_images(
+                        [ImageRef(url=poster, alt="视频封面")],
+                        scope="article", article_id=article_id,
+                        source_material_id=link_mid, page_url=raw.url, limit=1)
+            else:
+                saved += media_download.fetch_videos(
+                    [v], scope="article", article_id=article_id,
+                    source_material_id=source_mid, page_url=raw.url)
+        if getattr(raw, "audios", None):
+            saved += media_download.fetch_audios(
+                raw.audios, scope="article", article_id=article_id,
+                source_material_id=source_mid, page_url=raw.url)
+        return saved
 
     def _extract_topic(self, raw: RawArticle) -> TopicExtract:
         if not self.llm_available():
@@ -115,6 +148,21 @@ class CollectorAgent(AgentBase):
         out: list[tuple[str, str, str]] = []
         seen_urls = {raw.url}
 
+        # 相关性守卫：标题+摘要须命中任一关键词/实体 token（防无关结果入库）
+        tokens = {t.lower() for t in
+                  (extract.keywords + extract.entities + [extract.topic]) if t and len(t) >= 2}
+        tokens |= {w.lower() for t in tokens for w in t.split() if len(w) >= 2}
+
+        def _relevant(results):
+            if not tokens:
+                return results
+            kept = []
+            for r in results:
+                hay = (r.title + " " + (r.snippet or "")).lower()
+                if any(t in hay for t in tokens):
+                    kept.append(r)
+            return kept
+
         def _take(results, ref_type: RefType, cap: int) -> None:
             for r in results:
                 if len(out) >= cap:
@@ -137,7 +185,8 @@ class CollectorAgent(AgentBase):
         for q in queries:
             if len(out) >= ref_max:
                 break
-            _take(web.search(q, max_results=6, days_window=window), RefType.REFERENCE, ref_max)
+            _take(_relevant(web.search(q, max_results=6, days_window=window)),
+                  RefType.REFERENCE, ref_max)
 
         # 2) 原始论文/基础资料（允许跳出窗口；AI 要闻基本总能关联到论文）
         if config.get("collect.allow_foundational", True) and len(out) < ref_max:
@@ -167,13 +216,14 @@ class CollectorAgent(AgentBase):
                                 source_url=url, ref_type=ref_type.value,
                                 fetch_status="fetch_error", title=url)
             return None
+        folder = library.save_ref_snapshot(article_id, "", raw.html or "", raw.markdown,
+                                           {"url": url, "title": raw.title,
+                                            "published_at": raw.published_at})
         mid = library.ingest_text(raw.markdown, title=raw.title or url, scope="article",
                                   article_id=article_id, source_url=url,
                                   ref_type=ref_type.value,
-                                  meta={"site": raw.site, "published_at": raw.published_at})
-        library.save_ref_snapshot(article_id, mid, raw.html or "", raw.markdown,
-                                  {"url": url, "title": raw.title,
-                                   "published_at": raw.published_at})
+                                  meta={"site": raw.site, "published_at": raw.published_at},
+                                  folder=folder)
         # 参考篇图片少量抓取下（每篇至多 5 张）
         media_download.fetch_images(raw.images[:5], scope="article", article_id=article_id,
                                     source_material_id=mid, page_url=url)

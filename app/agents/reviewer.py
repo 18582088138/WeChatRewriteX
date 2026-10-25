@@ -2,7 +2,7 @@
 
 - layout / originality / compliance(词表)：纯规则，确定可测；
 - fact / attribution / compliance(LLM) / ai_flavor：一次 LLM 调用出结构化条目；
-- originality 采用拍板的双保险：洗稿侧 prompt 预防 + 审稿侧强约束（blocker + 修改指导）。
+- originality 采用拍板的双保险：创作侧 prompt 预防 + 审稿侧强约束（blocker + 修改指导）。
 """
 from __future__ import annotations
 

@@ -11,18 +11,18 @@ class InvalidTransition(Exception):
 TRANSITIONS: dict[ArticleStatus, set[ArticleStatus]] = {
     ArticleStatus.NEW: {ArticleStatus.COLLECTING},
     ArticleStatus.COLLECTING: {ArticleStatus.COLLECTED, ArticleStatus.FAILED},
-    ArticleStatus.COLLECTED: {ArticleStatus.WRITING, ArticleStatus.COLLECTING},   # 允许补收集
-    ArticleStatus.WRITING: {ArticleStatus.DRAFTED, ArticleStatus.FAILED},
-    ArticleStatus.DRAFTED: {ArticleStatus.REVIEWING, ArticleStatus.WRITING},
+    ArticleStatus.COLLECTED: {ArticleStatus.CREATING, ArticleStatus.COLLECTING},   # 允许补收集
+    ArticleStatus.CREATING: {ArticleStatus.DRAFTED, ArticleStatus.FAILED},
+    ArticleStatus.DRAFTED: {ArticleStatus.REVIEWING, ArticleStatus.CREATING},
     ArticleStatus.REVIEWING: {ArticleStatus.REVIEWED, ArticleStatus.FAILED},
     ArticleStatus.REVIEWED: {ArticleStatus.EDITING, ArticleStatus.FINALIZED},
     ArticleStatus.EDITING: {ArticleStatus.REVIEWING, ArticleStatus.FINALIZED,
-                            ArticleStatus.WRITING},   # 编辑后可整篇重写
+                            ArticleStatus.CREATING},   # 编辑后可整篇重写
     ArticleStatus.FINALIZED: {ArticleStatus.PUBLISHING, ArticleStatus.DONE,
                               ArticleStatus.EDITING, ArticleStatus.REVIEWING},
     ArticleStatus.PUBLISHING: {ArticleStatus.DONE, ArticleStatus.FAILED},
     ArticleStatus.DONE: {ArticleStatus.EDITING},          # 允许回炉
-    ArticleStatus.FAILED: {ArticleStatus.NEW, ArticleStatus.COLLECTING, ArticleStatus.WRITING, ArticleStatus.REVIEWING},
+    ArticleStatus.FAILED: {ArticleStatus.NEW, ArticleStatus.COLLECTING, ArticleStatus.CREATING, ArticleStatus.REVIEWING},
 }
 
 

@@ -21,23 +21,42 @@ class TrafilaturaCrawler:
         html_text = trafilatura.fetch_url(url)
         if not html_text:
             raise CrawlError("页面抓取失败（可能需要 JS 渲染或存在反爬）")
+        from ..media.filter import clean_markdown, image_url_ok
         markdown = trafilatura.extract(
             html_text, output_format="markdown", include_images=True,
             include_links=False, favor_recall=True) or ""
         if not markdown.strip():
             raise CrawlError("正文提取为空")
+        markdown = clean_markdown(markdown)
         meta = trafilatura.extract_metadata(html_text)
 
         images: list[ImageRef] = []
+        videos: list = []
         try:
+            from .base import VideoRef
             doc = lxml_html.fromstring(html_text)
             for im in doc.xpath("//img[@src]"):
                 src = im.get("src") or ""
                 if src.startswith("//"):
                     src = "https:" + src
-                if not src.startswith("http") or _SKIP_IMG.search(src):
+                if not src.startswith("http") or not image_url_ok(src):
                     continue
                 images.append(ImageRef(url=src, alt=im.get("alt") or ""))
+            # 文内嵌视频（iframe 播放器 / video 标签）
+            for iframe in doc.xpath("//iframe"):
+                src = iframe.get("data-src") or iframe.get("src") or ""
+                if any(h in src for h in ("v.qq.com", "player.bilibili.com",
+                                          "youtube.com", "youtube-nocookie.com")):
+                    videos.append(VideoRef(
+                        url=src if src.startswith("http") else "https:" + src.lstrip("/")))
+            for v in doc.xpath("//video"):
+                src = v.get("data-src") or v.get("src") or ""
+                if src.startswith("http"):
+                    videos.append(VideoRef(url=src, poster=v.get("poster") or ""))
+                for s in v.xpath(".//source"):
+                    ssrc = s.get("src") or ""
+                    if ssrc.startswith("http"):
+                        videos.append(VideoRef(url=ssrc))
         except Exception:
             pass
 
@@ -49,4 +68,5 @@ class TrafilaturaCrawler:
             author=(meta.author if meta and meta.author else "") or "",
             site=(meta.sitename if meta and meta.sitename else "") or "",
             images=images,
+            videos=list({v.url: v for v in videos}.values()),
         )

@@ -9,8 +9,8 @@ stateDiagram-v2
     [*] --> NEW
     NEW --> COLLECTING: 启动收集 (手动或自动)
     COLLECTING --> COLLECTED: 素材库就绪
-    COLLECTED --> WRITING: 启动洗稿
-    WRITING --> DRAFTED: 草稿 v1 生成
+    COLLECTED --> CREATING: 启动创作
+    CREATING --> DRAFTED: 草稿 v1 生成
     DRAFTED --> REVIEWING: 启动审稿
     REVIEWING --> REVIEWED: checklist 就绪
     REVIEWED --> EDITING: 人工审阅中
@@ -53,20 +53,26 @@ stateDiagram-v2
 2. **主题提炼**（LLM，summarize 档）：输出 `topic / keywords[] / core_points[] / entities[] / published_at`，作为关联搜索的种子。
 3. **关联搜索**
    - 时间窗口：以原文发布日为中心 ±`search_window_days`（默认 3），用 keywords + entities 组合查询，目标凑齐 **3~5 篇**参考（配置 `ref_count_min/max`）；稀缺主题允许 1~2 篇并在报告中显式标注 `scarce=true`。
+   - 搜索链（零配置可用）：Tavily（有 key 优先）→ Bing HTML（/ck/a 跳转还原）→ DuckDuckGo；论文走 arXiv 搜索器（foundational）。
+   - **相关性守卫**：搜索结果标题+摘要须命中任一关键词/实体 token，防无关结果入库。
    - **基础资料补入**：若核心论点涉及某论文/基础概念（如某架构、某芯片制程），允许跳出窗口补入原始论文或权威科普，标记 `foundational=true`，在成稿中作为背景引用。
    - 去重：URL 规范化 + 标题向量去重；同主题多来源时优先官方博客/论文/主流媒体。
-4. **素材抓取**
-   - 每篇参考同样做快照；图片全部下载 → pHash 去重 → 水印初筛（见下）→ 记录尺寸/来源；视频用 yt-dlp 取回（失败记原因）。
+4. **素材抓取与规则过滤（不调 LLM）**
+   - 文本：剔除广告/求关注/转载声明类行，砍掉「相关阅读/往期回顾」起的尾巴（`services/media/filter.py`）。
+   - 图片：URL 黑名单特征 + 尺寸/比例/文件大小下限 + pHash 近似去重；被过滤项**不入库**。
+   - 视频：v.qq/bilibili/直链走 yt-dlp；**视频号 wxv_ 降级为「链接 + 封面」素材**（封面即可用配图，服务端不取流——wechatDownload 式本机凭证方案列为后续候选）。
+   - 音频：mpvoice `voice_encode_fileid` → res.wx.qq.com 播放地址直接下载。
+   - 链接管理：手动加链接（单/批量 ingest 任务）、单链重抓 recrawl、公共库素材可复制进本文库。
 5. **整理入库**：写素材索引，生成 `notes.md`（主题/关键词/核心论点/素材清单），触发 `collect.finished`。
 
 ### 水印检测（两道）
 
 1. 启发式：角落半透明 logo 模板匹配 + 已知平台水印特征（公众号、微博、小红书、B站角标）；
-2. 拿不准的走 vision 档模型问一句「此图是否含水印/平台标识」。检出即标 `watermark=true`，洗稿选图时默认排除（用户可覆盖）。
+2. 拿不准的走 vision 档模型问一句「此图是否含水印/平台标识」。检出即标 `watermark=true`，创作选图时默认不排除（水印图可用, 仅打标; 用户可手动去除）。
 
 ---
 
-## Agent 2 · 洗稿 Rewriter
+## Agent 2 · 创作 Creator
 
 **输入**：`{ article_id, style_pack, target_word_count, outline_hint? }` + 素材库检索结果
 **输出**：`DraftDoc v1`（文档块模型，见 `03`）+ 元数据（关键词、一句话总结、分页建议）
@@ -140,6 +146,6 @@ stateDiagram-v2
 
 ## 开放问题
 
-1. ~~审稿的 originality 阈值策略~~ **已拍板（2026-10-24）**：双保险——洗稿 Agent 用 prompt 硬约束（禁逐句改写、要求重构表达）做前端预防；审稿 Agent 做强约束，超标即 `blocker` 并附**具体修改指导**（指出高相似片段 + 重构建议，`auto_fixable=true`）。阈值初值 0.35/0.75 先用，M2 用真实数据校准。
+1. ~~审稿的 originality 阈值策略~~ **已拍板（2026-10-24）**：双保险——创作 Agent 用 prompt 硬约束（禁逐句改写、要求重构表达）做前端预防；审稿 Agent 做强约束，超标即 `blocker` 并附**具体修改指导**（指出高相似片段 + 重构建议，`auto_fixable=true`）。阈值初值 0.35/0.75 先用，M2 用真实数据校准。
 2. 增量复审的触发阈值是否合适，是否允许用户手动关？
 3. 是否引入「多模型交叉审稿」（用非成稿所用渠道的模型审 fact 维度）？成本换可靠，默认关。**已拍板**：AI 味检测优先借鉴开源方案/skill，商用 API 仅做效果调研，默认不接。

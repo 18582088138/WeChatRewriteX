@@ -26,7 +26,7 @@ DEFAULTS: dict[str, Any] = {
         "image_min_width": 400,
         "watermark_check": "heuristic",
     },
-    "rewrite": {"style_pack": "tech-evangelist", "target_word_count": 1500, "originality_guard": True},
+    "create": {"style_pack": "tech-evangelist", "target_word_count": 1500, "originality_guard": True},
     "review": {
         "block_on_blocker": True,
         "originality": {"simhash_warn": 0.35, "simhash_block": 0.55, "embedding_warn": 0.75, "embedding_block": 0.85},
@@ -49,7 +49,7 @@ DEFAULTS: dict[str, Any] = {
         ],
         "routing": {
             "summarize": {"model": "deepseek/deepseek-chat", "temperature": 0.3},
-            "rewrite": {"model": "deepseek/deepseek-chat", "temperature": 0.7},
+            "create": {"model": "deepseek/deepseek-chat", "temperature": 0.7},
             "compress": {"model": "deepseek/deepseek-chat", "temperature": 0.3},
             "review": {"model": "deepseek/deepseek-chat", "temperature": 0.2},
             "vision": {"model": "volcengine/doubao-vision-pro-32k", "temperature": 0.2},
@@ -57,7 +57,7 @@ DEFAULTS: dict[str, Any] = {
         "embedding": {"model": "volcengine/doubao-embedding-large", "dimension": 2560},
         "cost_log": True,
     },
-    "storage": {"data_dir": "data", "material_size_limit_mb": 500},
+    "storage": {"data_dir": "resource", "material_size_limit_mb": 500},
     "hooks": {},
 }
 
@@ -135,7 +135,7 @@ def set_db_overlay(provider: Callable[[], dict[str, Any]]) -> None:
 
 
 def style_dir(pack_name: str | None = None) -> Path:
-    name = pack_name or get("rewrite.style_pack", "tech-evangelist")
+    name = pack_name or get("create.style_pack", "tech-evangelist")
     return CONFIG_DIR / "styles" / name
 
 

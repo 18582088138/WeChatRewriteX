@@ -116,7 +116,7 @@ def sanitize_block_text(text: str) -> str:
 
 
 def blocks_from_llm(payload: dict) -> list[Block]:
-    """解析洗稿 Agent 的 JSON 输出为块列表并分配 id。
+    """解析创作 Agent 的 JSON 输出为块列表并分配 id。
 
     接受结构: {"blocks": [{"type": "heading|paragraph|quote|image|divider",
     "text": ..., "level": 2, "asset_hint": "素材id或描述", "citations": [...]}]}

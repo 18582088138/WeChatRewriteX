@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from ..agents.collector import CollectorAgent
 from ..agents.reviewer import ReviewerAgent
-from ..agents.rewriter import RewriterAgent
+from ..agents.creator import CreatorAgent
 from ..core import config, events
 from ..core.models import ArticleStatus
 from ..core.statemachine import transition
@@ -14,10 +14,10 @@ _agents: dict[str, object] = {}
 
 def _get_agents(llm=None):
     if llm is not None:
-        return {"collect": CollectorAgent(llm), "rewrite": RewriterAgent(llm),
+        return {"collect": CollectorAgent(llm), "create": CreatorAgent(llm),
                 "review": ReviewerAgent(llm)}
     if not _agents:
-        _agents.update({"collect": CollectorAgent(), "rewrite": RewriterAgent(),
+        _agents.update({"collect": CollectorAgent(), "create": CreatorAgent(),
                         "review": ReviewerAgent()})
     return _agents
 
@@ -33,8 +33,8 @@ def _set_status(article_id: str, dst: ArticleStatus, error: str | None = None) -
                        status=dst.value, error=error)
 
 
-def run_stage(stage: str, article_id: str, llm=None) -> dict:
-    """执行一个阶段。stage ∈ collect | rewrite | review。返回结果摘要。"""
+def run_stage(stage: str, article_id: str, llm=None, payload: dict | None = None) -> dict:
+    """执行一个阶段。stage ∈ collect | create | review。返回结果摘要。"""
     art = dao.get_article(article_id)
     if not art:
         raise ValueError(f"文章不存在: {article_id}")
@@ -48,10 +48,11 @@ def run_stage(stage: str, article_id: str, llm=None) -> dict:
         report = agents["collect"].run(article_id)
         _set_status(article_id, ArticleStatus.COLLECTED)
         result = {"topic": report.topic, "refs": len(report.refs), "scarce": report.scarce}
-    elif stage == "rewrite":
-        _set_status(article_id, ArticleStatus.WRITING)
-        events.bus.publish(events.REWRITE_STARTED, article_id)
-        doc = agents["rewrite"].run(article_id)
+    elif stage == "create":
+        _set_status(article_id, ArticleStatus.CREATING)
+        events.bus.publish(events.CREATE_STARTED, article_id)
+        selected = (payload or {}).get("selected_material_ids")
+        doc = agents["create"].run(article_id, selected_material_ids=selected)
         _set_status(article_id, ArticleStatus.DRAFTED)
         result = {"version": doc.version, "word_count": doc.meta.word_count}
     elif stage == "review":
@@ -77,7 +78,7 @@ def run_stage(stage: str, article_id: str, llm=None) -> dict:
 
 
 def _maybe_chain(just_finished: str, article_id: str) -> None:
-    nxt = {"collect": "rewrite", "rewrite": "review"}.get(just_finished)
+    nxt = {"collect": "create", "create": "review"}.get(just_finished)
     if nxt:
         dao.enqueue_job(nxt, article_id)
 
@@ -101,8 +102,8 @@ def mark_failed(article_id: str | None, error: str) -> None:
 STAGE_ENTRY = {
     "collect": {ArticleStatus.NEW, ArticleStatus.COLLECTED, ArticleStatus.FAILED,
                 ArticleStatus.COLLECTING},
-    "rewrite": {ArticleStatus.COLLECTED, ArticleStatus.DRAFTED, ArticleStatus.EDITING,
-                ArticleStatus.WRITING, ArticleStatus.FAILED},
+    "create": {ArticleStatus.COLLECTED, ArticleStatus.DRAFTED, ArticleStatus.EDITING,
+                ArticleStatus.CREATING, ArticleStatus.FAILED},
     "review": {ArticleStatus.DRAFTED, ArticleStatus.EDITING, ArticleStatus.REVIEWING,
                ArticleStatus.FINALIZED, ArticleStatus.FAILED},
 }

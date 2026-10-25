@@ -39,7 +39,9 @@ CREATE TABLE IF NOT EXISTS materials (
 );
 CREATE INDEX IF NOT EXISTS idx_materials_article ON materials(article_id);
 CREATE INDEX IF NOT EXISTS idx_materials_scope ON materials(scope, kind);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_materials_sha ON materials(sha256) WHERE sha256 IS NOT NULL;
+-- sha256 不做唯一约束：显式「复制到本文素材库」会合法产生第二行同 sha 记录；
+-- 去重由 ingest 流程先查后插保证。
+CREATE INDEX IF NOT EXISTS idx_materials_sha ON materials(sha256);
 
 CREATE TABLE IF NOT EXISTS material_texts (  -- 文本型素材的正文(供检索/审稿取证)
   material_id   TEXT PRIMARY KEY,

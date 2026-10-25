@@ -1,10 +1,10 @@
-"""Agent 单测：审稿规则维度 / 洗稿分页 / 降级稿；以及 FakeLLM 跑通洗稿主流程。"""
+"""Agent 单测：审稿规则维度 / 创作分页 / 降级稿；以及 FakeLLM 跑通创作主流程。"""
 from __future__ import annotations
 
 import json
 
 from app.agents.reviewer import ReviewerAgent
-from app.agents.rewriter import RewriterAgent
+from app.agents.creator import CreatorAgent
 from app.core.models import Block, BlockType, DraftDoc, DraftMeta
 from app.services.llm.router import LLMResult
 from app.storage import dao, library
@@ -57,17 +57,17 @@ def _with_ids(doc: DraftDoc, article_id: str) -> DraftDoc:
     return doc
 
 
-def test_rewriter_pagination_greedy():
+def test_creator_pagination_greedy():
     doc = DraftDoc(id="", article_id="a", version=1, blocks=[], meta=DraftMeta())
     for i in range(6):
         doc.blocks.append(Block(id=f"b{i}", type=BlockType.PARAGRAPH, text="字" * 200))
-    pages = RewriterAgent._paginate_xhs(doc)
+    pages = CreatorAgent._paginate_xhs(doc)
     assert len(pages) == 6            # 200 字/块，上限 300 → 每页一块
     assert all(len(p.block_ids) == 1 for p in pages)
 
 
 class FakeLLM:
-    """按 stage 返回脚本化输出，验证洗稿主流程无需真实 LLM。"""
+    """按 stage 返回脚本化输出，验证创作主流程无需真实 LLM。"""
 
     def __call__(self, purpose, messages, schema=None, article_id=None, stage="", max_tokens=None):
         if "draft" in stage:
@@ -97,16 +97,16 @@ class FakeLLM:
         return LLMResult(text=text, parsed=parsed, model="fake/fake", channel="fake")
 
 
-def test_rewriter_run_with_fake_llm():
+def test_creator_run_with_fake_llm():
     art, primary_mid = _mk_article_with_source()
-    agent = RewriterAgent(llm=FakeLLM())
+    agent = CreatorAgent(llm=FakeLLM())
     # 把 FakeLLM 输出里的占位引用替换为真实素材 id（模拟 LLM 正确引用）
     orig_complete = agent.complete
 
     def patched(purpose, messages, schema=None, article_id=None, stage="", max_tokens=None):
         r = orig_complete(purpose, messages, schema=schema, article_id=article_id,
                           stage=stage, max_tokens=max_tokens)
-        if stage == "rewriter.draft" and r.parsed:
+        if stage == "creator.draft" and r.parsed:
             for b in r.parsed.blocks:
                 if b.get("citations"):
                     b["citations"] = [primary_mid]

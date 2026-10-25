@@ -51,8 +51,8 @@ def resolve_item(item_id: str, body: ResolveItem) -> dict:
         review = db.query_one("SELECT * FROM reviews WHERE id=?", (item["review_id"],))
         article_id = review["article_id"]
         doc, row = draft_service.get_doc(article_id)
-        from ..agents.rewriter import RewriterAgent
-        agent = RewriterAgent()
+        from ..agents.creator import CreatorAgent
+        agent = CreatorAgent()
         if not agent.llm_available():
             raise HTTPException(503, "未配置 LLM 渠道")
         new = doc.model_copy(deep=True)

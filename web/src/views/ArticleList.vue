@@ -52,7 +52,7 @@ async function create() {
   }
 }
 
-const STAGE_TEXT: Record<string, string> = { collect: '收集', rewrite: '洗稿', review: '审稿', publish: '导出' }
+const STAGE_TEXT: Record<string, string> = { collect: '收集', create: '创作', review: '审稿', publish: '导出' }
 function progressText(a: any): string {
   const p = a.progress
   if (!p) return ''
@@ -70,7 +70,7 @@ onMounted(store.refreshArticles)
       <div class="max-w-[1200px] mx-auto px-6 h-12 flex items-center gap-3">
         <div class="flex items-center gap-2.5">
           <span class="inline-block w-4 h-4" style="background: var(--accent);"></span>
-          <span class="font-semibold text-[15px] tracking-tight">洗稿助手</span>
+          <span class="font-semibold text-[15px] tracking-tight">创作助手</span>
           <span class="text-xs" style="color: var(--faint);">AI 要闻再创作工作台</span>
         </div>
         <div class="flex-1"></div>
@@ -108,7 +108,7 @@ onMounted(store.refreshArticles)
         <div v-if="list.length === 0" class="py-20 text-center">
           <p class="text-[15px]" style="color: var(--muted);">还没有文章。</p>
           <p class="text-sm mt-2" style="color: var(--faint);">
-            点右上角「录入链接」，把一篇 AI 要闻交给收集、洗稿、审稿三个 Agent。
+            点右上角「录入链接」，把一篇 AI 要闻交给收集、创作、审稿三个 Agent。
           </p>
           <NButton type="primary" size="small" class="mt-5" @click="showCreate = true">录入第一篇</NButton>
         </div>

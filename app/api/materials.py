@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ..core import events
+from ..core.ids import new_id as new_id_fn
 from ..storage import dao, db, library
 from ..services.crawl import registry as crawl_registry
 from ..services.crawl.base import CrawlError
@@ -21,7 +22,7 @@ class AddUrl(BaseModel):
 
 def _with_abs(m: dict) -> dict:
     p = library.material_abs_path(m.get("path"))
-    m["url"] = f"/files/library/{m['path']}" if m.get("path") else None
+    m["url"] = f"/files/{m['path']}" if m.get("path") else None
     m["exists"] = bool(p and p.exists()) if m.get("path") else None
     return m
 
@@ -81,18 +82,119 @@ async def upload_common_material(file: UploadFile = File(...)) -> dict:
 def add_url_material(aid: str, body: AddUrl) -> dict:
     if not dao.get_article(aid):
         raise HTTPException(404, "文章不存在")
+    from ..services import ingest as ingest_svc
     try:
-        raw = crawl_registry.fetch(body.url)
+        r = ingest_svc.ingest_url(aid, body.url, body.ref_type)
     except CrawlError as e:
         raise HTTPException(502, f"抓取失败: {e}")
-    mid = library.ingest_text(raw.markdown, title=raw.title or body.url, scope="article",
-                              article_id=aid, source_url=body.url,
-                              ref_type=body.ref_type or "reference",
-                              meta={"site": raw.site, "published_at": raw.published_at})
-    media_download.fetch_images(raw.images[:5], scope="article", article_id=aid,
-                                source_material_id=mid, page_url=body.url)
-    events.bus.publish(events.MATERIAL_INGESTED, aid, material_id=mid)
-    return {"material_id": mid, "title": raw.title}
+    events.bus.publish(events.MATERIAL_INGESTED, aid, material_id=r["material_id"])
+    return r
+
+
+class BatchUrl(BaseModel):
+    urls: list[str]
+    ref_type: str | None = None
+
+
+class CopyToArticle(BaseModel):
+    article_id: str
+
+
+class PatchMaterial(BaseModel):
+    title: str | None = None
+    note: str | None = None
+
+
+@router.post("/articles/{aid}/materials/batch-url")
+def batch_url_material(aid: str, body: BatchUrl) -> dict:
+    """批量链接批量抓取：入队 ingest 任务，逐链接记录成败。"""
+    if not dao.get_article(aid):
+        raise HTTPException(404, "文章不存在")
+    urls = [u.strip() for u in body.urls if u.strip().startswith("http")]
+    if not urls:
+        raise HTTPException(400, "没有有效链接")
+    from ..pipeline import queue
+    job_id = queue.enqueue("ingest", aid, {"urls": urls, "ref_type": body.ref_type})
+    return {"job_id": job_id, "count": len(urls)}
+
+
+@router.post("/materials/{mid}/recrawl")
+def recrawl_material(mid: str) -> dict:
+    """单链接独立重抓：更新正文标题并补充媒体。"""
+    from ..services import ingest as ingest_svc
+    try:
+        r = ingest_svc.recrawl(mid)
+    except CrawlError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(502, f"重抓失败: {e}")
+    events.bus.publish(events.MATERIAL_INGESTED, None, material_id=mid)
+    return r
+
+
+@router.post("/materials/{mid}/copy-to-article")
+def copy_to_article(mid: str, body: CopyToArticle) -> dict:
+    """公共库素材拖拽复制到本文素材库（同文件，新行；不重复占盘）。"""
+    m = dao.get_material(mid)
+    if not m:
+        raise HTTPException(404, "素材不存在")
+    if not dao.get_article(body.article_id):
+        raise HTTPException(404, "文章不存在")
+    if m["scope"] == "article" and m.get("article_id") == body.article_id:
+        return {"material_id": mid, "copied": False, "reason": "已在本文素材库"}
+    new_id = new_id_fn("material")
+    db.execute(
+        """INSERT INTO materials
+        (id,scope,article_id,kind,path,sha256,phash,source_url,source_material_id,
+         watermark,width,height,duration,ref_type,fetch_status,note,title,meta_json)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (new_id, "article", body.article_id, m["kind"], m.get("path"), m.get("sha256"),
+         m.get("phash"), m.get("source_url"), m.get("source_material_id"), m.get("watermark"),
+         m.get("width"), m.get("height"), m.get("duration"), m.get("ref_type"),
+         m.get("fetch_status"), (m.get("note") or "") + "（复制自公共库）", m.get("title"),
+         m.get("meta_json") or "{}"),
+    )
+    if m["kind"] == "text":
+        db.execute("INSERT OR REPLACE INTO material_texts(material_id,content) VALUES(?,?)",
+                   (new_id, dao.get_material_text(mid)))
+    events.bus.publish(events.MATERIAL_INGESTED, body.article_id, material_id=new_id)
+    return {"material_id": new_id, "copied": True}
+
+
+@router.patch("/materials/{mid}")
+def patch_material(mid: str, body: PatchMaterial) -> dict:
+    """改素材标题/备注。"""
+    m = dao.get_material(mid)
+    if not m:
+        raise HTTPException(404, "素材不存在")
+    if body.title is not None:
+        db.execute("UPDATE materials SET title=? WHERE id=?", (body.title.strip(), mid))
+    if body.note is not None:
+        db.execute("UPDATE materials SET note=? WHERE id=?", (body.note, mid))
+    return {"ok": True}
+
+
+@router.post("/materials/{mid}/reveal")
+def reveal_material(mid: str) -> dict:
+    """在系统文件管理器中打开素材所在文件夹（本机桌面场景）。"""
+    m = dao.get_material(mid)
+    if not m:
+        raise HTTPException(404, "素材不存在")
+    p = library.material_abs_path(m.get("path"))
+    if not p or not p.exists():
+        raise HTTPException(404, "文件不存在")
+    import subprocess
+    import sys as _sys
+    try:
+        if _sys.platform == "win32":
+            subprocess.Popen(["explorer", "/select,", str(p)])
+        elif _sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", str(p)])
+        else:
+            subprocess.Popen(["xdg-open", str(p.parent)])
+    except OSError as e:
+        raise HTTPException(500, f"打开文件夹失败: {e}")
+    return {"ok": True, "folder": str(p.parent)}
 
 
 @router.post("/articles/{aid}/materials/scan-inbox")

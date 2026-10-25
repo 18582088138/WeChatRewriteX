@@ -1,7 +1,7 @@
-# WeChatRewritingAssistant · AI 要闻洗稿助手
+# WeChatRewritingAssistant · AI 要闻创作助手
 
 输入一篇 AI 行业要闻（大模型 / 具身智能 / 芯片 / AI 软硬件）的链接，三个 Agent 依次完成
-**资料收集 → 再创作 → 审稿**，人工审阅定稿后一键导出**公众号 / 小红书 / 微博 / X** 的发布包。
+**资料收集 → 创作 → 审稿**，人工审阅定稿后一键导出**公众号 / 小红书 / 微博 / X** 的发布包。
 
 ## 快速开始
 
@@ -13,7 +13,7 @@ copy .env.example .env   # 填入 DEEPSEEK_API_KEY 等
 python -m app            # → http://127.0.0.1:8000
 ```
 
-详见 [docs/user-manual.md](docs/user-manual.md)。
+详见 [docs/user-manual.md](docs/user-manual.md)。独立爬取小工具：`python tools/scraper/server.py`（→ 127.0.0.1:8765）。
 
 ## 架构速览
 

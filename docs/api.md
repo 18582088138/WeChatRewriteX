@@ -25,7 +25,7 @@ Base URL: `http://127.0.0.1:8000`，所有接口前缀 `/api`。运行时可访�
 | POST | `/api/articles` | 录入链接。`{url, user_notes?, style_pack?, target_word_count?, auto_collect=true}`，默认自动入队收集 |
 | GET | `/api/articles?status=&q=` | 列表。`status` ∈ `New/Process/Done`；返回含 `ui_status`、`progress`（运行/排队阶段） |
 | GET | `/api/articles/{aid}` | 详情：状态、素材数、版本列表、最新审稿、发布记录 |
-| POST | `/api/articles/{aid}/advance` | 推进阶段 `{stage: collect\|rewrite\|review}`；当前状态不允许 → 409；收集 → 自动触发后续需手动或 `pipeline.auto` |
+| POST | `/api/articles/{aid}/advance` | 推进阶段 `{stage: collect\|create\|review, selected_material_ids?}`；当前状态不允许 → 409。`selected_material_ids` 为 create 阶段的「勾选参与创作素材集」（素材库「导入 & 创作」按钮）；收集 → 后续阶段需手动或 `pipeline.auto` 连跑 |
 | POST | `/api/articles/{aid}/finalize` | 定稿 `{force=false}`；存在未处理 blocker 时 409，`force=true` 强制定稿并留痕（返回 `forced_blockers`） |
 | POST | `/api/articles/{aid}/reopen` | 定稿/完成后回炉编辑（FINALIZED/DONE → EDITING） |
 | GET | `/api/jobs?article_id=&limit=` | 任务队列状态（type/status/attempts/error/结果） |
@@ -38,11 +38,20 @@ Base URL: `http://127.0.0.1:8000`，所有接口前缀 `/api`。运行时可访�
 | GET | `/api/materials/common?kind=` | 公共素材库 |
 | POST | `/api/articles/{aid}/materials/upload` | multipart 上传（`file` 字段）；sha256 全局去重 |
 | POST | `/api/materials/upload` | 上传到公共库 |
-| POST | `/api/articles/{aid}/materials/url` | `{url, ref_type?}` 爬取网址入库（正文 + 前 5 图） |
+| POST | `/api/articles/{aid}/materials/url` | `{url, ref_type?}` 爬取网址入库（正文+图/视频/音频） |
+| POST | `/api/articles/{aid}/materials/batch-url` | `{urls: [], ref_type?}` 批量链接批量抓取（入队 `ingest` 任务，逐链接记录成败） |
+| POST | `/api/materials/{mid}/recrawl` | 单链接独立重抓：更新正文标题并补充媒体 |
+| POST | `/api/materials/{mid}/copy-to-article` | `{article_id}` 公共库素材复制到本文素材库（同文件新行，不占盘；GUI 拖拽即调用此接口） |
+| PATCH | `/api/materials/{mid}` | `{title?, note?}` 改素材标题/备注 |
+| POST | `/api/materials/{mid}/reveal` | 在系统文件管理器中打开素材所在文件夹 |
 | POST | `/api/articles/{aid}/materials/scan-inbox` · `/api/materials/scan-inbox` | 摄取对应 inbox/ 里手动拷入的文件 |
 | GET | `/api/materials/{mid}/file` | 直接返回素材文件内容（图片/视频预览） |
 | GET | `/api/materials/{mid}/text` | 取文本素材正文 |
 | DELETE | `/api/materials/{mid}` | 删除素材（行 + FTS/向量索引 + 文件） |
+
+**视频素材的两种形态**：`path` 非空 = 已下载的本地文件（可弹窗播放）；`path` 为空但
+`source_url` 非空 = 链接型视频（视频号 wxv_ 内嵌，服务端不取流，前端外跳播放器页；
+其封面已下载为图片素材，可作配图）。
 
 ## 文案 Drafts（块模型）
 
@@ -83,5 +92,5 @@ Base URL: `http://127.0.0.1:8000`，所有接口前缀 `/api`。运行时可访�
 |---|---|---|
 | GET | `/api/settings` | 生效配置 + 渠道配置状态（不返回密钥）+ LLM/搜索/embedding 可用性 |
 | PUT | `/api/settings` | `{key: "a.b.c", value}` 写 DB 覆盖层（优先级最高；`llm.channels` 仅可改 yaml） |
-| GET | `/api/sse` | 事件流。事件：`status.changed` `job.enqueued` `job.failed` `collect.finished` `rewrite.finished` `review.finished` `draft.saved` `draft.finalized` `publish.finished` `material.ingested` |
+| GET | `/api/sse` | 事件流。事件：`status.changed` `job.enqueued` `job.failed` `collect.finished` `create.finished` `review.finished` `draft.saved` `draft.finalized` `publish.finished` `material.ingested` |
 | GET | `/api/health` | 健康检查（免鉴权） |

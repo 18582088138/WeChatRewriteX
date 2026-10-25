@@ -22,10 +22,6 @@ class CreateArticle(BaseModel):
     auto_collect: bool = True
 
 
-class Advance(BaseModel):
-    stage: str          # collect | rewrite | review
-
-
 class Finalize(BaseModel):
     force: bool = False
 
@@ -72,24 +68,32 @@ def article_detail(aid: str) -> dict:
     return out
 
 
+class Advance(BaseModel):
+    stage: str          # collect | create | review
+    selected_material_ids: list[str] | None = None   # create 阶段: 勾选参与创作的素材
+
+
 @router.post("/{aid}/advance")
 def advance(aid: str, body: Advance) -> dict:
     art = dao.get_article(aid)
     if not art:
         raise HTTPException(404, "文章不存在")
-    if body.stage not in ("collect", "rewrite", "review"):
-        raise HTTPException(400, "stage 必须是 collect/rewrite/review")
+    if body.stage not in ("collect", "create", "review"):
+        raise HTTPException(400, "stage 必须是 collect/create/review")
     status = ArticleStatus(art["status"])
     if not orchestrator.can_start(body.stage, status):
         raise HTTPException(409, f"当前状态 {status.value} 不能启动 {body.stage}")
-    if body.stage == "rewrite":
+    if body.stage == "create":
         texts = [m for m in dao.list_materials(article_id=aid, kind="text")
                  if m["fetch_status"] == "ok"]
         if not texts:
             raise HTTPException(409, "素材库为空，先完成收集")
     if body.stage == "review" and not dao.latest_draft(aid):
-        raise HTTPException(409, "没有草稿，先完成洗稿")
-    job_id = queue.enqueue(body.stage, aid)
+        raise HTTPException(409, "没有草稿，先完成创作")
+    payload = {}
+    if body.selected_material_ids:
+        payload["selected_material_ids"] = body.selected_material_ids
+    job_id = queue.enqueue(body.stage, aid, payload)
     return {"job_id": job_id, "stage": body.stage}
 
 

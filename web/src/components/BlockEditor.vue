@@ -220,7 +220,7 @@ async function runInsert() {
       <NSpin :show="loading">
         <div v-if="!doc && !loading" class="py-20 text-center">
           <p class="text-[15px]" style="color: var(--muted);">还没有文案。</p>
-          <p class="text-sm mt-2" style="color: var(--faint);">收集完成后，点顶部「开始洗稿」。</p>
+          <p class="text-sm mt-2" style="color: var(--faint);">收集完成后，点顶部「开始创作」。</p>
         </div>
 
         <template v-if="doc">

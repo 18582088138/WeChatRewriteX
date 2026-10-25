@@ -97,8 +97,8 @@ def render_cards(article_id: str, theme_name: str | None = None,
         raise CardRenderError("没有草稿，无法生成卡片")
     doc = DraftDoc.model_validate_json(draft["doc_json"])
     if not doc.meta.xhs_pages:
-        from ...agents.rewriter import RewriterAgent
-        doc.meta.xhs_pages = RewriterAgent._paginate_xhs(doc)
+        from ...agents.creator import CreatorAgent
+        doc.meta.xhs_pages = CreatorAgent._paginate_xhs(doc)
 
     theme_name = theme_name or config.get("cards.theme", "tech-note")
     theme, template = _load_theme(theme_name)

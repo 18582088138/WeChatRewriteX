@@ -28,6 +28,19 @@ async function onInsertRefs(ids: string[]) {
   editorRef.value?.openInsertRefs(ids)
 }
 
+/** 素材面板「导入 & 创作」：勾选素材集合 → 启动创作流程并跳到创作 tab */
+async function onImportCreate(ids: string[]) {
+  try {
+    await api.post(`/api/articles/${aid}/advance`,
+                   { stage: 'create', selected_material_ids: ids })
+    message.success(`已按勾选的 ${ids.length} 份素材启动创作`)
+    tab.value = 'create'
+    setTimeout(load, 800)
+  } catch (e: any) {
+    message.error(e.message)
+  }
+}
+
 async function load() {
   article.value = await api.get(`/api/articles/${aid}`)
 }
@@ -48,7 +61,7 @@ const actions = computed(() => {
   const list: { key: string; label: string; stage?: string; primary?: boolean }[] = []
   if (s === 'NEW' || s === 'FAILED') list.push({ key: 'collect', label: '开始收集', stage: 'collect', primary: true })
   if (s === 'COLLECTED') {
-    list.push({ key: 'rewrite', label: '开始洗稿', stage: 'rewrite', primary: true })
+    list.push({ key: 'create', label: '开始创作', stage: 'create', primary: true })
     list.push({ key: 'recollect', label: '补充收集', stage: 'collect' })
   }
   if (s === 'DRAFTED') list.push({ key: 'review', label: '开始审稿', stage: 'review', primary: true })
@@ -114,7 +127,8 @@ const stageIndex = computed(() => {
 
       <NTabs v-model:value="tab" type="line" animated size="large">
         <NTabPane name="materials" tab="素材库">
-          <MaterialsPanel :article-id="aid" @insert-refs="onInsertRefs" />
+          <MaterialsPanel :article-id="aid" @insert-refs="onInsertRefs"
+                          @import-create="onImportCreate" />
         </NTabPane>
         <NTabPane name="create" tab="创作">
           <BlockEditor ref="editorRef" :article-id="aid" @goto-review="tab = 'review'" />

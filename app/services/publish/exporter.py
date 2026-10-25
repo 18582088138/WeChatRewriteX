@@ -131,7 +131,7 @@ def blocks_to_mp_html(doc: DraftDoc) -> str:
 def export_variants(article_id: str, platforms: list[str]) -> dict:
     draft = dao.latest_draft(article_id)
     if not draft:
-        raise ValueError("没有草稿，先完成洗稿")
+        raise ValueError("没有草稿，先完成创作")
     doc = DraftDoc.model_validate_json(draft["doc_json"])
     # 发布包落在文章素材文件夹内：data/library/articles/<标题_短id>/exports/<平台>/
     root = library.exports_dir(article_id)

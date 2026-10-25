@@ -1,4 +1,4 @@
-"""洗稿 Agent：证据包 grounding → 成稿 → 词数控制 → 元数据 → 分页建议。
+"""创作 Agent：证据包 grounding → 成稿 → 词数控制 → 元数据 → 分页建议。
 
 编辑期能力（段落重生成 / 资料融合插入）也在这里，供 API 层直接调用。
 """
@@ -29,20 +29,20 @@ class BlocksPayload(BaseModel):
 _REF_LABEL = {"primary": "原文", "reference": "参考", "foundational": "基础资料"}
 
 
-class RewriterAgent(AgentBase):
-    name = "rewriter"
+class CreatorAgent(AgentBase):
+    name = "creator"
 
     # ---------- 主流程 ----------
 
-    def run(self, article_id: str) -> DraftDoc:
+    def run(self, article_id: str, selected_material_ids: list[str] | None = None) -> DraftDoc:
         article = dao.get_article(article_id)
         if not article:
             raise ValueError(f"文章不存在: {article_id}")
         style = self.load_style_pack(article.get("style_pack"))
-        evidence = self._evidence_pack(article_id)
-        images = self._available_images(article_id)
+        evidence = self._evidence_pack(article_id, selected_material_ids)
+        images = self._available_images(article_id, selected_material_ids)
         word_target = int(article.get("target_word_count")
-                          or config.get("rewrite.target_word_count", 1500))
+                          or config.get("create.target_word_count", 1500))
 
         if not self.llm_available():
             doc = self._degraded_doc(article_id, evidence)
@@ -50,20 +50,25 @@ class RewriterAgent(AgentBase):
             prompt = self.prompt("draft", style=style, word_target=word_target,
                                  evidence=evidence, images=images,
                                  user_notes=article.get("user_notes") or "")
-            result = self.complete("rewrite", [{"role": "user", "content": prompt}],
+            result = self.complete("create", [{"role": "user", "content": prompt}],
                                    schema=DraftPayload, article_id=article_id,
-                                   stage="rewriter.draft", max_tokens=8000)
+                                   stage="creator.draft", max_tokens=8000)
             doc = self._payload_to_doc(article_id, result.parsed)
             doc = self._enforce_word_count(doc, style, word_target, article_id)
             self._ensure_images(doc, images)
             doc.meta.xhs_pages = self._paginate_xhs(doc)
+
+        # 创作定题 → 项目文件夹从「输入标题-日期」改名为「拟定标题-日期」（先于落盘）
+        new_title = (doc.meta.title_candidates or [""])[0]
+        if new_title:
+            library.rename_to_created_title(article_id, new_title)
 
         version = dao.next_version(article_id)
         doc.version = version
         doc.id = f"{article_id}-v{version}"
         dao.save_draft(doc, origin="agent")
         library.save_draft_files(doc, bk.to_markdown(doc))
-        events.bus.publish(events.REWRITE_FINISHED, article_id, version=version,
+        events.bus.publish(events.CREATE_FINISHED, article_id, version=version,
                            word_count=bk.doc_word_count(doc))
         return doc
 
@@ -86,9 +91,9 @@ class RewriterAgent(AgentBase):
         class RegenOut(BaseModel):
             blocks: list[dict] = Field(default_factory=list)
 
-        result = self.complete("rewrite", [{"role": "user", "content": prompt}],
+        result = self.complete("create", [{"role": "user", "content": prompt}],
                                schema=RegenOut, article_id=article_id,
-                               stage="rewriter.regenerate")
+                               stage="creator.regenerate")
         by_index = {int(x.get("index", -1)): str(x.get("text", ""))
                     for x in result.parsed.blocks}
         for i, b in enumerate(targets):
@@ -110,9 +115,9 @@ class RewriterAgent(AgentBase):
         after = "\n".join(b.text for b in doc.blocks[idx + 1:idx + 3])
         prompt = self.prompt("insert_refs", style=style, refs=refs,
                              instruction=instruction, before=before, after=after)
-        result = self.complete("rewrite", [{"role": "user", "content": prompt}],
+        result = self.complete("create", [{"role": "user", "content": prompt}],
                                schema=BlocksPayload, article_id=article_id,
-                               stage="rewriter.insert_refs")
+                               stage="creator.insert_refs")
         new_blocks = bk.blocks_from_llm(result.parsed.model_dump())
         anchor = after_block_id
         for nb in new_blocks:
@@ -122,8 +127,12 @@ class RewriterAgent(AgentBase):
 
     # ---------- 内部 ----------
 
-    def _evidence_pack(self, article_id: str) -> list[dict]:
+    def _evidence_pack(self, article_id: str,
+                       selected_ids: list[str] | None = None) -> list[dict]:
         mats = dao.list_materials(article_id=article_id)
+        if selected_ids:
+            keep = set(selected_ids)
+            mats = [m for m in mats if m["id"] in keep]
         pack = []
         for m in mats:
             if m["kind"] != "text" or m["fetch_status"] != "ok":
@@ -143,9 +152,14 @@ class RewriterAgent(AgentBase):
         return pack
 
     @staticmethod
-    def _available_images(article_id: str) -> list[dict]:
-        """可用图片：含水印图（拍板 #7：暂可用，排在最后），只排除下载失败/过小。"""
+    def _available_images(article_id: str,
+                          selected_ids: list[str] | None = None) -> list[dict]:
+        """可用图片：含水印图（拍板 #7：暂可用，排在最后），只排除下载失败/过小。
+        勾选集合给定时只从勾选图片中取。"""
         mats = dao.list_materials(article_id=article_id, kind="image")
+        if selected_ids:
+            keep = set(selected_ids)
+            mats = [m for m in mats if m["id"] in keep]
         out = []
         for m in mats:
             if m.get("fetch_status") != "ok":
@@ -200,7 +214,7 @@ class RewriterAgent(AgentBase):
                                  current=wc, blocks_json=blocks_json[:12000])
             result = self.complete("compress", [{"role": "user", "content": prompt}],
                                    schema=BlocksPayload, article_id=article_id,
-                                   stage="rewriter.compress", max_tokens=8000)
+                                   stage="creator.compress", max_tokens=8000)
             new_blocks = bk.blocks_from_llm(result.parsed.model_dump())
             # 保留原图片块（压缩 prompt 可能丢图）
             images = [b for b in doc.blocks if b.type in (BlockType.IMAGE, BlockType.VIDEO)]

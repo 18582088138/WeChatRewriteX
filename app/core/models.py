@@ -11,7 +11,7 @@ class ArticleStatus(str, Enum):
     NEW = "NEW"
     COLLECTING = "COLLECTING"
     COLLECTED = "COLLECTED"
-    WRITING = "WRITING"
+    CREATING = "CREATING"
     DRAFTED = "DRAFTED"
     REVIEWING = "REVIEWING"
     REVIEWED = "REVIEWED"
@@ -26,7 +26,7 @@ UI_STATUS = {
     ArticleStatus.NEW: "New",
     ArticleStatus.COLLECTING: "Process",
     ArticleStatus.COLLECTED: "Process",
-    ArticleStatus.WRITING: "Process",
+    ArticleStatus.CREATING: "Process",
     ArticleStatus.DRAFTED: "Process",
     ArticleStatus.REVIEWING: "Process",
     ArticleStatus.REVIEWED: "Process",

@@ -2,6 +2,7 @@
 .env
 
 # runtime data
+resource/
 data/
 
 # python

@@ -23,7 +23,7 @@ flowchart TB
 
     subgraph AGENTS[Agent 层]
         collector[资料收集 Agent]
-        rewriter[洗稿 Agent]
+        rewriter[创作 Agent]
         reviewer[审稿 Agent]
     end
 
@@ -84,7 +84,7 @@ app/
 ├── agents/
 │   ├── base.py              # AgentBase: config/prompts 模板渲染 / 风格包加载 / LLM 调用封装
 │   ├── collector.py         # 资料收集: 抓取→主题提炼→关联搜索(网页+arXiv)→媒体补充→notes.md
-│   ├── rewriter.py          # 洗稿: 证据包 grounding→成稿→词数控制→必配图兜底→分页; 段落重生成/融合插入
+│   ├── creator.py           # 创作: 证据包 grounding→成稿→词数控制→必配图兜底→分页; 段落重生成/融合插入
 │   └── reviewer.py          # 审稿: layout/banlist/originality 规则 + LLM 四维, 输出 checklist
 ├── services/
 │   ├── llm/router.py        # OpenAI 兼容薄路由: 渠道优先级+fallback+schema 校验重试+成本日志
@@ -121,7 +121,7 @@ web/                         # 前端源码 (Vue3 + Vite + TS + Naive UI + Tailw
 └── src/api.ts               # fetch 封装(令牌) + SSE 客户端
 config/                      # 一切可手动调整的提示词与参数 (拍板 2026-10-24)
 ├── settings.yaml            # 非密钥参数 (窗口/阈值/模型档位/并发/hooks)
-├── prompts/                 # Jinja2 模板: collector/topic_extract, rewriter/{draft,regenerate,
+├── prompts/                 # Jinja2 模板: collector/topic_extract, creator/{draft,regenerate,
 │                            #   insert_refs,compress}, reviewer/review
 └── styles/tech-evangelist/  # 风格包: style.yaml / system.md / rules.md / banlist.txt / fewshots/
 data/                        # 唯一数据根 (gitignore): app.db + library/ + drafts/
@@ -219,7 +219,7 @@ config/styles/tech-evangelist/   # 默认: 轻松诙谐+严谨科学的技术传
   媒体下载内部用 `ThreadPoolExecutor` 有界并发（默认 4），LLM 阶段不复用连接。
 - 任务重试上限 2 次；进程重启后 `running` 任务自动重置为 `pending` 续跑；
   准入校验含「自身进行态」使重试幂等；定稿/发布态下的复审为软审（只出报告不动状态）。
-- 长任务（收集、洗稿、审稿、卡片渲染、导出）通过 `/api/sse` 向前端推送进度事件，前端 store 驱动刷新。
+- 长任务（收集、创作、审稿、卡片渲染、导出）通过 `/api/sse` 向前端推送进度事件，前端 store 驱动刷新。
 
 ## 安全与边界
 

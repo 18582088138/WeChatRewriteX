@@ -1,4 +1,4 @@
-"""API 冒烟 + 无 LLM 降级全流程：fixture 文章 → 收集 → 洗稿(降级稿) → 审稿 → 编辑 → 定稿。"""
+"""API 冒烟 + 无 LLM 降级全流程：fixture 文章 → 收集 → 创作(降级稿) → 审稿 → 编辑 → 定稿。"""
 from __future__ import annotations
 
 import time
@@ -29,8 +29,8 @@ def test_full_flow_degraded(app_client):
     mats = app_client.get(f"/api/articles/{aid}/materials?scope=article").json()["materials"]
     assert any(m["ref_type"] == "primary" for m in mats)
 
-    # 3. 手动推进洗稿（无 LLM → 降级稿，版本 v1 落盘）
-    r = app_client.post(f"/api/articles/{aid}/advance", json={"stage": "rewrite"})
+    # 3. 手动推进创作（无 LLM → 降级稿，版本 v1 落盘）
+    r = app_client.post(f"/api/articles/{aid}/advance", json={"stage": "create"})
     assert r.status_code == 200
     art = _wait_status(app_client, aid, {"DRAFTED"})
     draft = app_client.get(f"/api/articles/{aid}/draft").json()["draft"]

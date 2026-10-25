@@ -71,8 +71,8 @@ def regenerate(draft_id: str, body: Regenerate) -> dict:
     if not body.block_ids:
         raise HTTPException(400, "block_ids 不能为空")
     old = DraftDoc.model_validate_json(row["doc_json"])
-    from ..agents.rewriter import RewriterAgent
-    agent = RewriterAgent()
+    from ..agents.creator import CreatorAgent
+    agent = CreatorAgent()
     if not agent.llm_available():
         raise HTTPException(503, "未配置 LLM 渠道，无法 AI 重生成")
     new = old.model_copy(deep=True)
@@ -92,8 +92,8 @@ def insert_refs(draft_id: str, body: InsertRefs) -> dict:
         raise HTTPException(404, "草稿不存在")
     if not body.material_ids:
         raise HTTPException(400, "material_ids 不能为空")
-    from ..agents.rewriter import RewriterAgent
-    agent = RewriterAgent()
+    from ..agents.creator import CreatorAgent
+    agent = CreatorAgent()
     if not agent.llm_available():
         raise HTTPException(503, "未配置 LLM 渠道，无法融合插入")
     new = DraftDoc.model_validate_json(row["doc_json"]).model_copy(deep=True)

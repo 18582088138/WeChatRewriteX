@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>media-scraper · 素材抓取</title>
+<style>
+  :root { --ink:#141414; --muted:#5F6368; --faint:#6B6B6B; --border:#E8E8E8;
+          --paper:#F9FAFB; --accent:#C63B24; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",system-ui,sans-serif;
+         background:var(--paper); color:var(--ink); font-size:14px; }
+  .wrap { max-width:960px; margin:0 auto; padding:32px 24px 64px; }
+  header { display:flex; align-items:center; gap:10px; margin-bottom:28px; }
+  .mark { width:16px; height:16px; background:var(--accent); }
+  h1 { font-size:20px; font-weight:700; }
+  .sub { color:var(--faint); font-size:12px; }
+  .bar { display:flex; gap:10px; margin-bottom:18px; }
+  input[type=text] { flex:1; height:42px; padding:0 14px; font-size:14px; border:1px solid var(--border);
+                     border-radius:6px; outline:none; background:#fff; }
+  input[type=text]:focus { border-color:var(--ink); }
+  button { height:42px; padding:0 20px; border:none; border-radius:6px; background:#1D1F20;
+           color:#fff; font-size:14px; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:default; }
+  .ghost { background:#fff; color:var(--ink); border:1px solid var(--border); }
+  .panel { background:#fff; border:1px solid var(--border); border-radius:8px; padding:18px; margin-top:14px; }
+  .status { color:var(--muted); font-size:13px; line-height:1.8; white-space:pre-wrap; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; margin-top:10px; }
+  .grid img { width:100%; aspect-ratio:1; object-fit:cover; border-radius:6px; border:1px solid var(--border); }
+  .file-row { display:flex; align-items:center; gap:8px; padding:8px 0; border-top:1px solid #F1F1F1; font-size:13px; }
+  .file-row a { color:var(--accent); text-decoration:none; }
+  h2 { font-size:15px; margin-bottom:8px; }
+  .tag { font-size:11px; background:#EDEFF2; color:#4B5563; border-radius:4px; padding:2px 6px; }
+  video { max-width:100%; border-radius:6px; background:#000; }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="mark"></span>
+    <div>
+      <h1>media-scraper</h1>
+      <div class="sub">单篇文章素材抓取：文本 / 图片 / 视频 / 音频，纯规则过滤，独立运行</div>
+    </div>
+  </header>
+
+  <div class="bar">
+    <input id="url" type="text" placeholder="粘贴文章链接，如 https://mp.weixin.qq.com/s/…" />
+    <button id="go" onclick="run()">抓取</button>
+  </div>
+
+  <div id="statusPanel" class="panel hidden"><div id="status" class="status"></div></div>
+
+  <div id="result" class="hidden">
+    <div class="panel">
+      <h2 id="title"></h2>
+      <div class="sub" id="meta"></div>
+      <div style="margin-top:10px; display:flex; gap:8px;">
+        <button class="ghost" onclick="openFolder()">打开输出文件夹</button>
+        <button class="ghost" onclick="location.reload()">再抓一篇</button>
+      </div>
+    </div>
+    <div class="panel"><h2>图片 <span class="tag" id="imgCount"></span></h2><div id="imgs" class="grid"></div></div>
+    <div class="panel"><h2>视频 / 音频</h2><div id="avs"></div></div>
+    <div class="panel"><h2>文本</h2><div class="file-row"><a id="mdLink" target="_blank">content.md（点击预览/下载）</a></div>
+      <div id="textPreview" class="status" style="margin-top:8px;"></div></div>
+  </div>
+</div>
+
+<script>
+let summary = null;
+const $ = (id) => document.getElementById(id);
+
+async function run() {
+  const url = $('url').value.trim();
+  if (!url.startsWith('http')) { alert('请输入有效链接'); return; }
+  $('go').disabled = true;
+  $('result').classList.add('hidden');
+  $('statusPanel').classList.remove('hidden');
+  $('status').textContent = '抓取中（页面/图片/视频按序下载，长视频可能需一两分钟）…';
+  try {
+    const resp = await fetch('/scrape', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || resp.statusText);
+    summary = data;
+    $('status').textContent = (data.logs || []).join('\n');
+    render(data);
+  } catch (e) {
+    $('status').textContent = '失败：' + e.message;
+  } finally { $('go').disabled = false; }
+}
+
+function render(d) {
+  $('result').classList.remove('hidden');
+  $('title').textContent = d.title || '（无标题）';
+  $('meta').textContent = `正文 ${d.text_chars} 字 · 图 ${d.images} · 视频 ${d.videos} · 音频 ${d.audios} · 过滤 ${d.filtered} 项低质资源`;
+  $('imgCount').textContent = d.images + ' 张';
+  const dirName = d.out_dir.split(/[\\/]/).pop();
+  const imgs = $('imgs'); imgs.innerHTML = '';
+  d.files.filter(f => f.startsWith('图片/')).forEach(f => {
+    const img = document.createElement('img');
+    img.src = '/out/' + dirName + '/' + f; img.loading = 'lazy';
+    img.onclick = () => window.open(img.src, '_blank');
+    imgs.appendChild(img);
+  });
+  const avs = $('avs'); avs.innerHTML = '';
+  const avFiles = d.files.filter(f => f.startsWith('视频/') || f.startsWith('音频/'));
+  if (!avFiles.length) avs.innerHTML = '<div class="sub">无视频/音频素材</div>';
+  avFiles.forEach(f => {
+    const row = document.createElement('div'); row.className = 'file-row';
+    const a = document.createElement('a');
+    a.href = '/out/' + dirName + '/' + f; a.target = '_blank'; a.textContent = f;
+    row.appendChild(a);
+    if (f.startsWith('视频/')) {
+      const v = document.createElement('video');
+      v.src = a.href; v.controls = true; v.style.maxWidth = '360px';
+      row.appendChild(v);
+    }
+    avs.appendChild(row);
+  });
+  $('mdLink').href = '/out/' + dirName + '/content.md';
+  fetch('/out/' + dirName + '/content.md').then(r => r.text()).then(t => {
+    $('textPreview').textContent = t.slice(0, 600) + (t.length > 600 ? ' …' : '');
+  });
+}
+
+function openFolder() {
+  if (!summary) return;
+  fetch('/reveal', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: summary.out_dir }) });
+}
+</script>
+</body>
+</html>

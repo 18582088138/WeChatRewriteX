@@ -14,7 +14,7 @@ const editable = ref({
   'collect.search_window_days': 3,
   'collect.ref_count.min': 3,
   'collect.ref_count.max': 5,
-  'rewrite.target_word_count': 1500,
+  'create.target_word_count': 1500,
   'pipeline.auto': false,
   'review.block_on_blocker': true,
   'review.originality.simhash_warn': 0.35,
@@ -102,17 +102,17 @@ function saveToken() {
         </div>
       </section>
 
-      <!-- 洗稿与审稿 -->
+      <!-- 创作与审稿 -->
       <section class="panel p-5 space-y-4">
-        <div class="font-semibold">洗稿与审稿</div>
+        <div class="font-semibold">创作与审稿</div>
         <div class="flex items-center gap-3 text-sm">
           <span class="w-44 text-ink-500">目标词数</span>
-          <NInputNumber v-model:value="editable['rewrite.target_word_count']" :min="300" :max="8000"
+          <NInputNumber v-model:value="editable['create.target_word_count']" :min="300" :max="8000"
                         :step="100" size="small" class="!w-28" />
-          <NButton size="tiny" @click="save('rewrite.target_word_count', editable['rewrite.target_word_count'])">保存</NButton>
+          <NButton size="tiny" @click="save('create.target_word_count', editable['create.target_word_count'])">保存</NButton>
         </div>
         <div class="flex items-center gap-3 text-sm">
-          <span class="w-44 text-ink-500">自动连跑（收集→洗稿→审稿）</span>
+          <span class="w-44 text-ink-500">自动连跑（收集→创作→审稿）</span>
           <NSwitch :value="editable['pipeline.auto']"
                    @update:value="(v: boolean) => { editable['pipeline.auto'] = v; save('pipeline.auto', v) }" />
         </div>

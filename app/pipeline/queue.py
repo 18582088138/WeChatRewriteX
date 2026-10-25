@@ -19,10 +19,27 @@ MAX_ATTEMPTS = 2
 def register_defaults(llm=None) -> None:
     _handlers.update({
         "collect": lambda aid, payload: orchestrator.run_stage("collect", aid, llm),
-        "rewrite": lambda aid, payload: orchestrator.run_stage("rewrite", aid, llm),
+        "create": lambda aid, payload: orchestrator.run_stage("create", aid, llm, payload),
         "review": lambda aid, payload: orchestrator.run_stage("review", aid, llm),
         "publish": _run_publish,
+        "ingest": _run_ingest,
     })
+
+
+def _run_ingest(article_id: str | None, payload: dict) -> dict:
+    """批量链接抓取（单链接失败不阻断，逐个记录结果）。"""
+    from ..services import ingest as ingest_svc
+    results = []
+    for url in payload.get("urls", []):
+        try:
+            r = ingest_svc.ingest_url(article_id, url, payload.get("ref_type"))
+            results.append({"url": url, "ok": True, "title": r.get("title"),
+                            "material_id": r["material_id"]})
+        except Exception as e:
+            results.append({"url": url, "ok": False, "error": str(e)[:200]})
+    if article_id and results:
+        events.bus.publish(events.MATERIAL_INGESTED, article_id, count=len(results))
+    return {"results": results}
 
 
 def _run_publish(article_id: str, payload: dict) -> dict:

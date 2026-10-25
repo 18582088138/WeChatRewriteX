@@ -27,7 +27,7 @@ def test_illegal_transition_raises():
 
 def test_ui_status_mapping():
     assert ui_status(ArticleStatus.NEW) == "New"
-    assert ui_status(ArticleStatus.WRITING) == "Process"
+    assert ui_status(ArticleStatus.CREATING) == "Process"
     assert ui_status(ArticleStatus.FINALIZED) == "Done"
 
 

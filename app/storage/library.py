@@ -1,23 +1,28 @@
-"""素材库文件系统（v2：文章标题命名 + 中文分项目录）。
+"""素材库文件系统 v3（resource 根目录 + 项目文件夹 + reference 同级 + 类型子目录）。
 
-结构（data/ 为唯一数据根，与代码分离且整体 gitignore）：
+布局（resource/ 为唯一数据根，gitignore，运行时自动创建）：
 
-data/library/
-├── common/                      # 公共素材库
-│   ├── 图片/ 视频/ 文档/ inbox/
-└── articles/<文章标题_短id>/     # 每篇文章一个可读文件夹
-    ├── 原文/                    # page.html content.md meta.json
-    ├── 参考/<material_id>/      # 每篇参考一个子目录
-    ├── 图片/  视频/  文档/
-    ├── inbox/                   # 手动拷入落点（扫描即入库）
-    ├── exports/<platform>/      # 发布包（含 cards/）
-    └── notes.md                 # 收集报告
+resource/
+├── app.db  style_reference/
+├── common/                                # 公共素材库
+│   ├── reference/<文章标题>/               # 公共文章素材（与项目内同级结构）
+│   ├── 图片/  视频/  音频/  其他/
+│   └── inbox/                             # 手动拷入落点，扫描即入库
+└── <项目名 = 输入文章标题-YYYYMMDD-HHmm>/    # 文章项目文件夹（创作定题后改名的标题）
+    ├── reference/
+    │   ├── <输入文章标题>/  page.html content.md meta.json
+    │   └── <参考文章标题>/  （与输入文章同级，不做来源隔离）
+    ├── 图片/  视频/  音频/  其他/
+    ├── inbox/
+    ├── exports/<platform>/                # 发布包（xhs_cards/ 也在此）
+    ├── drafts/                            # 文案版本 vNNN.md/.json + runs/
+    └── notes.md                           # 收集报告
 
-素材行 materials.path 记录相对 library/ 的路径；文件夹名在首次建目录时定稿
-（标题已知用标题，否则用 id 兜底），并持久化到 articles.lib_dir，保证稳定。
+素材行 materials.path 记录相对 resource/ 的路径；文件夹名持久化在 articles.lib_dir。
 """
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
 import re
@@ -27,50 +32,88 @@ from pathlib import Path
 from ..core.config import data_dir
 from . import dao, db
 
-_KIND_DIR = {"image": "图片", "video": "视频", "doc": "文档", "text": "文档", "link": "文档"}
+_KIND_DIR = {"image": "图片", "video": "视频", "audio": "音频",
+             "doc": "其他", "text": "reference", "link": "其他"}
 _IMG_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 _VID_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".avi"}
+_AUD_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}
+
+_DT_SUFFIX = re.compile(r"-(\d{8}-\d{4})$")
 
 
 def library_root() -> Path:
-    return data_dir() / "library"
+    """resource/ 根（library_root 之名保留以免大面积改动调用点）。"""
+    return data_dir()
 
 
 def common_dir() -> Path:
     return library_root() / "common"
 
 
-def _safe_name(title: str, fallback: str, limit: int = 24) -> str:
+def _safe_name(title: str, fallback: str, limit: int = 40) -> str:
     t = re.sub(r'[\\/:*?"<>|\r\n\t]+', "", (title or "")).strip().strip(".")
     t = re.sub(r"\s+", " ", t)[:limit].strip()
     return t or fallback
 
 
+def _dt_of(article_row: dict | None = None) -> str:
+    if article_row and article_row.get("created_at"):
+        try:
+            dt = datetime.datetime.strptime(article_row["created_at"][:16], "%Y-%m-%d %H:%M")
+            return dt.strftime("%Y%m%d-%H%M")
+        except ValueError:
+            pass
+    return datetime.datetime.now().strftime("%Y%m%d-%H%M")
+
+
 def article_dir(article_id: str) -> Path:
-    """文章素材目录：读 articles.lib_dir；未命名按标题定名写回；标题后到时自动迁移。"""
-    row = db.query_one("SELECT id, title, lib_dir FROM articles WHERE id=?", (article_id,))
+    """项目文件夹：<输入文章标题-日期时间>；标题后到时迁移；创作定题后由 rename_to_created_title 改名。"""
+    row = db.query_one("SELECT id, title, lib_dir, created_at FROM articles WHERE id=?",
+                       (article_id,))
     if not row:
-        return library_root() / "articles" / article_id
+        return library_root() / article_id
     title = (row.get("title") or "").strip()
     lib_dir = row.get("lib_dir")
-    fallback_named = not lib_dir or lib_dir.startswith(("art_", "article_"))
-
-    if lib_dir and (not fallback_named or not title):
-        return library_root() / "articles" / lib_dir
-    # 标题已知且当前是兜底名 → 迁移到标题命名
-    name = f"{_safe_name(title, article_id)}_{article_id[-6:]}" if title else article_id
+    # 已定名（符合 标题-日期时间 规范）就直接用
+    if lib_dir and _DT_SUFFIX.search(lib_dir):
+        return library_root() / lib_dir
+    # 旧命名（标题_短id 或 art_ 兜底）或无命名 → 迁移/定名
+    name = f"{_safe_name(title, article_id)}-{_dt_of(row)}"
     if lib_dir and lib_dir != name:
-        old, new = library_root() / "articles" / lib_dir, library_root() / "articles" / name
-        if old.exists() and not new.exists():
-            old.rename(new)
-            for sep in ("/", "\\"):
-                db.execute("UPDATE materials SET path=REPLACE(path, ?, ?) WHERE article_id=?",
-                           (f"articles{sep}{lib_dir}{sep}", f"articles{sep}{name}{sep}",
-                            article_id))
-        elif new.exists():
-            name = lib_dir or name   # 目标已存在则不折腾，保持原名
+        _migrate_dir_name(article_id, lib_dir, name)
     db.execute("UPDATE articles SET lib_dir=? WHERE id=?", (name, article_id))
-    return library_root() / "articles" / name
+    return library_root() / name
+
+
+def _migrate_dir_name(article_id: str, old: str, new: str) -> None:
+    """物理改名 + 素材 path 前缀重写。目标已存在则保持原名。"""
+    old_p, new_p = library_root() / old, library_root() / new
+    if not old_p.exists():
+        return
+    if new_p.exists():
+        return
+    old_p.rename(new_p)
+    for sep in ("/", "\\"):
+        db.execute("UPDATE materials SET path=REPLACE(path, ?, ?) WHERE article_id=?",
+                   (f"{old}{sep}", f"{new}{sep}", article_id))
+
+
+def rename_to_created_title(article_id: str, new_title: str) -> Path:
+    """创作 Agent 定题后：把文件夹从「输入标题-日期」改名为「拟定标题-日期」（日期保留）。"""
+    row = db.query_one("SELECT lib_dir, created_at FROM articles WHERE id=?", (article_id,))
+    if not row or not row.get("lib_dir"):
+        return article_dir(article_id)
+    old = row["lib_dir"]
+    m = _DT_SUFFIX.search(old)
+    dt = m.group(1) if m else _dt_of(row)
+    slug = _safe_name(new_title, "")
+    if not slug:
+        return library_root() / old
+    name = f"{slug}-{dt}"
+    if name != old:
+        _migrate_dir_name(article_id, old, name)
+        db.execute("UPDATE articles SET lib_dir=? WHERE id=?", (name, article_id))
+    return library_root() / name
 
 
 def exports_dir(article_id: str) -> Path:
@@ -80,7 +123,7 @@ def exports_dir(article_id: str) -> Path:
 def ensure_dirs(article_id: str | None = None) -> None:
     bases = [common_dir()] + ([article_dir(article_id)] if article_id else [])
     for base in bases:
-        for sub in ("图片", "视频", "文档", "inbox"):
+        for sub in ("图片", "视频", "音频", "其他", "reference", "inbox"):
             (base / sub).mkdir(parents=True, exist_ok=True)
 
 
@@ -113,6 +156,8 @@ def guess_kind(filename: str) -> str:
         return "image"
     if ext in _VID_EXTS:
         return "video"
+    if ext in _AUD_EXTS:
+        return "audio"
     if ext in {".txt", ".md", ".markdown"}:
         return "text"
     return "doc"
@@ -120,7 +165,17 @@ def guess_kind(filename: str) -> str:
 
 def _dest_dir(scope: str, article_id: str | None, kind: str) -> Path:
     base = common_dir() if scope == "common" else article_dir(article_id or "")
-    return base / _KIND_DIR.get(kind, "文档")
+    return base / _KIND_DIR.get(kind, "其他")
+
+
+def _unique_dir(parent: Path, name: str) -> Path:
+    """reference/<标题> 重名时追加 -2/-3。"""
+    cand = parent / name
+    n = 2
+    while cand.exists():
+        cand = parent / f"{name}-{n}"
+        n += 1
+    return cand
 
 
 def ingest_bytes(data: bytes, filename: str, scope: str, article_id: str | None = None,
@@ -173,11 +228,29 @@ def ingest_bytes(data: bytes, filename: str, scope: str, article_id: str | None 
 
 def ingest_text(content: str, title: str, scope: str, article_id: str | None = None,
                 source_url: str | None = None, ref_type: str | None = None,
-                meta: dict | None = None) -> str:
-    """存文本素材（正文进 FTS 索引，供检索与审稿取证）。"""
-    mid, _ = ingest_bytes(content.encode("utf-8"), f"{title[:40] or 'text'}.md", scope,
-                          article_id, source_url=source_url, kind="text", ref_type=ref_type,
-                          title=title)
+                meta: dict | None = None, folder: Path | None = None) -> str:
+    """存文章素材：reference/<标题>/content.md（正文进 FTS 索引）。
+
+    folder 给定时直接写入该目录（与 page.html/meta.json 快照同夹），否则按标题自建。"""
+    digest = _sha256(content.encode("utf-8"))
+    dup = dao.find_material_by_sha(digest)
+    if dup:
+        return dup["id"]
+    if folder is None:
+        ensure_dirs(article_id if scope == "article" else None)
+        base = common_dir() if scope == "common" else article_dir(article_id or "")
+        folder = _unique_dir(base / "reference", _safe_name(title, digest[:8]))
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "content.md").write_text(content, encoding="utf-8")
+    if meta and not (folder / "meta.json").exists():
+        (folder / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2),
+                                          encoding="utf-8")
+    rel = str(folder.relative_to(library_root()))
+    mid = dao.insert_material(
+        scope=scope, article_id=article_id, kind="text", path=rel + "/content.md",
+        sha256=digest, source_url=source_url, ref_type=ref_type,
+        title=title or digest[:8],
+    )
     dao.set_material_text(mid, content)
     if meta:
         db.execute("UPDATE materials SET meta_json=? WHERE id=?",
@@ -192,22 +265,26 @@ def material_abs_path(rel_path: str | None) -> Path | None:
 
 
 def save_article_snapshot(article_id: str, html: str, markdown: str, meta: dict) -> Path:
-    d = article_dir(article_id) / "原文"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "page.html").write_text(html, encoding="utf-8")
-    (d / "content.md").write_text(markdown, encoding="utf-8")
-    (d / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-    return d
+    base = article_dir(article_id) / "reference"
+    folder = _unique_dir(base, _safe_name(meta.get("title") or "", "原文"))
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "page.html").write_text(html, encoding="utf-8")
+    (folder / "content.md").write_text(markdown, encoding="utf-8")
+    (folder / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2),
+                                      encoding="utf-8")
+    return folder
 
 
 def save_ref_snapshot(article_id: str, material_id: str, html: str, markdown: str,
                       meta: dict) -> Path:
-    d = article_dir(article_id) / "参考" / material_id
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "page.html").write_text(html, encoding="utf-8")
-    (d / "content.md").write_text(markdown, encoding="utf-8")
-    (d / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-    return d
+    base = article_dir(article_id) / "reference"
+    folder = _unique_dir(base, _safe_name(meta.get("title") or "", material_id))
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "page.html").write_text(html, encoding="utf-8")
+    (folder / "content.md").write_text(markdown, encoding="utf-8")
+    (folder / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2),
+                                      encoding="utf-8")
+    return folder
 
 
 def write_notes(article_id: str, notes_md: str) -> Path:
@@ -236,10 +313,10 @@ def scan_inbox(article_id: str | None = None) -> list[str]:
     return ingested
 
 
-# ---------- 文案版本落盘（应用内部数据，非用户素材） ----------
+# ---------- 文案版本落盘（项目文件夹内 drafts/） ----------
 
 def drafts_dir(article_id: str) -> Path:
-    return data_dir() / "drafts" / article_id
+    return article_dir(article_id) / "drafts"
 
 
 def save_draft_files(doc, markdown: str) -> Path:

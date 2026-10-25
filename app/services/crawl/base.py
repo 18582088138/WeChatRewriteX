@@ -12,6 +12,13 @@ class ImageRef:
 
 
 @dataclass
+class VideoRef:
+    url: str                 # 可 yt-dlp 的页面/直链，或 readtemplate 播放器页（降级为链接素材）
+    poster: str = ""         # 封面图地址（可下载为图片素材）
+    vid: str = ""            # 平台视频 id（如 wxv_）
+
+
+@dataclass
 class RawArticle:
     url: str
     title: str = ""
@@ -21,6 +28,8 @@ class RawArticle:
     author: str = ""
     site: str = ""
     images: list[ImageRef] = field(default_factory=list)
+    videos: list[VideoRef] = field(default_factory=list)
+    audios: list[str] = field(default_factory=list)   # 音频直链
     extra: dict = field(default_factory=dict)   # 论文 pdf_url 等
 
 
