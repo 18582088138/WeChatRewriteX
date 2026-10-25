@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NButton, NCheckbox, NInput, NModal, NSelect, NSpin, useDialog, useMessage } from 'naive-ui'
+import { NButton, NInput, NModal, NSelect, NSpin, useDialog, useMessage } from 'naive-ui'
 import { api } from '../api'
 import { useAppStore } from '../stores/app'
 import type { Block, DraftDoc, Material } from '../types'
@@ -18,20 +18,54 @@ const versions = ref<any[]>([])
 const loading = ref(false)
 const article = ref<any>(null)
 const sessionMaterials = ref<Material[]>([])
-const costs = ref<any>(null)
 
-/* ================= 侧窗：自适应吸附 + 悬停弹出（反馈 1 布局规则） ================= */
+/* ================= 侧窗（反馈三：交互规则重定义） =================
+   宽屏：常驻 + sticky 跟随滚动；窄屏：自动收起为边缘标记条，
+   悬停 0.5s 弹出、离开 2s 收回；选中文字快捷唤起右窗。 */
 const wide = ref(window.innerWidth >= 1200)
 const leftOpen = ref(true)
 const rightOpen = ref(true)
 let mq: MediaQueryList
+let openTimer: ReturnType<typeof setTimeout> | null = null
+let closeTimer: ReturnType<typeof setTimeout> | null = null
+
 function onMq(e: MediaQueryListEvent) {
   wide.value = e.matches
   leftOpen.value = e.matches
   rightOpen.value = e.matches
 }
+function edgeHover(side: 'left' | 'right') {
+  if (wide.value) return
+  if (closeTimer) clearTimeout(closeTimer)
+  openTimer = setTimeout(() => {               // 0.5s 防抖弹出
+    if (side === 'left') leftOpen.value = true
+    else rightOpen.value = true
+  }, 500)
+}
+function edgeLeave() {
+  if (openTimer) { clearTimeout(openTimer); openTimer = null }
+}
+function panelLeave(side: 'left' | 'right') {
+  if (wide.value) return
+  if (openTimer) { clearTimeout(openTimer); openTimer = null }
+  closeTimer = setTimeout(() => {              // 2s 防抖收回
+    if (side === 'left') leftOpen.value = false
+    else rightOpen.value = false
+  }, 2000)
+}
+function panelEnter() {
+  if (closeTimer) { clearTimeout(closeTimer); closeTimer = null }
+}
+function onSelectText() {                       // 选中文字快捷唤起右窗（仅窄屏收起态）
+  if (wide.value || rightOpen.value) return
+  const sel = window.getSelection()
+  if (sel && !sel.isCollapsed && centerRef.value?.contains(sel.anchorNode)) {
+    rightOpen.value = true
+  }
+}
 
 /* ================= 编辑器状态 ================= */
+const centerRef = ref<HTMLElement | null>(null)
 const selectedId = ref<string | null>(null)
 const editingId = ref<string | null>(null)
 const editText = ref('')
@@ -46,12 +80,15 @@ const imgBlockId = ref('')
 const insertModal = ref(false)
 const insertIds = ref<string[]>([])
 const insertInstruction = ref('')
+const dropTargetId = ref<string | null>(null)   // 拖拽插入位置指示
 
-/* 底部信息窗口 */
+/* 标题&副标题（置顶块） + 底部信息窗（总结/关键词/参考链接） */
 const metaTitle = ref('')
+const metaSubtitle = ref('')
 const metaTitleAlts = ref('')
 const metaOneLiner = ref('')
 const metaKeywords = ref('')
+const metaRefLinks = ref('')
 const metaEditing = ref<string | null>(null)
 
 const isLatest = computed(() =>
@@ -59,6 +96,13 @@ const isLatest = computed(() =>
 const finalized = computed(() => versions.value[0]?.status === 'finalized')
 const textBlocks = computed(() =>
   doc.value?.blocks.filter(b => ['heading', 'paragraph', 'quote'].includes(b.type)) ?? [])
+
+/** 渲染块：跳过第一个一级标题（与置顶标题块同源，防重复） */
+const visibleBlocks = computed(() => {
+  const blocks = doc.value?.blocks ?? []
+  const firstH1 = blocks.findIndex(b => b.type === 'heading' && b.level === 1)
+  return blocks.filter((_, i) => i !== firstH1)
+})
 
 function assetUrl(assetId: string) { return api.absUrl(`/api/materials/${assetId}/file`) }
 
@@ -72,23 +116,17 @@ async function load(version?: number) {
     draftId.value = r.draft.id
     versions.value = r.versions
     syncMetaForm()
-  } catch (e) {
-    console.error('draft load failed', e)
-  } finally { loading.value = false }
+  } catch (e) { console.error('draft load failed', e) } finally { loading.value = false }
 }
 
 async function loadArticle() {
   article.value = await api.get(`/api/articles/${props.articleId}`)
   const ids: string[] = article.value.selected_material_ids || []
-  if (ids.length) {
-    const all = (await api.get(`/api/articles/${props.articleId}/materials?scope=article`)).materials
-    sessionMaterials.value = all.filter((m: Material) => ids.includes(m.id))
-  } else {
-    sessionMaterials.value = []
-  }
-  if (store.devMode) {
-    try { costs.value = await api.get(`/api/articles/${props.articleId}/costs`) } catch { /* ignore */ }
-  }
+  const all = (await api.get(`/api/articles/${props.articleId}/materials?scope=article`)).materials
+  // 修复「导入素材与左侧展示不一致」：会话为空时展示本篇全部已导入素材
+  sessionMaterials.value = ids.length
+    ? all.filter((m: Material) => ids.includes(m.id))
+    : all
 }
 
 function syncMetaForm() {
@@ -96,9 +134,11 @@ function syncMetaForm() {
   if (!d) return
   const [first, ...rest] = d.meta.title_candidates || []
   metaTitle.value = first || ''
+  metaSubtitle.value = d.meta.subtitle || ''
   metaTitleAlts.value = rest.join('\n')
   metaOneLiner.value = d.meta.one_liner || ''
   metaKeywords.value = (d.meta.keywords || []).map(k => `#${k}`).join('，')
+  metaRefLinks.value = (d.meta.ref_links || []).map(x => `${x.title} | ${x.url}`).join('\n')
 }
 
 onMounted(async () => {
@@ -107,27 +147,67 @@ onMounted(async () => {
   wide.value = mq.matches
   leftOpen.value = mq.matches
   rightOpen.value = mq.matches
+  document.addEventListener('selectstart', onSelectText)
   await load()
   await loadArticle()
 })
-onUnmounted(() => mq?.removeEventListener('change', onMq))
-watch(() => store.workbenchTick, () => load())
+onUnmounted(() => {
+  mq?.removeEventListener('change', onMq)
+  document.removeEventListener('selectstart', onSelectText)
+})
+watch(() => store.workbenchTick, () => { load(); loadArticle() })
 
-/* ================= 会话素材（左窗） ================= */
+/* ================= 会话素材（左窗「创作素材」） ================= */
 async function removeFromSession(m: Material) {
-  const ids = (article.value?.selected_material_ids || []).filter((x: string) => x !== m.id)
+  let ids: string[] = article.value?.selected_material_ids || []
+  if (!ids.length) {
+    // 会话为空 = 全量模式：移除 = 显式勾选其余全部
+    ids = sessionMaterials.value.map(x => x.id).filter(x => x !== m.id)
+  } else {
+    ids = ids.filter(x => x !== m.id)
+  }
   await api.put(`/api/articles/${props.articleId}/selection`, { material_ids: ids })
   message.success('已从本次创作会话移除（原始素材保留）')
   await loadArticle()
 }
 
+function onMaterialDrag(e: DragEvent, m: Material) {
+  e.dataTransfer?.setData('text/material-id', m.id)
+  e.dataTransfer!.effectAllowed = 'copy'
+}
+
+/** 拖拽素材到编辑区指定块位置 → 在该块后新建素材块（反馈 一.5） */
+function onBlockDragOver(e: DragEvent, b: Block) {
+  if (e.dataTransfer?.types.includes('text/material-id')) {
+    e.preventDefault()
+    dropTargetId.value = b.id
+  }
+}
+async function onBlockDrop(e: DragEvent, b: Block) {
+  e.preventDefault()
+  dropTargetId.value = null
+  const mid = e.dataTransfer?.getData('text/material-id')
+  if (!mid || !draftId.value) return
+  const m = sessionMaterials.value.find(x => x.id === mid)
+  if (!m) return
+  const op = m.kind === 'text'
+    ? { op: 'insert_after', block_id: b.id, block_type: 'quote', text: m.title }
+    : { op: 'insert_after', block_id: b.id,
+        block_type: m.kind === 'video' ? 'video' : 'image', asset_id: m.id, caption: m.title }
+  try {
+    const r = await api.put(`/api/drafts/${draftId.value}/edit`, { ops: [op] })
+    message.success(`已插入素材（v${r.version}）`)
+    await load()
+  } catch (err: any) { message.error(err.message) }
+}
+
 async function insertToDoc(m: Material) {
   if (!doc.value || !draftId.value) return
+  const anchor = selectedId.value || (doc.value.blocks.at(-1)?.id ?? null)
   const op = m.kind === 'text'
-    ? { op: 'insert_after', block_id: selectedId.value, block_type: 'quote', text: m.title }
-    : { op: 'insert_after', block_id: selectedId.value,
-        block_type: m.kind === 'video' ? 'video' : 'image',
-        asset_id: m.id, caption: m.title }
+    ? { op: 'insert_after', block_id: anchor, block_type: 'quote', text: m.title }
+    : { op: 'insert_after', block_id: anchor,
+        block_type: m.kind === 'video' ? 'video' : 'image', asset_id: m.id, caption: m.title }
   try {
     const r = await api.put(`/api/drafts/${draftId.value}/edit`, { ops: [op] })
     message.success(`已插入（v${r.version}）`)
@@ -141,14 +221,15 @@ function clickBlock(b: Block) {
   store.anchorBlockId = b.id
 }
 function dblclickBlock(b: Block) {
-  if (!isLatest.value || finalized.value) return
+  if (!isLatest.value) { message.warning('历史版本只读，请先在右侧回滚或回到最新版'); return }
+  if (finalized.value) { message.warning('已定稿；如需修改请先在审稿页回炉'); return }
   if (b.type === 'image' || b.type === 'video') { openImagePicker(b.id); return }
   if (b.type === 'divider') return
   editingId.value = b.id
   editText.value = b.text
 }
 function onClickOutside() {
-  if (editingId.value) saveEdit()       // 点击块外自动保存（反馈 1.1）
+  if (editingId.value) saveEdit()
 }
 async function saveEdit() {
   if (!editingId.value || !doc.value) return
@@ -171,7 +252,7 @@ async function addBlock(afterId: string | null) {
       { ops: [{ op: 'insert_after', block_id: afterId, block_type: 'paragraph', text: '' }] })
     await load()
     const d = doc.value!
-    const idx = afterId ? d.blocks.findIndex(b => b.id === afterId) + 1 : d.blocks.length - 1
+    const idx = afterId ? d.blocks.findIndex(x => x.id === afterId) + 1 : d.blocks.length - 1
     const nb = d.blocks[idx]
     if (nb) { editingId.value = nb.id; editText.value = '' }
   } catch (e: any) { message.error(e.message) }
@@ -233,28 +314,54 @@ function doRollback(v: number) {
   })
 }
 
-/* ================= 底部信息窗口（反馈 1.4） ================= */
-async function saveMeta(field: 'title' | 'one_liner' | 'keywords') {
-  if (!doc.value || !draftId.value) return
-  const ops: any[] = []
-  if (field === 'title') {
-    const t = metaTitle.value.trim()
-    if (!t) return
-    ops.push({ op: 'update_meta', field: 'title_selected', value: t })
-    ops.push({ op: 'update_meta', field: 'title_candidates',
-               value: [t, ...metaTitleAlts.value.split('\n').map(s => s.trim()).filter(Boolean)] })
-  } else if (field === 'one_liner') {
-    ops.push({ op: 'update_meta', field: 'one_liner', value: metaOneLiner.value })
-  } else {
-    const kws = metaKeywords.value.split(/[，,]/).map(s => s.trim().replace(/^#/, '')).filter(Boolean)
-    ops.push({ op: 'update_meta', field: 'keywords', value: kws })
-  }
+/* ================= 标题/副标题/信息窗保存 ================= */
+async function saveTitle() {
+  if (!draftId.value || !metaTitle.value.trim()) return
+  const ops: any[] = [
+    { op: 'update_meta', field: 'title_selected', value: metaTitle.value.trim() },
+    { op: 'update_meta', field: 'title_candidates',
+      value: [metaTitle.value.trim(),
+              ...metaTitleAlts.value.split('\n').map(s => s.trim()).filter(Boolean)] },
+  ]
   try {
     const r = await api.put(`/api/drafts/${draftId.value}/edit`, { ops })
-    message.success(`已保存（v${r.version}）` + (r.folder_renamed ? '；项目文件夹已同步改名' : ''))
+    message.success(`标题已保存（v${r.version}）` + (r.folder_renamed ? '；项目文件夹已同步改名' : ''))
+    metaEditing.value = null
+    await load(); await loadArticle()
+  } catch (e: any) { message.error(e.message) }
+}
+
+async function saveSubtitle() {
+  if (!draftId.value) return
+  try {
+    const r = await api.put(`/api/drafts/${draftId.value}/edit`,
+      { ops: [{ op: 'update_meta', field: 'subtitle', value: metaSubtitle.value }] })
+    message.success(`副标题已保存（v${r.version}）`)
     metaEditing.value = null
     await load()
-    if (r.folder_renamed) await loadArticle()
+  } catch (e: any) { message.error(e.message) }
+}
+
+async function saveMeta(field: 'one_liner' | 'keywords' | 'ref_links') {
+  if (!draftId.value) return
+  let op: any
+  if (field === 'one_liner') {
+    op = { op: 'update_meta', field: 'one_liner', value: metaOneLiner.value }
+  } else if (field === 'keywords') {
+    const kws = metaKeywords.value.split(/[，,]/).map(s => s.trim().replace(/^#/, '')).filter(Boolean)
+    op = { op: 'update_meta', field: 'keywords', value: kws }
+  } else {
+    const links = metaRefLinks.value.split('\n').map(line => {
+      const [t, u] = line.split('|').map(s => s.trim())
+      return t || u ? { title: t || u, url: u || '' } : null
+    }).filter(Boolean)
+    op = { op: 'update_meta', field: 'ref_links', value: links }
+  }
+  try {
+    const r = await api.put(`/api/drafts/${draftId.value}/edit`, { ops: [op] })
+    message.success(`已保存（v${r.version}）`)
+    metaEditing.value = null
+    await load()
   } catch (e: any) { message.error(e.message) }
 }
 
@@ -297,32 +404,32 @@ async function runInsert() {
     await load()
   } catch (e: any) { message.error(e.message) } finally { aiBusy.value = false }
 }
-
-/* ================= 开销 ================= */
-const costLine = computed(() => {
-  if (!store.devMode || !costs.value) return ''
-  const c = costs.value.by_stage?.['创作'] || { calls: 0, prompt_tokens: 0, completion_tokens: 0, cost_est: 0 }
-  return `本页累计开销：${c.calls} 次调用 · ${c.prompt_tokens + c.completion_tokens} tokens · ≈$${c.cost_est}`
-})
 </script>
 
 <template>
-  <div class="create-wb relative" @click="onClickOutside">
-    <!-- ============ 左侧素材浏览窗口（吸附/悬停弹出） ============ -->
-    <div v-if="!leftOpen" class="edge-strip left-0" @mouseenter="leftOpen = true" />
+  <div class="create-wb" :class="{ narrow: !wide }" @click="onClickOutside">
+    <!-- 左边缘标记（窄屏收起态的视觉提示） -->
+    <div v-if="!leftOpen" class="edge-marker left" @mouseenter="edgeHover('left')" @mouseleave="edgeLeave">
+      <span>创<br>作<br>素<br>材</span>
+    </div>
+    <div v-if="!rightOpen" class="edge-marker right" @mouseenter="edgeHover('right')" @mouseleave="edgeLeave">
+      <span>工<br>具</span>
+    </div>
+
+    <!-- ============ 左侧【创作素材】窗口 ============ -->
     <aside class="side-panel left-panel panel" :class="{ hidden: !leftOpen }"
-           @mouseleave="wide ? null : (leftOpen = false)">
+           @mouseenter="panelEnter" @mouseleave="panelLeave('left')">
       <div class="flex items-center justify-between px-3 py-2" style="border-bottom: 1px solid var(--rule);">
-        <span class="text-xs font-semibold" style="color: var(--muted);">本次创作素材</span>
-        <button class="text-xs hover:underline" style="color: var(--faint);"
-                @click="leftOpen = false">收起</button>
+        <span class="text-xs font-semibold" style="color: var(--muted);">创作素材</span>
+        <button class="text-xs hover:underline" style="color: var(--faint);" @click="leftOpen = false">收起</button>
       </div>
-      <div class="p-2 space-y-2 overflow-auto max-h-[calc(100vh-320px)]">
+      <div class="p-2 space-y-2 overflow-auto panel-body">
         <div v-if="!sessionMaterials.length" class="text-xs p-2" style="color: var(--faint);">
-          未勾选素材。到素材库勾选后点「导入 & 创作」。
+          本篇暂无已导入素材。到素材库勾选后点「导入」。
         </div>
-        <div v-for="m in sessionMaterials" :key="m.id" class="relative group rounded-md"
-             style="border: 1px solid var(--rule);">
+        <div v-for="m in sessionMaterials" :key="m.id" class="session-item rounded-md"
+             draggable="true" @dragstart="onMaterialDrag($event, m)"
+             style="border: 1px solid var(--rule);" title="可拖拽到右侧正文指定位置">
           <img v-if="m.kind === 'image' && m.url" :src="api.absUrl(m.url)"
                class="w-full aspect-video object-cover rounded-t-md cursor-zoom-in"
                @click.stop="lightboxUrl = api.absUrl(m.url)" />
@@ -341,8 +448,7 @@ const costLine = computed(() => {
     </aside>
 
     <!-- ============ 中央 Notebook 主编辑区 ============ -->
-    <main class="nb-center panel" :style="{ marginLeft: leftOpen ? 'clamp(200px,16vw,300px)' : '0',
-                                          marginRight: rightOpen ? 'clamp(220px,17vw,320px)' : '0' }">
+    <main ref="centerRef" class="nb-center panel">
       <NSpin :show="loading">
         <div v-if="!doc && !loading" class="py-20 text-center">
           <p class="text-[15px]" style="color: var(--muted);">还没有文案。</p>
@@ -350,12 +456,45 @@ const costLine = computed(() => {
         </div>
 
         <template v-if="doc">
-          <div v-for="b in doc.blocks" :key="b.id"
-               class="block-item" :class="{ selected: selectedId === b.id, editing: editingId === b.id }"
-               @click.stop="clickBlock(b)" @dblclick.stop="dblclickBlock(b)">
+          <!-- 标题 & 副标题（置顶块，反馈 一.2；大号加粗 / 常规斜体） -->
+          <div class="mb-7">
+            <h1 v-if="metaEditing !== 'title'" class="doc-title" @dblclick.stop="metaEditing = 'title'">
+              {{ metaTitle || '（双击输入标题）' }}</h1>
+            <div v-else class="space-y-1" @click.stop>
+              <input v-model="metaTitle" class="info-input text-lg font-bold" v-focus />
+              <textarea v-model="metaTitleAlts" class="info-input" rows="2"
+                        placeholder="备选标题，每行一个" />
+              <div class="flex gap-2">
+                <button class="text-xs hover:underline" style="color: var(--accent-ink);"
+                        @click="saveTitle">保存</button>
+                <button class="text-xs hover:underline" style="color: var(--faint);"
+                        @click="metaEditing = null">取消</button>
+              </div>
+            </div>
+            <p v-if="metaEditing !== 'subtitle'" class="doc-subtitle" @dblclick.stop="metaEditing = 'subtitle'">
+              {{ metaSubtitle || '（双击输入副标题）' }}</p>
+            <div v-else class="mt-1" @click.stop>
+              <input v-model="metaSubtitle" class="info-input italic" v-focus
+                     placeholder="副标题：一句话补充视角/看点，≤30字" />
+              <div class="flex gap-2 mt-1">
+                <button class="text-xs hover:underline" style="color: var(--accent-ink);"
+                        @click="saveSubtitle">保存</button>
+                <button class="text-xs hover:underline" style="color: var(--faint);"
+                        @click="metaEditing = null">取消</button>
+              </div>
+            </div>
+          </div>
+
+          <div v-for="b in visibleBlocks" :key="b.id"
+               class="block-item" :class="{ selected: selectedId === b.id, editing: editingId === b.id,
+                                            'drop-target': dropTargetId === b.id }"
+               @click.stop="clickBlock(b)" @dblclick.stop="dblclickBlock(b)"
+               @dragover="onBlockDragOver($event, b)" @dragleave="dropTargetId = null"
+               @drop="onBlockDrop($event, b)">
             <template v-if="editingId !== b.id">
               <h1 v-if="b.type === 'heading' && b.level === 1">{{ b.text }}</h1>
-              <h2 v-else-if="b.type === 'heading'">{{ b.text }}</h2>
+              <h2 v-else-if="b.type === 'heading' && b.level === 2">{{ b.text }}</h2>
+              <h3 v-else-if="b.type === 'heading'">{{ b.text }}</h3>
               <p v-else-if="b.type === 'paragraph'" :class="{ 'text-faint italic': !b.text }">
                 {{ b.text || '（空段，双击输入）' }}</p>
               <blockquote v-else-if="b.type === 'quote'">{{ b.text }}</blockquote>
@@ -374,21 +513,20 @@ const costLine = computed(() => {
             <button class="add-block" @click.stop="addBlock(b.id)" title="在此插入文本块">+</button>
           </div>
           <div class="text-center text-xs mt-6" style="color: var(--faint);">
-            双击段落编辑 · 点击外部自动保存 · 块间 + 新增 · 双击图片可替换
+            双击编辑 · 点外部自动保存 · 块间 + 新增 · 双击图片替换 · 左侧素材可拖入指定位置
           </div>
         </template>
       </NSpin>
     </main>
 
     <!-- ============ 右侧工具窗口 ============ -->
-    <div v-if="!rightOpen" class="edge-strip right-0" @mouseenter="rightOpen = true" />
     <aside class="side-panel right-panel panel" :class="{ hidden: !rightOpen }"
-           @mouseleave="wide ? null : (rightOpen = false)">
+           @mouseenter="panelEnter" @mouseleave="panelLeave('right')">
       <div class="flex items-center justify-between px-3 py-2" style="border-bottom: 1px solid var(--rule);">
         <span class="text-xs font-semibold" style="color: var(--muted);">工具</span>
         <button class="text-xs hover:underline" style="color: var(--faint);" @click="rightOpen = false">收起</button>
       </div>
-      <div class="p-3 space-y-4 overflow-auto max-h-[calc(100vh-300px)]">
+      <div class="p-3 space-y-4 overflow-auto panel-body">
         <div>
           <div class="text-xs font-semibold mb-2" style="color: var(--muted);">AI 重写</div>
           <div class="grid grid-cols-2 gap-1.5">
@@ -407,37 +545,19 @@ const costLine = computed(() => {
                      label: `v${v.version} · ${({ agent: 'AI', human: '人工', auto_fix: 'AI修复', insert_refs: '资料插入', rollback: '回滚' } as any)[v.origin] || v.origin}${v.checkpoint ? ' · 快照' : ''}${v.status === 'finalized' ? ' · 定稿' : ''}${v.changes ? ` · ${v.changes}块改动` : ''}`,
                      value: v.version }))" />
           <div class="text-[11px] mt-1.5" style="color: var(--faint);">块级增量版本：只记变更块，历史可重建。</div>
-          <NButton size="tiny" block tertiary class="mt-2"
-                   :disabled="!doc || isLatest || finalized"
+          <NButton size="tiny" block tertiary class="mt-2" :disabled="!doc || isLatest || finalized"
                    @click="doc && doRollback(doc.version)">回滚到当前查看的版本</NButton>
         </div>
-        <div v-if="costLine" class="text-[11px] pt-2"
-             style="color: var(--faint); border-top: 1px solid var(--rule);">{{ costLine }}</div>
         <NButton block type="primary" size="small" :disabled="!doc" @click="emit('goto-review')">去审稿 →</NButton>
       </div>
     </aside>
 
-    <!-- ============ 底部信息窗口（反馈 1.4） ============ -->
-    <div class="bottom-info panel" :style="{ left: leftOpen ? 'clamp(200px,16vw,300px)' : '0',
-                                            right: rightOpen ? 'clamp(220px,17vw,320px)' : '0' }">
-      <div class="info-cell" @dblclick="metaEditing = 'title'">
-        <div class="info-label">标题候选</div>
-        <template v-if="metaEditing === 'title'">
-          <input v-model="metaTitle" class="info-input" placeholder="主标题" @click.stop />
-          <textarea v-model="metaTitleAlts" class="info-input mt-1" rows="2"
-                    placeholder="备选标题，每行一个" @click.stop @blur="saveMeta('title')" />
-          <button class="text-xs hover:underline mt-0.5" style="color: var(--accent-ink);"
-                  @click.stop="saveMeta('title')">保存</button>
-        </template>
-        <template v-else>
-          <div class="info-value font-medium">{{ metaTitle || '（未定）' }}</div>
-          <div v-if="metaTitleAlts" class="info-sub">{{ metaTitleAlts.split('\n')[0] }}</div>
-        </template>
-      </div>
+    <!-- ============ 底部信息窗口（总结/关键词/参考文字链接） ============ -->
+    <div class="bottom-info panel">
       <div class="info-cell" @dblclick="metaEditing = 'one_liner'">
-        <div class="info-label">一句话总结</div>
+        <div class="info-label">文章总结</div>
         <template v-if="metaEditing === 'one_liner'">
-          <textarea v-model="metaOneLiner" class="info-input" rows="2" @click.stop
+          <textarea v-model="metaOneLiner" class="info-input" rows="2" @click.stop v-focus
                     @blur="saveMeta('one_liner')" />
         </template>
         <div v-else class="info-value">{{ metaOneLiner || '（无）' }}</div>
@@ -446,9 +566,27 @@ const costLine = computed(() => {
         <div class="info-label">关键词</div>
         <template v-if="metaEditing === 'keywords'">
           <input v-model="metaKeywords" class="info-input" placeholder="#关键词1，#关键词2"
-                 @click.stop @blur="saveMeta('keywords')" />
+                 @click.stop v-focus @blur="saveMeta('keywords')" />
         </template>
         <div v-else class="info-value" style="color: var(--accent-ink);">{{ metaKeywords || '（无）' }}</div>
+      </div>
+      <div class="info-cell" @dblclick="metaEditing = 'reflinks'">
+        <div class="info-label">参考文字链接</div>
+        <template v-if="metaEditing === 'reflinks'">
+          <textarea v-model="metaRefLinks" class="info-input" rows="3"
+                    placeholder="每行一条：标题 | https://…" @click.stop v-focus
+                    @blur="saveMeta('ref_links')" />
+        </template>
+        <div v-else class="info-value info-links">
+          <template v-if="doc?.meta.ref_links?.length">
+            <div v-for="(r, i) in doc.meta.ref_links.slice(0, 4)" :key="i" class="truncate">
+              <a v-if="r.url" :href="r.url" target="_blank" class="hover:underline"
+                 style="color: var(--accent-ink);" @click.stop>{{ r.title || r.url }}</a>
+              <span v-else>{{ r.title }}</span>
+            </div>
+          </template>
+          <span v-else>（创作后自动记录参考文章）</span>
+        </div>
       </div>
     </div>
 
@@ -473,8 +611,7 @@ const costLine = computed(() => {
           <div class="aspect-square rounded-md overflow-hidden panel" style="background: var(--raised);">
             <img :src="api.absUrl(m.url)" class="w-full h-full object-cover" loading="lazy" />
           </div>
-          <span v-if="m.watermark === 1"
-                class="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded text-[11px]"
+          <span v-if="m.watermark === 1" class="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded text-[11px]"
                 style="background: var(--pill-warn-bg); color: var(--pill-warn-ink);">水印</span>
           <div class="text-xs truncate mt-1" style="color: var(--faint);">{{ m.title }}</div>
         </div>
@@ -511,26 +648,64 @@ export default {
 </script>
 
 <style scoped>
-/* 布局：中央自适应，左右侧窗吸附/悬停弹出（反馈 1 布局规则） */
-.create-wb { min-height: 62vh; }
-.nb-center { transition: margin .2s ease; padding: 28px 32px; min-height: 62vh; }
-.side-panel {
-  position: absolute; top: 0; bottom: 120px; width: clamp(200px, 16vw, 300px);
-  z-index: 5; transition: transform .18s ease; background: var(--surface);
+/* 布局（反馈三）：宽屏三栏 sticky 跟随滚动；窄屏收起为边缘标记条，防抖弹出 */
+.create-wb {
+  display: grid;
+  grid-template-columns: clamp(200px, 16vw, 300px) minmax(0, 1fr) clamp(220px, 17vw, 320px);
+  gap: 16px;
+  align-items: start;
+  min-height: 62vh;
 }
-.left-panel { left: 0; }
-.right-panel { right: 0; width: clamp(220px, 17vw, 320px); }
-.side-panel.hidden { transform: translateX(-102%); }
-.right-panel.hidden { transform: translateX(102%); }
-.edge-strip { position: absolute; top: 0; bottom: 120px; width: 14px; z-index: 4; }
-.edge-strip.left-0 { left: 0; }
-.edge-strip.right-0 { right: 0; }
+.create-wb.narrow { grid-template-columns: 0 minmax(0, 1fr) 0; }
+.nb-center { padding: 28px 32px; min-height: 62vh; grid-column: 2; grid-row: 1; }
+.left-panel { grid-column: 1; grid-row: 1; }
+.right-panel { grid-column: 3; grid-row: 1; }
+.bottom-info { grid-column: 1 / -1; grid-row: 2; }
 
-/* 块间插入按钮 */
+.side-panel { position: sticky; top: 96px; background: var(--surface); z-index: 5; }
+.panel-body { max-height: calc(100vh - 320px); }
+.left-panel.hidden, .right-panel.hidden { display: none; }
+
+/* 窄屏：面板转为固定悬浮层，边缘留标记条 */
+.create-wb.narrow .side-panel {
+  position: fixed; top: 50%; transform: translateY(-50%);
+  display: block; max-height: 76vh; box-shadow: var(--tw-shadow, 0 8px 30px rgba(20,20,20,.14));
+  width: clamp(220px, 26vw, 300px);
+}
+.create-wb.narrow .left-panel { left: 8px; }
+.create-wb.narrow .right-panel { right: 8px; }
+.create-wb.narrow .side-panel.hidden { display: none; }
+
+.edge-marker {
+  position: fixed; top: 30%; bottom: 30%; width: 16px; z-index: 20;
+  border: 1px solid var(--control); background: var(--surface);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
+.edge-marker.left { left: 0; border-left: none; border-radius: 0 8px 8px 0; }
+.edge-marker.right { right: 0; border-right: none; border-radius: 8px 0 0 8px; }
+.edge-marker span {
+  writing-mode: vertical-rl; font-size: 10px; color: var(--faint); letter-spacing: 2px;
+}
+.edge-marker:hover { border-color: var(--accent); }
+
+/* 标题 & 副标题（置顶块样式规范） */
+.doc-title { font-size: 24px; font-weight: 800; line-height: 1.3; letter-spacing: -0.01em; }
+.doc-subtitle { font-size: 15px; font-style: italic; color: var(--muted); margin-top: 6px; }
+
+/* 块 */
 .block-item { position: relative; padding: 2px 6px; border-radius: 6px; }
 .block-item:hover { background: var(--raised); }
 .block-item.selected { background: #FDF0EC; outline: 1px solid #F0C4B8; }
 .block-item.editing { background: var(--surface); outline: 1px solid var(--control); }
+.block-item.drop-target { outline: 2px dashed var(--accent); background: var(--accent-soft); }
+.block-item h1 { font-size: 22px; font-weight: 700; margin: 0 0 20px; line-height: 1.35; }
+.block-item h2 { font-size: 17px; font-weight: 700; margin: 26px 0 10px; }
+.block-item h3 { font-size: 15px; font-weight: 700; margin: 20px 0 8px; }
+.block-item p { line-height: 1.9; font-size: 15px; color: #2A2926; margin-bottom: 1em; text-align: justify; }
+.block-item blockquote { border-left: 3px solid var(--accent); background: var(--raised);
+  padding: 10px 16px; margin: 0 0 16px; color: #4A463D; font-size: 14px; line-height: 1.8; }
+.block-item .caption { text-align: center; font-size: 12px; color: var(--faint); margin-top: 4px; }
 .add-block {
   position: absolute; left: 50%; bottom: -9px; transform: translateX(-50%);
   width: 18px; height: 18px; border-radius: 999px; font-size: 12px; line-height: 1;
@@ -540,13 +715,16 @@ export default {
 .block-item:hover .add-block { opacity: 1; }
 
 /* 底部信息窗口 */
-.bottom-info { display: grid; grid-template-columns: 1.2fr 1.4fr 1fr; gap: 0; margin-top: 12px; }
-.info-cell { padding: 12px 16px; cursor: default; }
+.bottom-info {
+  grid-column: 1 / -1; display: grid;
+  grid-template-columns: 1.2fr 1fr 1.4fr; gap: 0; margin-top: 12px;
+}
+.info-cell { padding: 12px 16px; }
 .info-cell + .info-cell { border-left: 1px solid var(--rule); }
 .info-cell:hover { background: var(--raised); }
 .info-label { font-size: 11px; color: var(--faint); margin-bottom: 4px; }
 .info-value { font-size: 13px; line-height: 1.5; }
-.info-sub { font-size: 11px; color: var(--faint); margin-top: 2px; }
+.info-links a { display: block; }
 .info-input { width: 100%; font-size: 13px; border: 1px solid var(--control);
   border-radius: 6px; padding: 6px 8px; outline: none; background: var(--surface); }
 .info-input:focus { border-color: var(--ink-900); }

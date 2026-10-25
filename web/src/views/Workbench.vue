@@ -43,6 +43,9 @@ async function onImportCreate(ids: string[]) {
 
 async function load() {
   article.value = await api.get(`/api/articles/${aid}`)
+  if (store.devMode) {
+    try { totalCosts.value = await api.get(`/api/articles/${aid}/costs`) } catch { /* ignore */ }
+  }
 }
 onMounted(async () => {
   await load()
@@ -66,6 +69,9 @@ const actions = computed(() => {
     list.push({ key: 'deepsearch', label: '深度搜索', deep: true })
   }
   if (s === 'DRAFTED') list.push({ key: 'review', label: '开始审稿', stage: 'review', primary: true })
+  // 再次创作：已有草稿后重跑创作（读取当前勾选素材集合）
+  if (['DRAFTED', 'EDITING', 'REVIEWED'].includes(s))
+    list.push({ key: 'recreate', label: '再次创作', deep: true })
   return list
 })
 
@@ -80,6 +86,19 @@ async function runStage(stage: string) {
   } finally {
     busy.value = false
   }
+}
+
+/** 再次创作：读取当前已勾选全部素材，调用创作 Agent 完整重新生成（反馈 一.1） */
+async function runRecreate() {
+  busy.value = true
+  try {
+    const sel = article.value?.selected_material_ids || []
+    await api.post(`/api/articles/${aid}/advance`,
+                   { stage: 'create', selected_material_ids: sel.length ? sel : undefined })
+    message.success('再次创作已启动（按当前勾选素材完整重新生成）')
+    tab.value = 'create'
+    setTimeout(load, 800)
+  } catch (e: any) { message.error(e.message) } finally { busy.value = false }
 }
 
 async function runDeepSearch() {
@@ -108,6 +127,14 @@ const progressMessages = computed(() => {
     .filter(m => m.article_id === aid)
     .slice(-8)
     .map(m => m.message)
+})
+
+/** 本篇全流程累计开销（dev 模式；分页底部居中展示） */
+const totalCosts = ref<any>(null)
+const totalCostLine = computed(() => {
+  const c = totalCosts.value?.total
+  if (!c || !c.calls) return ''
+  return `本篇累计开销：${c.calls} 次调用 · ${c.prompt_tokens + c.completion_tokens} tokens · ≈$${c.cost_est}`
 })
 
 /** 底部状态栏（反馈 1.5）：有任务运行自动展开日志，无任务收起只留上一条完成记录 */
@@ -151,7 +178,7 @@ watch(hasRunning, (v) => { if (v) logExpanded.value = true })
         <div class="flex-1"></div>
         <NButton v-for="act in actions" :key="act.key" size="small"
                  :type="act.primary ? 'primary' : 'default'" :loading="busy"
-                 @click="act.deep ? runDeepSearch() : runStage(act.stage!)">{{ act.label }}</NButton>
+                 @click="act.deep ? (act.key === 'recreate' ? runRecreate() : runDeepSearch()) : runStage(act.stage!)">{{ act.label }}</NButton>
       </div>
 
       <!-- 分阶段进度：等待动画 + 文字日志（反馈 3.4） —— 由底部状态栏承载，此处不再重复 -->
@@ -178,6 +205,10 @@ watch(hasRunning, (v) => { if (v) logExpanded.value = true })
         </NTabPane>
       </NTabs>
     </main>
+
+    <!-- 本篇累计开销（dev 模式；分页底部居中、日志上方；全流程累加） -->
+    <div v-if="store.devMode && totalCostLine" class="text-center text-xs py-1.5"
+         style="color: var(--faint);">{{ totalCostLine }}</div>
 
     <!-- 底部状态栏（反馈 1.5）：运行中自动展开日志，空闲收起留上一条完成记录 -->
     <footer class="status-bar">

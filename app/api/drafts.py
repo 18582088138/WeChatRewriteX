@@ -67,7 +67,7 @@ def rollback_draft(aid: str, body: Rollback) -> dict:
 
 @router.put("/drafts/{draft_id}/edit")
 def edit_draft(draft_id: str, body: EditOps) -> dict:
-    row = dao.get_draft_by_id(draft_id)
+    row = draft_service.resolve_head_row(draft_id)
     if not row:
         raise HTTPException(404, "草稿不存在")
     aid = row["article_id"]
@@ -98,7 +98,7 @@ def edit_draft(draft_id: str, body: EditOps) -> dict:
 
 @router.post("/drafts/{draft_id}/regenerate")
 def regenerate(draft_id: str, body: Regenerate) -> dict:
-    row = dao.get_draft_by_id(draft_id)
+    row = draft_service.resolve_head_row(draft_id)
     if not row:
         raise HTTPException(404, "草稿不存在")
     if not body.block_ids:
@@ -120,7 +120,7 @@ def regenerate(draft_id: str, body: Regenerate) -> dict:
 
 @router.post("/drafts/{draft_id}/insert-refs")
 def insert_refs(draft_id: str, body: InsertRefs) -> dict:
-    row = dao.get_draft_by_id(draft_id)
+    row = draft_service.resolve_head_row(draft_id)
     if not row:
         raise HTTPException(404, "草稿不存在")
     if not body.material_ids:

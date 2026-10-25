@@ -15,6 +15,22 @@ from ..core.models import Block, BlockType, DraftDoc
 from ..storage import dao, library
 
 
+def resolve_head_row(draft_id: str) -> dict | None:
+    """把前端持有的 draft id 解析为当前 HEAD 行。
+
+    增量版本下，编辑后的 HEAD 不一定是 drafts 实体行（v2+ 只记在变更日志），
+    所以先按 id 精确查，查不到则按 `<article_id>-vN` 形态回退到该文章 HEAD
+    （修复「编辑后提示草稿不存在」——前端拿到的是上一版编号而非实体 id）。
+    """
+    row = dao.get_draft_by_id(draft_id)
+    if row:
+        return row
+    if "-v" in draft_id:
+        aid = draft_id.rsplit("-v", 1)[0]
+        return dao.latest_draft(aid)
+    return None
+
+
 def get_doc(article_id: str, version: int | None = None) -> tuple[DraftDoc, dict]:
     row = dao.get_draft(article_id, version) if version else dao.latest_draft(article_id)
     if not row:
@@ -141,6 +157,14 @@ def apply_ops(doc: DraftDoc, ops: list[dict]) -> int:
             elif field == "title_candidates" and isinstance(value, list):
                 doc.meta.title_candidates = [str(x).strip() for x in value
                                              if str(x).strip()][:5]
+                changed += 1
+            elif field == "subtitle" and isinstance(value, str):
+                doc.meta.subtitle = value.strip()
+                changed += 1
+            elif field == "ref_links" and isinstance(value, list):
+                doc.meta.ref_links = [{"title": str(x.get("title", "")),
+                                       "url": str(x.get("url", ""))}
+                                      for x in value if isinstance(x, dict)][:20]
                 changed += 1
             elif field == "title_selected" and isinstance(value, str):
                 cands = [c for c in doc.meta.title_candidates if c != value]

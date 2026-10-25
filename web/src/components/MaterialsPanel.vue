@@ -47,7 +47,7 @@ async function load() {
   materials.value = (await api.get(url)).materials
   selected.value = new Set()
 }
-onMounted(load)
+onMounted(async () => { await load(); await checkDraft() })
 watch(() => store.workbenchTick, load)
 watch(scope, load)
 
@@ -234,11 +234,36 @@ async function onDropToCommon(e: DragEvent) {
   } catch (err: any) { message.error(err.message) }
 }
 
-/* ---------- 导入 & 创作 ---------- */
+/* ---------- 导入按钮状态分支（反馈 四） ----------
+   初始（无草稿）：「导入&创作」→ 导入 + 调 LLM 生成；
+   后续（已有草稿）：「导入素材」→ 仅导入会话，不自动生成。 */
+const hasDraft = ref(false)
 
-function importCreate() {
+async function checkDraft() {
+  try { await api.get(`/api/articles/${props.articleId}/draft`); hasDraft.value = true }
+  catch { hasDraft.value = false }
+}
+
+async function importCreate() {
   if (!selected.value.size) return
-  emit('import-create', [...selected.value])
+  const ids = [...selected.value]
+  if (hasDraft.value) {
+    // 仅导入会话
+    const cur = new Set(await currentSelection())
+    ids.forEach(id => cur.add(id))
+    await api.put(`/api/articles/${props.articleId}/selection`, { material_ids: [...cur] })
+    message.success(`已导入 ${ids.length} 份素材到本次创作会话（未触发重新生成）`)
+    selected.value = new Set()
+    await load()
+  } else {
+    emit('import-create', ids)
+    selected.value = new Set()
+  }
+}
+
+async function currentSelection(): Promise<string[]> {
+  const a = await api.get(`/api/articles/${props.articleId}`)
+  return a.selected_material_ids || []
 }
 </script>
 
@@ -273,7 +298,7 @@ function importCreate() {
       </label>
       <NButton size="small" quaternary @click="scanInbox">扫描 inbox</NButton>
       <NButton v-if="selected.size" size="small" type="primary" @click="importCreate">
-        导入 & 创作（已选 {{ selected.size }}）
+        {{ hasDraft ? `导入素材（已选 ${selected.size}）` : `导入 & 创作（已选 ${selected.size}）` }}
       </NButton>
     </div>
 

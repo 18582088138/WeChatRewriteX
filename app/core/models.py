@@ -68,6 +68,8 @@ class DraftMeta(BaseModel):
     keywords: list[str] = Field(default_factory=list)
     one_liner: str = ""
     title_candidates: list[str] = Field(default_factory=list)
+    subtitle: str = ""                              # 副标题（创作时同步生成）
+    ref_links: list[dict] = Field(default_factory=list)  # 参考文字链接 [{title, url}]
     word_count: int = 0
     xhs_pages: list[XhsPage] = Field(default_factory=list)
 

@@ -17,6 +17,7 @@ from .base import AgentBase
 
 class DraftPayload(BaseModel):
     title_candidates: list[str] = Field(default_factory=list)
+    subtitle: str = ""                               # 副标题（V1.3）
     keywords: list[str] = Field(default_factory=list)
     one_liner: str = ""
     blocks: list[dict] = Field(default_factory=list)
@@ -43,6 +44,7 @@ class CreatorAgent(AgentBase):
         images = self._available_images(article_id, selected_material_ids)
         word_target = int(article.get("target_word_count")
                           or config.get("create.target_word_count", 1500))
+        self._evidence_now = evidence            # 供 ref_links 使用
 
         if not self.llm_available():
             doc = self._degraded_doc(article_id, evidence)
@@ -57,6 +59,11 @@ class CreatorAgent(AgentBase):
             doc = self._enforce_word_count(doc, style, word_target, article_id)
             self._ensure_images(doc, images)
             doc.meta.xhs_pages = self._paginate_xhs(doc)
+        # 参考文字链接：记录本次创作用到的文章素材（标题+链接）
+        doc.meta.ref_links = [
+            {"title": m.get("title") or "", "url": m.get("source_url") or ""}
+            for m in getattr(self, "_evidence_now", [])
+        ]
 
         # 创作定题 → 项目文件夹从「输入标题-日期」改名为「拟定标题-日期」（先于落盘）
         new_title = (doc.meta.title_candidates or [""])[0]
@@ -196,6 +203,7 @@ class CreatorAgent(AgentBase):
         doc = DraftDoc(id="", article_id=article_id, version=0, blocks=valid,
                        meta=DraftMeta(keywords=payload.keywords,
                                       one_liner=payload.one_liner,
+                                      subtitle=payload.subtitle,
                                       title_candidates=payload.title_candidates[:3]))
         doc.meta.word_count = bk.doc_word_count(doc)
         return doc

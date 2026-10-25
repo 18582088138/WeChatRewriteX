@@ -115,6 +115,31 @@ def sanitize_block_text(text: str) -> str:
     return strip_citation_markers(text)[0]
 
 
+def _looks_like_heading(text: str) -> bool:
+    """短行、无句末标点、无引述结构 → 视作段落标题（V1.3 渲染层级启发式）。"""
+    s = text.strip()
+    if not s or len(s) > 26:
+        return False
+    if re.search(r"[。！？；，、,.!?;：:]$", s):
+        return False
+    if re.search(r"[。！？；]", s):      # 含完整句子的不是标题
+        return False
+    return True
+
+
+def _apply_heading_heuristic(blocks: list[Block]) -> list[Block]:
+    if len(blocks) < 5:                    # 短文不猜层级，防误伤
+        return blocks
+    has_sub = any(b.type == BlockType.HEADING and b.level >= 2 for b in blocks)
+    if has_sub:
+        return blocks
+    for b in blocks:
+        if b.type == BlockType.PARAGRAPH and _looks_like_heading(b.text):
+            b.type = BlockType.HEADING
+            b.level = 2
+    return blocks
+
+
 def blocks_from_llm(payload: dict) -> list[Block]:
     """解析创作 Agent 的 JSON 输出为块列表并分配 id。
 
@@ -143,7 +168,7 @@ def blocks_from_llm(payload: dict) -> list[Block]:
                 citations=citations,
             )
         )
-    return out
+    return _apply_heading_heuristic(out)
 
 
 def changed_blocks(old: DraftDoc, new: DraftDoc) -> tuple[int, float]:

@@ -23,9 +23,13 @@
 - 配图：从「可用图片」中选择 2~4 张插入合适位置（type=image，asset_id 取自列表），
   并写一句 caption；没有合适图片就不配，禁止虚构图片。
 
+# 硬约束补充
+- 结构层级：正文小标题用 heading level=2，正文段落用 paragraph，不要把小标题写成普通段落；
+
 # 输出（只输出 JSON）
 {
  "title_candidates": ["标题1","标题2","标题3"],
+ "subtitle": "副标题（一句话补充视角/看点，≤30字）",
  "keywords": ["..."],
  "one_liner": "一句话总结(≤40字)",
  "blocks": [

@@ -75,7 +75,7 @@ def test_blocks_from_llm_assigns_ids():
     blocks = bk.blocks_from_llm({"blocks": [
         {"type": "heading", "level": 1, "text": "t"},
         {"type": "paragraph", "text": "p", "citations": ["mat_1"]},
-        {"type": "unknown_type", "text": "fallback"},
+        {"type": "unknown_type", "text": "这是一段正常的正文，带句末标点。"},
     ]})
     assert all(b.id for b in blocks)
     assert blocks[1].citations == ["mat_1"]
