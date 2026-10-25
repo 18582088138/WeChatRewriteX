@@ -32,9 +32,11 @@ class CollectorAgent(AgentBase):
     name = "collector"
 
     def _progress(self, article_id: str, message: str) -> None:
-        """分阶段进度事件：前端等待动画 + 文字日志（反馈 3.4）。"""
+        """分阶段进度事件：前端等待动画 + 文字日志（反馈 3.4）；开发者模式同时写日志。"""
         events.bus.publish(events.STAGE_PROGRESS, article_id,
                            stage="collect", message=message)
+        from .. import logging_setup
+        logging_setup.log("info", "[collect] %s (article=%s)", message, article_id)
 
     def run(self, article_id: str) -> CollectionReport:
         article = dao.get_article(article_id)

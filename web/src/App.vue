@@ -7,6 +7,7 @@ const store = useAppStore()
 onMounted(() => {
   store.refreshArticles()
   store.startSse()
+  store.loadDevMode()
 })
 
 // taste 规范：主按钮近黑，accent 朱红只给品牌/关键数据，圆角 6-8px

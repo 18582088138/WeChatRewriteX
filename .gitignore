@@ -4,6 +4,7 @@
 # runtime data
 resource/
 data/
+log/
 
 # python
 __pycache__/

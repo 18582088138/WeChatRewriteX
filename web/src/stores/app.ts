@@ -14,6 +14,8 @@ export const useAppStore = defineStore('app', {
     workbenchTick: 0,
     /** 分阶段进度日志（stage.progress 事件滚动保留 40 条） */
     progressLog: [] as { ts: number; article_id?: string; message: string }[],
+    /** 开发者模式（设置页开关；控制日志可视化与成本面板显示） */
+    devMode: false as boolean,
   }),
   actions: {
     async refreshArticles() {
@@ -23,6 +25,12 @@ export const useAppStore = defineStore('app', {
       } finally {
         this.loading = false
       }
+    },
+    async loadDevMode() {
+      try {
+        const s = (await api.get('/api/settings')).settings
+        this.devMode = !!s?.dev?.mode
+      } catch { /* 保持默认关 */ }
     },
     startSse() {
       subscribeSse((e) => {

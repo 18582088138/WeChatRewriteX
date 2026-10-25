@@ -144,6 +144,9 @@ def put_setting(body: SettingPut) -> dict:
         raise HTTPException(400, "llm.channels 请直接编辑 config/settings.yaml")
     dao.set_setting(body.key, body.value)
     config.reload()
+    if body.key == "dev.mode":                      # 开发者模式即时生效
+        from .. import logging_setup
+        logging_setup.configure(bool(body.value))
     return {"ok": True}
 
 
@@ -171,3 +174,42 @@ def sse():
 @router.get("/health")
 def health() -> dict:
     return {"ok": True}
+
+
+# ---------- 开发者模式：日志可视化 + 成本监控 ----------
+
+@router.get("/logs/tail")
+def logs_tail(lines: int = 200) -> dict:
+    from .. import logging_setup
+    if not logging_setup.enabled():
+        raise HTTPException(403, "开发者模式未开启（设置页 → 开发者模式）")
+    return {"lines": logging_setup.tail(min(lines, 1000))}
+
+
+_STAGE_GROUP = {"collector": "收集", "creator": "创作", "reviewer": "审稿"}
+
+
+@router.get("/articles/{aid}/costs")
+def article_costs(aid: str) -> dict:
+    """API 费用监控：按环节聚合调用次数与 token（dev.mode 开启时前端展示）。"""
+    from ..storage import db
+    rows = db.query(
+        "SELECT stage, prompt_tokens, completion_tokens, cost_est FROM llm_calls "
+        "WHERE article_id=?", (aid,))
+    by_stage: dict[str, dict] = {}
+    for r in rows:
+        stage = r["stage"] or ""
+        group = next((v for k, v in _STAGE_GROUP.items() if stage.startswith(k)), "其他")
+        g = by_stage.setdefault(group, {"calls": 0, "prompt_tokens": 0,
+                                        "completion_tokens": 0, "cost_est": 0.0})
+        g["calls"] += 1
+        g["prompt_tokens"] += r["prompt_tokens"]
+        g["completion_tokens"] += r["completion_tokens"]
+        g["cost_est"] += r["cost_est"]
+    for g in by_stage.values():
+        g["cost_est"] = round(g["cost_est"], 6)
+    total = {"calls": len(rows),
+             "prompt_tokens": sum(r["prompt_tokens"] for r in rows),
+             "completion_tokens": sum(r["completion_tokens"] for r in rows),
+             "cost_est": round(sum(r["cost_est"] for r in rows), 6)}
+    return {"by_stage": by_stage, "total": total}

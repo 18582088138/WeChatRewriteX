@@ -10,10 +10,15 @@ from ..storage import dao
 from . import orchestrator
 
 _handlers: dict[str, callable] = {}
-_worker_thread: threading.Thread | None = None
 _stop = threading.Event()
+_worker_threads: list[threading.Thread] = []
 
 MAX_ATTEMPTS = 2
+
+# 双泳道（反馈 2：抓取与创作并行互不阻塞）：
+# lane A = 抓取类（collect/ingest/deepsearch），lane B = 创作类（create/review/publish）
+LANE_A = ("collect", "ingest", "deepsearch")
+LANE_B = ("create", "review", "publish")
 
 
 def register_defaults(llm=None) -> None:
@@ -70,11 +75,11 @@ def enqueue(job_type: str, article_id: str | None = None, payload: dict | None =
     return jid
 
 
-def _loop() -> None:
+def _loop(lane_types: tuple[str, ...]) -> None:
     while not _stop.is_set():
         job = None
         try:
-            job = dao.claim_job()
+            job = dao.claim_job(lane_types)
         except Exception:
             time.sleep(1)
             continue
@@ -85,14 +90,19 @@ def _loop() -> None:
         if not handler:
             dao.fail_job(job["id"], f"无处理器: {job['type']}")
             continue
+        from .. import logging_setup
+        logging_setup.log("info", "任务开始 %s (article=%s)", job["type"], job["article_id"])
         try:
             import json
             payload = json.loads(job.get("payload_json") or "{}")
             result = handler(job["article_id"], payload)
             dao.finish_job(job["id"], result)
+            logging_setup.log("info", "任务完成 %s (article=%s)", job["type"], job["article_id"])
         except Exception as e:
             requeue = job["attempts"] < MAX_ATTEMPTS
             dao.fail_job(job["id"], str(e)[:500], requeue=requeue)
+            logging_setup.log("error", "任务失败 %s (article=%s): %s",
+                              job["type"], job["article_id"], str(e)[:300])
             if not requeue:
                 orchestrator.mark_failed(job["article_id"], str(e))
 
@@ -104,14 +114,16 @@ def recover_interrupted() -> None:
 
 
 def start(llm=None) -> None:
-    global _worker_thread
     register_defaults(llm)
     recover_interrupted()
-    if _worker_thread and _worker_thread.is_alive():
+    if any(t.is_alive() for t in _worker_threads):
         return
     _stop.clear()
-    _worker_thread = threading.Thread(target=_loop, name="pipeline-worker", daemon=True)
-    _worker_thread.start()
+    _worker_threads.clear()
+    for name, lane in (("lane-fetch", LANE_A), ("lane-create", LANE_B)):
+        t = threading.Thread(target=_loop, args=(lane,), name=f"pipeline-{name}", daemon=True)
+        _worker_threads.append(t)
+        t.start()
 
 
 def stop() -> None:

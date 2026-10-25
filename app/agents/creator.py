@@ -63,12 +63,9 @@ class CreatorAgent(AgentBase):
         if new_title:
             library.rename_to_created_title(article_id, new_title)
 
-        version = dao.next_version(article_id)
-        doc.version = version
-        doc.id = f"{article_id}-v{version}"
-        dao.save_draft(doc, origin="agent")
-        library.save_draft_files(doc, bk.to_markdown(doc))
-        events.bus.publish(events.CREATE_FINISHED, article_id, version=version,
+        from ..services import draft_service
+        doc = draft_service.save_new_version(doc, origin="agent", checkpoint=True)
+        events.bus.publish(events.CREATE_FINISHED, article_id, version=doc.version,
                            word_count=bk.doc_word_count(doc))
         return doc
 

@@ -158,11 +158,14 @@ resource/
 - 向量：文本块与图片说明 → embedding（可配 bge / provider embedding API）→ sqlite-vec 存储；用于「段落选图」「claims 找证据」「撞稿语义比对」。
 - 向量索引失败可整体降级为纯 FTS，不阻断流程。
 
-## 版本与落盘
+## 版本与落盘（V1.2 块级增量版本）
 
-- 每次保存 = 新 `drafts` 行（`parent_version` 指回），文件写 `data/drafts/<article_id>/vNNN.md` + `vNNN.json`。
-- 定稿后版本锁定（只读），后续修改自动开新版本。
-- Agent 每次运行的完整输入/输出存 `data/drafts/<id>/runs/<stage>-<ts>.json`，可复盘。
+- drafts 表只存**稀疏 checkpoint**（创建 v1 / 定稿 / 回滚点）；每次编辑只记 `draft_changes`
+  变更块差异（old/new 块快照 + meta diff），不再每版全量备份。
+- HEAD = 最近 checkpoint + 后续变更重放（`dao.latest_draft` 透明处理）；任意版本可重建
+  （`dao.get_draft(aid, version)`）；回滚 = 重建目标态存为新 checkpoint。
+- checkpoint 文件落 `<项目>/drafts/vNNN.md/.json`；Agent 运行记录在 `<项目>/drafts/runs/`。
+- 关键词统一 `#关键词` 格式、中文逗号分隔（入库剥离 #）；改主标题联动正文一级标题与项目文件夹改名。
 
 ## 开放问题
 

@@ -1,9 +1,17 @@
-"""草稿版本服务：一切修改产生新版本 + 落盘 + 触发增量复审判断。"""
+"""草稿版本服务（块级增量版本，类 Git）：
+
+- drafts 表只存**稀疏 checkpoint**（创建 v1 / 定稿 / 回滚点），不再是每版全量备份；
+- 每次编辑只往 draft_changes 记**变更块的差异**（old/new 块快照 + meta diff）；
+- 当前稿 HEAD = 最近 checkpoint + 后续变更重放（dao.latest_draft 透明处理）；
+- 任意版本可重建（get_draft(aid, version)），回滚 = 重建目标态存为新 checkpoint。
+"""
 from __future__ import annotations
+
+import json
 
 from ..core import blocks as bk
 from ..core import config, events
-from ..core.models import BlockType, DraftDoc
+from ..core.models import Block, BlockType, DraftDoc
 from ..storage import dao, library
 
 
@@ -14,23 +22,87 @@ def get_doc(article_id: str, version: int | None = None) -> tuple[DraftDoc, dict
     return DraftDoc.model_validate_json(row["doc_json"]), row
 
 
-def save_new_version(doc: DraftDoc, origin: str) -> DraftDoc:
-    doc.version = dao.next_version(doc.article_id)
-    doc.id = f"{doc.article_id}-v{doc.version}"
+def _diff_blocks(old: DraftDoc, new: DraftDoc) -> list[dict]:
+    """块级差异：update / insert / remove。insert 记录 _after 供重放定位。"""
+    changes: list[dict] = []
+    old_map = {b.id: b for b in old.blocks}
+    new_map = {b.id: b for b in new.blocks}
+    for bid, b in old_map.items():
+        if bid not in new_map:
+            changes.append({"block_id": bid, "op": "remove",
+                            "old": b.model_dump_json(), "new": None})
+    for i, b in enumerate(new.blocks):
+        if b.id not in old_map:
+            payload = json.loads(b.model_dump_json())
+            payload["_after"] = new.blocks[i - 1].id if i > 0 else None
+            changes.append({"block_id": b.id, "op": "insert",
+                            "old": None, "new": json.dumps(payload, ensure_ascii=False)})
+        elif old_map[b.id].model_dump() != b.model_dump():
+            changes.append({"block_id": b.id, "op": "update",
+                            "old": old_map[b.id].model_dump_json(),
+                            "new": b.model_dump_json()})
+    old_meta = old.meta.model_dump(exclude={"xhs_pages"})
+    new_meta = new.meta.model_dump(exclude={"xhs_pages"})
+    if old_meta != new_meta:
+        changes.append({"block_id": "__meta__", "op": "meta",
+                        "old": json.dumps(old_meta, ensure_ascii=False),
+                        "new": json.dumps(new_meta, ensure_ascii=False)})
+    return changes
+
+
+def save_new_version(doc: DraftDoc, origin: str, checkpoint: bool = False) -> DraftDoc:
+    """保存：默认只记块级变更；checkpoint=True 时写稀疏全量快照（创建/定稿/回滚）。"""
+    seq = dao.next_version(doc.article_id)
+    head = dao.latest_draft(doc.article_id)
+    if head and not checkpoint:
+        old = DraftDoc.model_validate_json(head["doc_json"])
+        changes = _diff_blocks(old, doc)
+        for c in changes:
+            dao.record_change(doc.article_id, seq, c["block_id"], c["op"],
+                              c["old"], c["new"], origin)
+    doc.version = seq
+    doc.id = f"{doc.article_id}-v{seq}"
     doc.meta.word_count = bk.doc_word_count(doc)
-    dao.save_draft(doc, origin=origin)
-    library.save_draft_files(doc, bk.to_markdown(doc))
+    if checkpoint or not head:
+        dao.save_draft(doc, origin=origin)
+        library.save_draft_files(doc, bk.to_markdown(doc))   # 文件只随 checkpoint 落盘
     events.bus.publish(events.DRAFT_SAVED, doc.article_id, version=doc.version,
-                       origin=origin)
+                       origin=origin, checkpoint=checkpoint)
     return doc
 
 
-def apply_ops(doc: DraftDoc, ops: list[dict]) -> int:
-    """应用编辑操作，返回改动计数。
+def save_checkpoint(article_id: str, origin: str, status: str = "editing") -> DraftDoc | None:
+    """把当前 HEAD 落为一个稀疏 checkpoint（定稿/手动存档用）。"""
+    head = dao.latest_draft(article_id)
+    if not head:
+        return None
+    doc = DraftDoc.model_validate_json(head["doc_json"])
+    row = save_new_version(doc, origin=origin, checkpoint=True)
+    dao.set_draft_status(row.id, status)
+    return row
 
-    op: update(块文本) | remove | replace_image | set_caption | update_meta(元信息)。
-    update_meta 的 field ∈ title_selected | one_liner | keywords | title_candidates。
-    """
+
+def rollback(article_id: str, target_version: int) -> DraftDoc:
+    """一键回滚：重建目标版本状态并存为新 checkpoint（HEAD 立即指向它）。"""
+    row = dao.get_draft(article_id, target_version)
+    if not row:
+        raise ValueError(f"版本 v{target_version} 不存在")
+    doc = DraftDoc.model_validate_json(row["doc_json"])
+    seq = dao.next_version(article_id)
+    dao.record_change(article_id, seq, "__doc__", "rollback",
+                      None, json.dumps({"target": target_version}), "human")
+    doc.version = seq                      # checkpoint 用新序号，内容为目标态（防 UNIQUE 冲突）
+    doc.id = f"{article_id}-v{seq}"
+    out = dao.save_draft(doc, origin="rollback")
+    out_doc = DraftDoc.model_validate_json(out["doc_json"])
+    library.save_draft_files(out_doc, bk.to_markdown(out_doc))
+    events.bus.publish(events.DRAFT_SAVED, article_id, version=out["version"],
+                       origin="rollback", checkpoint=True)
+    return out_doc
+
+
+def apply_ops(doc: DraftDoc, ops: list[dict]) -> int:
+    """应用编辑操作，返回改动计数。op: update|remove|replace_image|set_caption|update_meta|insert_after。"""
     changed = 0
     for op in ops:
         kind = op.get("op", "update")
@@ -51,20 +123,26 @@ def apply_ops(doc: DraftDoc, ops: list[dict]) -> int:
             if b and b.type in (BlockType.IMAGE, BlockType.VIDEO):
                 b.caption = op.get("caption") or ""
                 changed += 1
+        elif kind == "insert_after":
+            nb = Block(id=bk.new_block_id(), type=BlockType(op.get("block_type", "paragraph")),
+                       text=str(op.get("text", "")),
+                       asset_id=op.get("asset_id"), caption=op.get("caption"))
+            bk.insert_block(doc, bid or None, nb)
+            changed += 1
         elif kind == "update_meta":
             field, value = op.get("field"), op.get("value")
             if field == "one_liner" and isinstance(value, str):
                 doc.meta.one_liner = value.strip()
                 changed += 1
             elif field == "keywords" and isinstance(value, list):
-                doc.meta.keywords = [str(x).strip() for x in value if str(x).strip()][:8]
+                doc.meta.keywords = [str(x).strip().lstrip("#") for x in value
+                                     if str(x).strip().lstrip("#")][:8]
                 changed += 1
             elif field == "title_candidates" and isinstance(value, list):
                 doc.meta.title_candidates = [str(x).strip() for x in value
                                              if str(x).strip()][:5]
                 changed += 1
             elif field == "title_selected" and isinstance(value, str):
-                # 把选中标题挪到候选首位（发布/卡片取 [0]）
                 cands = [c for c in doc.meta.title_candidates if c != value]
                 doc.meta.title_candidates = [value.strip()] + cands
                 changed += 1

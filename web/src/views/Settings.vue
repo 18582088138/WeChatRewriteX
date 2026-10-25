@@ -3,12 +3,17 @@ import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { NButton, NInputNumber, NSelect, NSwitch, NTag, useMessage } from 'naive-ui'
 import { api, getToken, setToken } from '../api'
+import { useAppStore } from '../stores/app'
 
 const router = useRouter()
+const store = useAppStore()
 const message = useMessage()
 
 const data = ref<any>(null)
 const token = ref(getToken())
+const devMode = ref(false)
+const logLines = ref<string[]>([])
+const logLoading = ref(false)
 
 const editable = ref({
   'collect.search_window_days': 3,
@@ -29,6 +34,8 @@ async function load() {
     const v = k.split('.').reduce((o, p) => o?.[p], s)
     if (v !== undefined) (editable.value as any)[k] = v
   }
+  devMode.value = !!s?.dev?.mode
+  if (devMode.value) loadLogs()
 }
 onMounted(load)
 
@@ -37,6 +44,22 @@ async function save(key: string, value: any) {
     await api.put('/api/settings', { key, value })
     message.success(`已保存 ${key}`)
   } catch (e: any) { message.error(e.message) }
+}
+
+async function toggleDevMode(v: boolean) {
+  devMode.value = v
+  await save('dev.mode', v)
+  store.devMode = v
+  message.success(v ? '开发者模式已开启：日志写入 log/、面板可见日志与开销' : '开发者模式已关闭')
+  if (v) loadLogs()
+}
+
+async function loadLogs() {
+  logLoading.value = true
+  try {
+    logLines.value = (await api.get('/api/logs/tail?lines=200')).lines
+  } catch (e: any) { logLines.value = []; message.warning(e.message) }
+  finally { logLoading.value = false }
 }
 
 function saveToken() {
@@ -153,6 +176,25 @@ function saveToken() {
           可直接编辑 system.md / rules.md / banlist.txt 微调；调优方法见
           <code class="bg-slate-100 px-1 rounded">docs/design/06-style-guide.md</code>。
         </div>
+      </section>
+      <!-- 开发者模式（默认关闭） -->
+      <section class="panel p-5 space-y-3">
+        <div class="flex items-center justify-between">
+          <div class="font-semibold">开发者模式</div>
+          <NSwitch :value="devMode" @update:value="toggleDevMode" />
+        </div>
+        <div class="text-xs" style="color: var(--faint);">
+          开启后：运行日志写入 <code class="bg-slate-100 px-1 rounded">log/app.log</code>（不进 git）；
+          各分页下方显示累计 API 开销（发布页汇总全流程）；此处可查看实时日志。
+        </div>
+        <template v-if="devMode">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-medium">运行日志（最近 200 行）</span>
+            <NButton size="tiny" :loading="logLoading" @click="loadLogs">刷新</NButton>
+          </div>
+          <pre class="text-xs p-3 rounded-md overflow-auto max-h-64"
+               style="background: #141414; color: #B9B4A9; font-family: Consolas, monospace;">{{ logLines.join('\n') || '（暂无日志，运行一个任务后刷新）' }}</pre>
+        </template>
       </section>
     </main>
   </div>

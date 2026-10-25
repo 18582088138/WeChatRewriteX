@@ -1,55 +1,94 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { NButton, NEmpty, NInput, NModal, NSelect, NSpin, useMessage } from 'naive-ui'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { NButton, NCheckbox, NInput, NModal, NSelect, NSpin, useDialog, useMessage } from 'naive-ui'
 import { api } from '../api'
 import { useAppStore } from '../stores/app'
-import type { Block, DraftDoc, Material, VersionRow } from '../types'
+import type { Block, DraftDoc, Material } from '../types'
 
 const props = defineProps<{ articleId: string }>()
 const emit = defineEmits<{ (e: 'goto-review'): void }>()
 const message = useMessage()
+const dialog = useDialog()
 const store = useAppStore()
 
+/* ================= 数据 ================= */
 const draftId = ref('')
 const doc = ref<DraftDoc | null>(null)
-const versions = ref<VersionRow[]>([])
-const viewingVersion = ref<number | null>(null)
+const versions = ref<any[]>([])
 const loading = ref(false)
+const article = ref<any>(null)
+const sessionMaterials = ref<Material[]>([])
+const costs = ref<any>(null)
 
+/* ================= 侧窗：自适应吸附 + 悬停弹出（反馈 1 布局规则） ================= */
+const wide = ref(window.innerWidth >= 1200)
+const leftOpen = ref(true)
+const rightOpen = ref(true)
+let mq: MediaQueryList
+function onMq(e: MediaQueryListEvent) {
+  wide.value = e.matches
+  leftOpen.value = e.matches
+  rightOpen.value = e.matches
+}
+
+/* ================= 编辑器状态 ================= */
 const selectedId = ref<string | null>(null)
 const editingId = ref<string | null>(null)
 const editText = ref('')
-
 const aiModal = ref(false)
 const aiInstruction = ref('')
 const aiBusy = ref(false)
 const aiTargets = ref<string[]>([])
-
+const wholeArticle = ref(false)
+const lightboxUrl = ref('')
 const imgModal = ref(false)
 const imgBlockId = ref('')
-const imageMaterials = ref<Material[]>([])
-
 const insertModal = ref(false)
 const insertIds = ref<string[]>([])
 const insertInstruction = ref('')
 
-/* —— 元信息三个独立编辑框 —— */
-const metaTitle = ref('')            // 主标题（候选首位）
-const metaTitleAlts = ref('')        // 其余候选，每行一个
+/* 底部信息窗口 */
+const metaTitle = ref('')
+const metaTitleAlts = ref('')
 const metaOneLiner = ref('')
 const metaKeywords = ref('')
-const metaSaving = ref('')
+const metaEditing = ref<string | null>(null)
 
 const isLatest = computed(() =>
-  !versions.value.length || viewingVersion.value === versions.value[0]?.version)
+  !versions.value.length || doc.value?.version === versions.value[0]?.version)
 const finalized = computed(() => versions.value[0]?.status === 'finalized')
+const textBlocks = computed(() =>
+  doc.value?.blocks.filter(b => ['heading', 'paragraph', 'quote'].includes(b.type)) ?? [])
 
-function assetUrl(assetId: string): string {
-  return api.absUrl(`/api/materials/${assetId}/file`)
+function assetUrl(assetId: string) { return api.absUrl(`/api/materials/${assetId}/file`) }
+
+/* ================= 加载 ================= */
+async function load(version?: number) {
+  loading.value = true
+  try {
+    const r = await api.get(`/api/articles/${props.articleId}/draft` +
+                            (version ? `?version=${version}` : ''))
+    doc.value = r.draft.doc
+    draftId.value = r.draft.id
+    versions.value = r.versions
+    syncMetaForm()
+  } catch (e) {
+    console.error('draft load failed', e)
+  } finally { loading.value = false }
 }
-function originLabel(origin: string): string {
-  return ({ agent: 'AI', human: '人工', auto_fix: 'AI修复', insert_refs: '资料插入' } as
-    Record<string, string>)[origin] || origin
+
+async function loadArticle() {
+  article.value = await api.get(`/api/articles/${props.articleId}`)
+  const ids: string[] = article.value.selected_material_ids || []
+  if (ids.length) {
+    const all = (await api.get(`/api/articles/${props.articleId}/materials?scope=article`)).materials
+    sessionMaterials.value = all.filter((m: Material) => ids.includes(m.id))
+  } else {
+    sessionMaterials.value = []
+  }
+  if (store.devMode) {
+    try { costs.value = await api.get(`/api/articles/${props.articleId}/costs`) } catch { /* ignore */ }
+  }
 }
 
 function syncMetaForm() {
@@ -59,61 +98,48 @@ function syncMetaForm() {
   metaTitle.value = first || ''
   metaTitleAlts.value = rest.join('\n')
   metaOneLiner.value = d.meta.one_liner || ''
-  metaKeywords.value = (d.meta.keywords || []).join(' ')
+  metaKeywords.value = (d.meta.keywords || []).map(k => `#${k}`).join('，')
 }
 
-async function load(version?: number) {
-  loading.value = true
-  try {
-    const r = await api.get(`/api/articles/${props.articleId}/draft` +
-                            (version ? `?version=${version}` : ''))
-    doc.value = r.draft.doc
-    draftId.value = r.draft.id
-    versions.value = r.versions
-    viewingVersion.value = r.draft.version
-    syncMetaForm()
-  } catch (e) {
-    console.error('draft load failed', e)
-    if (!doc.value) doc.value = null
-  } finally {
-    loading.value = false
-  }
+onMounted(async () => {
+  mq = window.matchMedia('(min-width: 1200px)')
+  mq.addEventListener('change', onMq)
+  wide.value = mq.matches
+  leftOpen.value = mq.matches
+  rightOpen.value = mq.matches
+  await load()
+  await loadArticle()
+})
+onUnmounted(() => mq?.removeEventListener('change', onMq))
+watch(() => store.workbenchTick, () => load())
+
+/* ================= 会话素材（左窗） ================= */
+async function removeFromSession(m: Material) {
+  const ids = (article.value?.selected_material_ids || []).filter((x: string) => x !== m.id)
+  await api.put(`/api/articles/${props.articleId}/selection`, { material_ids: ids })
+  message.success('已从本次创作会话移除（原始素材保留）')
+  await loadArticle()
 }
-onMounted(() => load())
-watch(() => store.workbenchTick, () => load(viewingVersion.value ?? undefined))
 
-/* ---------- 元信息保存 ---------- */
-
-async function saveMeta(field: 'title' | 'one_liner' | 'keywords') {
+async function insertToDoc(m: Material) {
   if (!doc.value || !draftId.value) return
-  metaSaving.value = field
-  const ops: any[] = []
-  if (field === 'title') {
-    if (metaTitle.value.trim())
-      ops.push({ op: 'update_meta', field: 'title_selected', value: metaTitle.value.trim() })
-    const alts = [metaTitle.value.trim(),
-                  ...metaTitleAlts.value.split('\n').map(s => s.trim()).filter(Boolean)]
-    ops.push({ op: 'update_meta', field: 'title_candidates', value: alts })
-  } else if (field === 'one_liner') {
-    ops.push({ op: 'update_meta', field: 'one_liner', value: metaOneLiner.value })
-  } else {
-    ops.push({ op: 'update_meta', field: 'keywords',
-               value: metaKeywords.value.split(/[\s,，、;；]+/).filter(Boolean) })
-  }
+  const op = m.kind === 'text'
+    ? { op: 'insert_after', block_id: selectedId.value, block_type: 'quote', text: m.title }
+    : { op: 'insert_after', block_id: selectedId.value,
+        block_type: m.kind === 'video' ? 'video' : 'image',
+        asset_id: m.id, caption: m.title }
   try {
-    const r = await api.put(`/api/drafts/${draftId.value}/edit`, { ops })
-    message.success(`已保存（v${r.version}）`)
+    const r = await api.put(`/api/drafts/${draftId.value}/edit`, { ops: [op] })
+    message.success(`已插入（v${r.version}）`)
     await load()
-  } catch (e: any) { message.error(e.message) } finally { metaSaving.value = '' }
+  } catch (e: any) { message.error(e.message) }
 }
 
-/* ---------- 块编辑 ---------- */
-
+/* ================= 块编辑（Notebook） ================= */
 function clickBlock(b: Block) {
   selectedId.value = b.id
   store.anchorBlockId = b.id
 }
-
 function dblclickBlock(b: Block) {
   if (!isLatest.value || finalized.value) return
   if (b.type === 'image' || b.type === 'video') { openImagePicker(b.id); return }
@@ -121,7 +147,9 @@ function dblclickBlock(b: Block) {
   editingId.value = b.id
   editText.value = b.text
 }
-
+function onClickOutside() {
+  if (editingId.value) saveEdit()       // 点击块外自动保存（反馈 1.1）
+}
 async function saveEdit() {
   if (!editingId.value || !doc.value) return
   const b = doc.value.blocks.find(x => x.id === editingId.value)
@@ -136,16 +164,45 @@ async function saveEdit() {
   editingId.value = null
 }
 
-function openAi(mode: 'rewrite' | 'shorten' | 'expand' | 'custom') {
-  if (!selectedId.value) return
+async function addBlock(afterId: string | null) {
+  if (!doc.value || !draftId.value) return
+  try {
+    const r = await api.put(`/api/drafts/${draftId.value}/edit`,
+      { ops: [{ op: 'insert_after', block_id: afterId, block_type: 'paragraph', text: '' }] })
+    await load()
+    const d = doc.value!
+    const idx = afterId ? d.blocks.findIndex(b => b.id === afterId) + 1 : d.blocks.length - 1
+    const nb = d.blocks[idx]
+    if (nb) { editingId.value = nb.id; editText.value = '' }
+  } catch (e: any) { message.error(e.message) }
+}
+
+async function removeBlock(blockId: string) {
+  const r = await api.put(`/api/drafts/${draftId.value}/edit`,
+    { ops: [{ op: 'remove', block_id: blockId }] })
+  message.success(`已删除块（v${r.version}）`)
+  selectedId.value = null
+  await load()
+}
+
+/* ================= AI 重写（右窗工具） ================= */
+function openAi(mode: 'rewrite' | 'shorten' | 'expand' | 'custom' | 'whole') {
   const presets = {
     rewrite: '换一种表达，保持事实不变，更自然流畅',
     shorten: '压缩到一半字数，保留事实',
     expand: '展开补充背景解释，不编造数字',
     custom: '',
+    whole: '',
   }
-  aiTargets.value = [selectedId.value]
-  aiInstruction.value = presets[mode]
+  wholeArticle.value = mode === 'whole'
+  if (wholeArticle.value) {
+    aiTargets.value = textBlocks.value.map(b => b.id)
+    aiInstruction.value = '整篇按风格包重新润色：保持事实与结构，统一语气'
+  } else {
+    if (!selectedId.value) return
+    aiTargets.value = [selectedId.value]
+    aiInstruction.value = (presets as any)[mode]
+  }
   aiModal.value = true
 }
 
@@ -160,17 +217,55 @@ async function runAi() {
   } catch (e: any) { message.error(e.message) } finally { aiBusy.value = false }
 }
 
-/* ---------- 图片 ---------- */
+/* ================= 版本管理（右窗） ================= */
+function doRollback(v: number) {
+  dialog.warning({
+    title: `回滚到 v${v}？`,
+    content: '将按块级变更日志重建该版本状态，并保存为新版本（当前状态不丢失，可再回滚回来）。',
+    positiveText: '回滚', negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        const r = await api.post(`/api/articles/${props.articleId}/rollback`, { version: v })
+        message.success(`已回滚到 v${r.rolled_back_to}（存为 v${r.version}）`)
+        await load()
+      } catch (e: any) { message.error(e.message) }
+    },
+  })
+}
 
+/* ================= 底部信息窗口（反馈 1.4） ================= */
+async function saveMeta(field: 'title' | 'one_liner' | 'keywords') {
+  if (!doc.value || !draftId.value) return
+  const ops: any[] = []
+  if (field === 'title') {
+    const t = metaTitle.value.trim()
+    if (!t) return
+    ops.push({ op: 'update_meta', field: 'title_selected', value: t })
+    ops.push({ op: 'update_meta', field: 'title_candidates',
+               value: [t, ...metaTitleAlts.value.split('\n').map(s => s.trim()).filter(Boolean)] })
+  } else if (field === 'one_liner') {
+    ops.push({ op: 'update_meta', field: 'one_liner', value: metaOneLiner.value })
+  } else {
+    const kws = metaKeywords.value.split(/[，,]/).map(s => s.trim().replace(/^#/, '')).filter(Boolean)
+    ops.push({ op: 'update_meta', field: 'keywords', value: kws })
+  }
+  try {
+    const r = await api.put(`/api/drafts/${draftId.value}/edit`, { ops })
+    message.success(`已保存（v${r.version}）` + (r.folder_renamed ? '；项目文件夹已同步改名' : ''))
+    metaEditing.value = null
+    await load()
+    if (r.folder_renamed) await loadArticle()
+  } catch (e: any) { message.error(e.message) }
+}
+
+/* ================= 图片 ================= */
+const imageMaterials = ref<Material[]>([])
 async function openImagePicker(blockId: string) {
   imgBlockId.value = blockId
   const r = await api.get(`/api/articles/${props.articleId}/materials?scope=article&kind=image`)
-  const common = await api.get('/api/materials/common?kind=image')
-  imageMaterials.value = [...r.materials, ...common.materials]
-    .filter((m: Material) => m.fetch_status === 'ok')   // 水印图可用，仅打标
+  imageMaterials.value = r.materials.filter((m: Material) => m.fetch_status === 'ok')
   imgModal.value = true
 }
-
 async function replaceImage(m: Material) {
   try {
     const r = await api.put(`/api/drafts/${draftId.value}/edit`,
@@ -181,16 +276,7 @@ async function replaceImage(m: Material) {
   } catch (e: any) { message.error(e.message) }
 }
 
-async function removeBlock(blockId: string) {
-  const r = await api.put(`/api/drafts/${draftId.value}/edit`,
-    { ops: [{ op: 'remove', block_id: blockId }] })
-  message.success(`已移除（v${r.version}）`)
-  selectedId.value = null
-  await load()
-}
-
-/* ---------- 融合插入（素材面板触发） ---------- */
-
+/* ================= 融合插入（素材页触发） ================= */
 function openInsertRefs(ids: string[]) {
   insertIds.value = ids
   insertInstruction.value = ''
@@ -211,12 +297,52 @@ async function runInsert() {
     await load()
   } catch (e: any) { message.error(e.message) } finally { aiBusy.value = false }
 }
+
+/* ================= 开销 ================= */
+const costLine = computed(() => {
+  if (!store.devMode || !costs.value) return ''
+  const c = costs.value.by_stage?.['创作'] || { calls: 0, prompt_tokens: 0, completion_tokens: 0, cost_est: 0 }
+  return `本页累计开销：${c.calls} 次调用 · ${c.prompt_tokens + c.completion_tokens} tokens · ≈$${c.cost_est}`
+})
 </script>
 
 <template>
-  <div class="flex gap-5 items-start">
-    <!-- 文档区 -->
-    <div class="flex-1 min-w-0 panel p-7 reader" @click.self="selectedId = null">
+  <div class="create-wb relative" @click="onClickOutside">
+    <!-- ============ 左侧素材浏览窗口（吸附/悬停弹出） ============ -->
+    <div v-if="!leftOpen" class="edge-strip left-0" @mouseenter="leftOpen = true" />
+    <aside class="side-panel left-panel panel" :class="{ hidden: !leftOpen }"
+           @mouseleave="wide ? null : (leftOpen = false)">
+      <div class="flex items-center justify-between px-3 py-2" style="border-bottom: 1px solid var(--rule);">
+        <span class="text-xs font-semibold" style="color: var(--muted);">本次创作素材</span>
+        <button class="text-xs hover:underline" style="color: var(--faint);"
+                @click="leftOpen = false">收起</button>
+      </div>
+      <div class="p-2 space-y-2 overflow-auto max-h-[calc(100vh-320px)]">
+        <div v-if="!sessionMaterials.length" class="text-xs p-2" style="color: var(--faint);">
+          未勾选素材。到素材库勾选后点「导入 & 创作」。
+        </div>
+        <div v-for="m in sessionMaterials" :key="m.id" class="relative group rounded-md"
+             style="border: 1px solid var(--rule);">
+          <img v-if="m.kind === 'image' && m.url" :src="api.absUrl(m.url)"
+               class="w-full aspect-video object-cover rounded-t-md cursor-zoom-in"
+               @click.stop="lightboxUrl = api.absUrl(m.url)" />
+          <div v-else class="px-2 py-3 text-xs" style="color: var(--muted);">
+            {{ { text: '文章', video: '视频', audio: '音频', doc: '文档', link: '链接' }[m.kind] || m.kind }} ·
+            {{ m.title || m.id }}
+          </div>
+          <div class="flex items-center justify-between px-1.5 py-1">
+            <button class="text-[11px] hover:underline" style="color: var(--accent-ink);"
+                    @click.stop="insertToDoc(m)">插入正文</button>
+            <button class="text-[11px] hover:underline" style="color: var(--faint);"
+                    @click.stop="removeFromSession(m)">移除</button>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ============ 中央 Notebook 主编辑区 ============ -->
+    <main class="nb-center panel" :style="{ marginLeft: leftOpen ? 'clamp(200px,16vw,300px)' : '0',
+                                          marginRight: rightOpen ? 'clamp(220px,17vw,320px)' : '0' }">
       <NSpin :show="loading">
         <div v-if="!doc && !loading" class="py-20 text-center">
           <p class="text-[15px]" style="color: var(--muted);">还没有文案。</p>
@@ -225,111 +351,113 @@ async function runInsert() {
 
         <template v-if="doc">
           <div v-for="b in doc.blocks" :key="b.id"
-               class="block-item px-2 py-1"
-               :class="{ selected: selectedId === b.id, editing: editingId === b.id }"
-               @click="clickBlock(b)" @dblclick="dblclickBlock(b)">
+               class="block-item" :class="{ selected: selectedId === b.id, editing: editingId === b.id }"
+               @click.stop="clickBlock(b)" @dblclick.stop="dblclickBlock(b)">
             <template v-if="editingId !== b.id">
               <h1 v-if="b.type === 'heading' && b.level === 1">{{ b.text }}</h1>
               <h2 v-else-if="b.type === 'heading'">{{ b.text }}</h2>
-              <p v-else-if="b.type === 'paragraph'">{{ b.text }}</p>
+              <p v-else-if="b.type === 'paragraph'" :class="{ 'text-faint italic': !b.text }">
+                {{ b.text || '（空段，双击输入）' }}</p>
               <blockquote v-else-if="b.type === 'quote'">{{ b.text }}</blockquote>
-              <div v-else-if="b.type === 'image'" class="my-4">
-                <img v-if="b.asset_id" :src="assetUrl(b.asset_id)" :alt="b.caption || ''" />
-                <div v-else class="rounded-md h-40 grid place-items-center text-sm"
-                     style="background: var(--raised); color: var(--faint);">
-                  图片已移除（双击重新选择）</div>
-                <div class="caption">{{ b.caption }}<span v-if="b.source"> · {{ b.source }}</span></div>
+              <div v-else-if="b.type === 'image'" class="my-3">
+                <img v-if="b.asset_id" :src="assetUrl(b.asset_id)" class="rounded-md max-w-full" />
+                <div class="caption">{{ b.caption }}</div>
               </div>
-              <div v-else-if="b.type === 'video'"
-                   class="my-4 rounded-md h-48 grid place-items-center text-sm"
-                   style="background: var(--raised); color: var(--muted);">
-                视频素材（在发布包中获取）</div>
+              <div v-else-if="b.type === 'video'" class="my-3 rounded-md h-40 grid place-items-center text-sm"
+                   style="background: var(--raised); color: var(--muted);">视频素材（发布包获取）</div>
               <hr v-else-if="b.type === 'divider'" />
             </template>
             <textarea v-else v-model="editText" @blur="saveEdit" @keyup.esc="editingId = null"
+                      @click.stop
                       class="w-full outline-none bg-transparent text-[15px] leading-[1.9] resize-none"
                       :rows="Math.max(3, Math.ceil(editText.length / 40))" v-focus></textarea>
+            <button class="add-block" @click.stop="addBlock(b.id)" title="在此插入文本块">+</button>
           </div>
-
-          <div class="text-center text-xs mt-8" style="color: var(--faint);">
-            双击段落进入编辑 · 单击选中后可 AI 改写 · 双击图片可替换
+          <div class="text-center text-xs mt-6" style="color: var(--faint);">
+            双击段落编辑 · 点击外部自动保存 · 块间 + 新增 · 双击图片可替换
           </div>
         </template>
       </NSpin>
+    </main>
+
+    <!-- ============ 右侧工具窗口 ============ -->
+    <div v-if="!rightOpen" class="edge-strip right-0" @mouseenter="rightOpen = true" />
+    <aside class="side-panel right-panel panel" :class="{ hidden: !rightOpen }"
+           @mouseleave="wide ? null : (rightOpen = false)">
+      <div class="flex items-center justify-between px-3 py-2" style="border-bottom: 1px solid var(--rule);">
+        <span class="text-xs font-semibold" style="color: var(--muted);">工具</span>
+        <button class="text-xs hover:underline" style="color: var(--faint);" @click="rightOpen = false">收起</button>
+      </div>
+      <div class="p-3 space-y-4 overflow-auto max-h-[calc(100vh-300px)]">
+        <div>
+          <div class="text-xs font-semibold mb-2" style="color: var(--muted);">AI 重写</div>
+          <div class="grid grid-cols-2 gap-1.5">
+            <NButton size="tiny" :disabled="!selectedId || !isLatest || finalized" @click="openAi('rewrite')">选段重写</NButton>
+            <NButton size="tiny" :disabled="!selectedId || !isLatest || finalized" @click="openAi('shorten')">缩写</NButton>
+            <NButton size="tiny" :disabled="!selectedId || !isLatest || finalized" @click="openAi('expand')">扩写</NButton>
+            <NButton size="tiny" :disabled="!selectedId || !isLatest || finalized" @click="openAi('custom')">自定义…</NButton>
+          </div>
+          <NButton size="tiny" block class="mt-1.5" :disabled="!doc || !isLatest || finalized"
+                   @click="openAi('whole')">整篇重写</NButton>
+        </div>
+        <div>
+          <div class="text-xs font-semibold mb-2" style="color: var(--muted);">版本管理</div>
+          <NSelect size="small" :value="doc?.version" @update:value="(v: number) => load(v)"
+                   :options="versions.map(v => ({
+                     label: `v${v.version} · ${({ agent: 'AI', human: '人工', auto_fix: 'AI修复', insert_refs: '资料插入', rollback: '回滚' } as any)[v.origin] || v.origin}${v.checkpoint ? ' · 快照' : ''}${v.status === 'finalized' ? ' · 定稿' : ''}${v.changes ? ` · ${v.changes}块改动` : ''}`,
+                     value: v.version }))" />
+          <div class="text-[11px] mt-1.5" style="color: var(--faint);">块级增量版本：只记变更块，历史可重建。</div>
+          <NButton size="tiny" block tertiary class="mt-2"
+                   :disabled="!doc || isLatest || finalized"
+                   @click="doc && doRollback(doc.version)">回滚到当前查看的版本</NButton>
+        </div>
+        <div v-if="costLine" class="text-[11px] pt-2"
+             style="color: var(--faint); border-top: 1px solid var(--rule);">{{ costLine }}</div>
+        <NButton block type="primary" size="small" :disabled="!doc" @click="emit('goto-review')">去审稿 →</NButton>
+      </div>
+    </aside>
+
+    <!-- ============ 底部信息窗口（反馈 1.4） ============ -->
+    <div class="bottom-info panel" :style="{ left: leftOpen ? 'clamp(200px,16vw,300px)' : '0',
+                                            right: rightOpen ? 'clamp(220px,17vw,320px)' : '0' }">
+      <div class="info-cell" @dblclick="metaEditing = 'title'">
+        <div class="info-label">标题候选</div>
+        <template v-if="metaEditing === 'title'">
+          <input v-model="metaTitle" class="info-input" placeholder="主标题" @click.stop />
+          <textarea v-model="metaTitleAlts" class="info-input mt-1" rows="2"
+                    placeholder="备选标题，每行一个" @click.stop @blur="saveMeta('title')" />
+          <button class="text-xs hover:underline mt-0.5" style="color: var(--accent-ink);"
+                  @click.stop="saveMeta('title')">保存</button>
+        </template>
+        <template v-else>
+          <div class="info-value font-medium">{{ metaTitle || '（未定）' }}</div>
+          <div v-if="metaTitleAlts" class="info-sub">{{ metaTitleAlts.split('\n')[0] }}</div>
+        </template>
+      </div>
+      <div class="info-cell" @dblclick="metaEditing = 'one_liner'">
+        <div class="info-label">一句话总结</div>
+        <template v-if="metaEditing === 'one_liner'">
+          <textarea v-model="metaOneLiner" class="info-input" rows="2" @click.stop
+                    @blur="saveMeta('one_liner')" />
+        </template>
+        <div v-else class="info-value">{{ metaOneLiner || '（无）' }}</div>
+      </div>
+      <div class="info-cell" @dblclick="metaEditing = 'keywords'">
+        <div class="info-label">关键词</div>
+        <template v-if="metaEditing === 'keywords'">
+          <input v-model="metaKeywords" class="info-input" placeholder="#关键词1，#关键词2"
+                 @click.stop @blur="saveMeta('keywords')" />
+        </template>
+        <div v-else class="info-value" style="color: var(--accent-ink);">{{ metaKeywords || '（无）' }}</div>
+      </div>
     </div>
 
-    <!-- 侧栏 -->
-    <div class="w-72 shrink-0 space-y-4 sticky top-16">
-      <!-- 版本 -->
-      <div class="panel p-4">
-        <div class="text-xs font-semibold mb-2" style="color: var(--muted);">版本</div>
-        <NSelect size="small" :value="viewingVersion" @update:value="(v: number) => load(v)"
-                 :options="versions.map(v => ({ label: `v${v.version} · ${originLabel(v.origin)}${v.status === 'finalized' ? ' · 定稿' : ''}`, value: v.version }))" />
-        <div class="text-xs mt-2" style="color: var(--faint);">
-          历史版本只读；编辑始终作用于最新版。
-          <span v-if="doc" class="num">当前 {{ doc.meta.word_count }} 字。</span>
-        </div>
-      </div>
-
-      <!-- 标题候选（独立框） -->
-      <div class="panel p-4">
-        <div class="text-xs font-semibold mb-2" style="color: var(--muted);">标题候选</div>
-        <NInput size="small" v-model:value="metaTitle" placeholder="主标题"
-                :disabled="!doc || !isLatest || finalized" />
-        <NInput size="small" v-model:value="metaTitleAlts" type="textarea"
-                :autosize="{ minRows: 2, maxRows: 4 }" class="mt-2"
-                placeholder="备选标题，每行一个"
-                :disabled="!doc || !isLatest || finalized" />
-        <NButton size="tiny" class="mt-2" :loading="metaSaving === 'title'"
-                 :disabled="!doc || !isLatest || finalized"
-                 @click="saveMeta('title')">保存标题</NButton>
-      </div>
-
-      <!-- 一句话总结（独立框） -->
-      <div class="panel p-4">
-        <div class="text-xs font-semibold mb-2" style="color: var(--muted);">一句话总结</div>
-        <NInput size="small" v-model:value="metaOneLiner" type="textarea"
-                :autosize="{ minRows: 2, maxRows: 3 }" placeholder="≤40 字"
-                :disabled="!doc || !isLatest || finalized" />
-        <div class="flex items-center justify-between mt-2">
-          <span class="text-xs num" style="color: var(--faint);">{{ metaOneLiner.length }} 字</span>
-          <NButton size="tiny" :loading="metaSaving === 'one_liner'"
-                   :disabled="!doc || !isLatest || finalized"
-                   @click="saveMeta('one_liner')">保存总结</NButton>
-        </div>
-      </div>
-
-      <!-- 关键词（独立框） -->
-      <div class="panel p-4">
-        <div class="text-xs font-semibold mb-2" style="color: var(--muted);">关键词</div>
-        <NInput size="small" v-model:value="metaKeywords" placeholder="空格或逗号分隔"
-                :disabled="!doc || !isLatest || finalized" />
-        <NButton size="tiny" class="mt-2" :loading="metaSaving === 'keywords'"
-                 :disabled="!doc || !isLatest || finalized"
-                 @click="saveMeta('keywords')">保存关键词</NButton>
-      </div>
-
-      <!-- 块操作 -->
-      <div class="panel p-4" v-if="doc && isLatest && !finalized">
-        <div class="text-xs font-semibold mb-2" style="color: var(--muted);">选中块操作</div>
-        <div class="grid grid-cols-2 gap-2">
-          <NButton size="small" :disabled="!selectedId" @click="openAi('rewrite')">AI 重写</NButton>
-          <NButton size="small" :disabled="!selectedId" @click="openAi('shorten')">缩写</NButton>
-          <NButton size="small" :disabled="!selectedId" @click="openAi('expand')">扩写</NButton>
-          <NButton size="small" :disabled="!selectedId" @click="openAi('custom')">自定义…</NButton>
-          <NButton size="small" tertiary type="error" :disabled="!selectedId"
-                   @click="selectedId && removeBlock(selectedId)">删除块</NButton>
-        </div>
-      </div>
-
-      <NButton block type="primary" :disabled="!doc" @click="emit('goto-review')">去审稿 →</NButton>
-    </div>
-
-    <!-- AI 指令弹窗 -->
-    <NModal v-model:show="aiModal" preset="card" title="AI 改写选中段落" class="!max-w-lg">
+    <!-- AI 重写弹窗 -->
+    <NModal v-model:show="aiModal" preset="card"
+            :title="wholeArticle ? 'AI 整篇重写' : 'AI 改写选中段落'" class="!max-w-lg">
       <div class="space-y-3">
         <NInput v-model:value="aiInstruction" type="textarea" :autosize="{ minRows: 3 }"
-                placeholder="改写指令，如：更口语一点 / 压到 100 字以内 / 补充 xx 背景" />
+                placeholder="重写指令，如：更口语一点 / 压到 100 字以内 / 补充 xx 背景" />
         <div class="flex justify-end gap-2">
           <NButton size="small" @click="aiModal = false">取消</NButton>
           <NButton size="small" type="primary" :loading="aiBusy" @click="runAi">生成新版本</NButton>
@@ -337,13 +465,12 @@ async function runInsert() {
       </div>
     </NModal>
 
-    <!-- 图片选择弹窗 -->
+    <!-- 图片替换弹窗 -->
     <NModal v-model:show="imgModal" preset="card" title="从素材库替换图片" class="!max-w-2xl">
       <div class="grid grid-cols-4 gap-3 max-h-96 overflow-auto">
         <div v-for="m in imageMaterials" :key="m.id" class="cursor-pointer group relative"
              @click="replaceImage(m)">
-          <div class="aspect-square rounded-md overflow-hidden panel group-hover:outline-2"
-               style="background: var(--raised);">
+          <div class="aspect-square rounded-md overflow-hidden panel" style="background: var(--raised);">
             <img :src="api.absUrl(m.url)" class="w-full h-full object-cover" loading="lazy" />
           </div>
           <span v-if="m.watermark === 1"
@@ -352,8 +479,12 @@ async function runInsert() {
           <div class="text-xs truncate mt-1" style="color: var(--faint);">{{ m.title }}</div>
         </div>
       </div>
-      <div v-if="!imageMaterials.length" class="py-10 text-center text-sm"
-           style="color: var(--faint);">素材库暂无可用图片</div>
+    </NModal>
+
+    <!-- 图片灯箱 -->
+    <NModal :show="!!lightboxUrl" preset="card" class="!max-w-4xl"
+            @update:show="(v: boolean) => { if (!v) lightboxUrl = '' }">
+      <img :src="lightboxUrl" class="max-w-full max-h-[78vh] mx-auto rounded-md" />
     </NModal>
 
     <!-- 融合插入弹窗 -->
@@ -375,8 +506,49 @@ async function runInsert() {
 
 <script lang="ts">
 export default {
-  directives: {
-    focus: { mounted: (el: HTMLElement) => el.focus() },
-  },
+  directives: { focus: { mounted: (el: HTMLElement) => el.focus() } },
 }
 </script>
+
+<style scoped>
+/* 布局：中央自适应，左右侧窗吸附/悬停弹出（反馈 1 布局规则） */
+.create-wb { min-height: 62vh; }
+.nb-center { transition: margin .2s ease; padding: 28px 32px; min-height: 62vh; }
+.side-panel {
+  position: absolute; top: 0; bottom: 120px; width: clamp(200px, 16vw, 300px);
+  z-index: 5; transition: transform .18s ease; background: var(--surface);
+}
+.left-panel { left: 0; }
+.right-panel { right: 0; width: clamp(220px, 17vw, 320px); }
+.side-panel.hidden { transform: translateX(-102%); }
+.right-panel.hidden { transform: translateX(102%); }
+.edge-strip { position: absolute; top: 0; bottom: 120px; width: 14px; z-index: 4; }
+.edge-strip.left-0 { left: 0; }
+.edge-strip.right-0 { right: 0; }
+
+/* 块间插入按钮 */
+.block-item { position: relative; padding: 2px 6px; border-radius: 6px; }
+.block-item:hover { background: var(--raised); }
+.block-item.selected { background: #FDF0EC; outline: 1px solid #F0C4B8; }
+.block-item.editing { background: var(--surface); outline: 1px solid var(--control); }
+.add-block {
+  position: absolute; left: 50%; bottom: -9px; transform: translateX(-50%);
+  width: 18px; height: 18px; border-radius: 999px; font-size: 12px; line-height: 1;
+  background: var(--surface); border: 1px solid var(--border); color: var(--faint);
+  opacity: 0; transition: opacity .12s; z-index: 3;
+}
+.block-item:hover .add-block { opacity: 1; }
+
+/* 底部信息窗口 */
+.bottom-info { display: grid; grid-template-columns: 1.2fr 1.4fr 1fr; gap: 0; margin-top: 12px; }
+.info-cell { padding: 12px 16px; cursor: default; }
+.info-cell + .info-cell { border-left: 1px solid var(--rule); }
+.info-cell:hover { background: var(--raised); }
+.info-label { font-size: 11px; color: var(--faint); margin-bottom: 4px; }
+.info-value { font-size: 13px; line-height: 1.5; }
+.info-sub { font-size: 11px; color: var(--faint); margin-top: 2px; }
+.info-input { width: 100%; font-size: 13px; border: 1px solid var(--control);
+  border-radius: 6px; padding: 6px 8px; outline: none; background: var(--surface); }
+.info-input:focus { border-color: var(--ink-900); }
+.text-faint { color: var(--faint); }
+</style>

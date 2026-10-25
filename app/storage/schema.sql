@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS articles (
   style_pack    TEXT,
   target_word_count INTEGER,
   user_notes    TEXT DEFAULT '',
-  lib_dir       TEXT,                      -- 素材文件夹名(标题_短id)
+  lib_dir       TEXT,                      -- 项目文件夹名(标题_日期时间)
+  selected_json TEXT DEFAULT '[]',         -- 创作会话勾选素材集合
   error         TEXT,
   created_at    TEXT DEFAULT (datetime('now', 'localtime')),
   updated_at    TEXT DEFAULT (datetime('now', 'localtime'))
@@ -64,6 +65,21 @@ CREATE TABLE IF NOT EXISTS drafts (
   UNIQUE(article_id, version)
 );
 CREATE INDEX IF NOT EXISTS idx_drafts_article ON drafts(article_id, version DESC);
+
+-- 块级增量版本（类 Git）：drafts 仅存稀疏 checkpoint（创建/定稿/回滚点），
+-- 每次编辑只记变更块的差异；HEAD = 最近 checkpoint + 后续变更重放。
+CREATE TABLE IF NOT EXISTS draft_changes (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  article_id    TEXT NOT NULL,
+  seq           INTEGER NOT NULL,          -- 全文档单调递增的保存序号（= 对外版本号）
+  block_id      TEXT NOT NULL,
+  op            TEXT NOT NULL,             -- update|insert|remove|replace_image|set_caption|meta|rollback
+  old_json      TEXT,                      -- 变更前块/元信息快照
+  new_json      TEXT,                      -- 变更后
+  origin        TEXT DEFAULT 'human',
+  created_at    TEXT DEFAULT (datetime('now', 'localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_changes_article ON draft_changes(article_id, seq);
 
 CREATE TABLE IF NOT EXISTS reviews (
   id            TEXT PRIMARY KEY,

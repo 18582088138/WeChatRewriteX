@@ -163,7 +163,12 @@ def save_draft(doc: DraftDoc, origin: str = "agent", status: str = "editing") ->
 
 
 def get_draft(article_id: str, version: int) -> dict | None:
-    return db.query_one("SELECT * FROM drafts WHERE article_id=? AND version=?", (article_id, version))
+    cp = checkpoint_at(article_id, version)
+    if not cp:
+        return None
+    if cp["version"] == version:
+        return cp
+    return _reconstruct(aid=article_id, checkpoint=cp, target_seq=version)
 
 
 def get_draft_by_id(draft_id: str) -> dict | None:
@@ -171,8 +176,57 @@ def get_draft_by_id(draft_id: str) -> dict | None:
 
 
 def latest_draft(article_id: str) -> dict | None:
-    return db.query_one(
-        "SELECT * FROM drafts WHERE article_id=? ORDER BY version DESC LIMIT 1", (article_id,))
+    """当前 HEAD：最近 checkpoint + 后续变更重放（无变更则直接返回 checkpoint）。"""
+    cp = latest_checkpoint(article_id)
+    if not cp:
+        return None
+    changes = changes_after(article_id, cp["version"])
+    if not changes:
+        return cp
+    last_seq = changes[-1]["seq"]
+    return _reconstruct(article_id, cp, last_seq)
+
+
+def _reconstruct(article_id: str, checkpoint: dict, target_seq: int) -> dict:
+    """checkpoint 快照 + 逐条变更重放到目标版本（块级增量版本的核心）。"""
+    import json as _json
+    from ..core.models import Block, DraftDoc
+    doc = DraftDoc.model_validate_json(checkpoint["doc_json"])
+    changes = [c for c in changes_after(article_id, checkpoint["version"])
+               if c["seq"] <= target_seq]
+    for c in changes:
+        op = c["op"]
+        if op == "update" or op == "replace_image" or op == "set_caption":
+            new = _json.loads(c["new_json"]) if c["new_json"] else None
+            if new:
+                for i, b in enumerate(doc.blocks):
+                    if b.id == c["block_id"]:
+                        doc.blocks[i] = Block.model_validate(new)
+                        break
+        elif op == "insert":
+            new = _json.loads(c["new_json"]) if c["new_json"] else None
+            if new:
+                b = Block.model_validate(new)
+                # 插入位置记录在新块 attrs 的 after
+                after = (c["new_json"] and _json.loads(c["new_json"]).get("_after")) or None
+                doc.blocks.append(b) if after is None else None
+                if after is not None:
+                    for i, x in enumerate(doc.blocks):
+                        if x.id == after:
+                            doc.blocks.insert(i + 1, b)
+                            break
+        elif op == "remove":
+            doc.blocks = [b for b in doc.blocks if b.id != c["block_id"]]
+        elif op == "meta":
+            new = _json.loads(c["new_json"]) if c["new_json"] else None
+            if new:
+                doc.meta = doc.meta.model_validate({**doc.meta.model_dump(), **new})
+    out = dict(checkpoint)
+    out["doc_json"] = doc.model_dump_json()
+    out["version"] = target_seq
+    out["id"] = f"{article_id}-v{target_seq}"
+    out["reconstructed"] = True
+    return out
 
 
 def list_drafts(article_id: str) -> list[dict]:
@@ -183,7 +237,53 @@ def list_drafts(article_id: str) -> list[dict]:
 
 def next_version(article_id: str) -> int:
     row = db.query_one("SELECT MAX(version) AS v FROM drafts WHERE article_id=?", (article_id,))
-    return (row["v"] or 0) + 1
+    chg = db.query_one("SELECT MAX(seq) AS s FROM draft_changes WHERE article_id=?", (article_id,))
+    return max(row["v"] or 0, chg["s"] or 0) + 1
+
+
+def record_change(article_id: str, seq: int, block_id: str, op: str,
+                  old_json: str | None, new_json: str | None, origin: str) -> None:
+    db.execute(
+        """INSERT INTO draft_changes(article_id,seq,block_id,op,old_json,new_json,origin)
+           VALUES(?,?,?,?,?,?,?)""",
+        (article_id, seq, block_id, op, old_json, new_json, origin),
+    )
+
+
+def changes_after(article_id: str, after_seq: int) -> list[dict]:
+    return db.query(
+        "SELECT * FROM draft_changes WHERE article_id=? AND seq>? ORDER BY seq, id",
+        (article_id, after_seq))
+
+
+def latest_checkpoint(article_id: str) -> dict | None:
+    return db.query_one(
+        "SELECT * FROM drafts WHERE article_id=? ORDER BY version DESC LIMIT 1", (article_id,))
+
+
+def checkpoint_at(article_id: str, version: int) -> dict | None:
+    return db.query_one(
+        "SELECT * FROM drafts WHERE article_id=? AND version<=? ORDER BY version DESC LIMIT 1",
+        (article_id, version))
+
+
+def list_draft_versions(article_id: str) -> list[dict]:
+    """版本时间线：checkpoint + 每次编辑的变更组，供版本下拉。"""
+    cps = db.query(
+        "SELECT id, version, origin, status, word_count, created_at FROM drafts "
+        "WHERE article_id=?", (article_id,))
+    out = [{"version": c["version"], "origin": c["origin"], "status": c["status"],
+            "word_count": c["word_count"], "created_at": c["created_at"],
+            "checkpoint": True, "draft_id": c["id"]} for c in cps]
+    groups = db.query(
+        "SELECT seq, origin, MIN(created_at) AS created_at, COUNT(*) AS n FROM draft_changes "
+        "WHERE article_id=? GROUP BY seq ORDER BY seq DESC", (article_id,))
+    for g in groups:
+        out.append({"version": g["seq"], "origin": g["origin"], "status": "",
+                    "word_count": None, "created_at": g["created_at"],
+                    "checkpoint": False, "changes": g["n"]})
+    out.sort(key=lambda x: -x["version"])
+    return out
 
 
 def set_draft_status(draft_id: str, status: str) -> None:
@@ -249,18 +349,29 @@ def enqueue_job(job_type: str, article_id: str | None = None, payload: dict | No
     return jid
 
 
-def claim_job() -> dict | None:
+def claim_job(types: tuple[str, ...] | None = None) -> dict | None:
+    """原子认领任务（UPDATE...RETURNING，多线程安全）。types 限定泳道。"""
     with db.connect() as conn:
-        row = conn.execute(
-            "SELECT * FROM jobs WHERE status='pending' AND run_after<=strftime('%s','now') "
-            "ORDER BY created_at LIMIT 1").fetchone()
-        if not row:
-            return None
-        conn.execute(
-            "UPDATE jobs SET status='running', attempts=attempts+1, "
-            "updated_at=datetime('now','localtime') WHERE id=?", (row["id"],))
+        if types:
+            marks = ",".join("?" for _ in types)
+            row = conn.execute(
+                f"""UPDATE jobs SET status='running', attempts=attempts+1,
+                    updated_at=datetime('now','localtime')
+                    WHERE id = (SELECT id FROM jobs WHERE status='pending'
+                                AND run_after<=strftime('%s','now') AND type IN ({marks})
+                                ORDER BY created_at LIMIT 1)
+                    RETURNING *""",
+                types).fetchone()
+        else:
+            row = conn.execute(
+                """UPDATE jobs SET status='running', attempts=attempts+1,
+                   updated_at=datetime('now','localtime')
+                   WHERE id = (SELECT id FROM jobs WHERE status='pending'
+                               AND run_after<=strftime('%s','now')
+                               ORDER BY created_at LIMIT 1)
+                   RETURNING *""").fetchone()
         conn.commit()
-        return dict(row)
+        return dict(row) if row else None
 
 
 def finish_job(jid: str, result: dict | None = None) -> None:

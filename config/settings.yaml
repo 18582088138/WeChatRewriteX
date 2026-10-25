@@ -49,6 +49,10 @@ variants:
   weibo:     { max_chars: 140 }
   x:         { max_tweets: 6 }
 
+# ---- 开发者模式（默认关闭）----
+dev:
+  mode: false        # 开启后: log/ 持久化日志、界面日志可视化、API 费用监控面板
+
 # ---- LLM 渠道与路由 ----
 # channel.provider 决定 base_url 预设(deepseek/volcengine/openai)与 env_key
 llm:

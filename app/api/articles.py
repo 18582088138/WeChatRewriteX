@@ -8,7 +8,7 @@ from ..core import config, events
 from ..core.models import ArticleStatus
 from ..core.statemachine import ui_status
 from ..pipeline import orchestrator, queue
-from ..storage import dao
+from ..storage import dao, db
 
 router = APIRouter(prefix="/api/articles", tags=["articles"])
 jobs_router = APIRouter(prefix="/api/jobs", tags=["jobs"])
@@ -65,12 +65,32 @@ def article_detail(aid: str) -> dict:
     out["versions"] = dao.list_drafts(aid)
     out["latest_review"] = dao.latest_review(aid)
     out["publish_jobs"] = dao.list_publish_jobs(aid)
+    import json as _json
+    try:
+        out["selected_material_ids"] = _json.loads(art.get("selected_json") or "[]")
+    except Exception:
+        out["selected_material_ids"] = []
     return out
 
 
 class Advance(BaseModel):
     stage: str          # collect | create | review
     selected_material_ids: list[str] | None = None   # create 阶段: 勾选参与创作的素材
+
+
+class Selection(BaseModel):
+    material_ids: list[str]
+
+
+@router.put("/{aid}/selection")
+def set_selection(aid: str, body: Selection) -> dict:
+    """保存创作会话的勾选素材集合（左侧素材浏览窗口数据源）。"""
+    if not dao.get_article(aid):
+        raise HTTPException(404, "文章不存在")
+    import json
+    db.execute("UPDATE articles SET selected_json=? WHERE id=?",
+               (json.dumps(body.material_ids, ensure_ascii=False), aid))
+    return {"ok": True, "count": len(body.material_ids)}
 
 
 @router.post("/{aid}/advance")
@@ -111,7 +131,9 @@ def finalize(aid: str, body: Finalize) -> dict:
         blockers = dao.pending_blockers(review["id"])
     if blockers and not body.force and config.get("review.block_on_blocker", True):
         raise HTTPException(409, f"存在 {blockers} 个未处理 blocker，禁止定稿")
-    dao.set_draft_status(draft["id"], "finalized")
+    # 定稿 = 落一个稀疏 checkpoint（块级增量版本下，checkpoint 只在 创建/定稿/回滚 时产生）
+    from ..services import draft_service
+    cp = draft_service.save_checkpoint(aid, origin="human", status="finalized")
     from ..core.statemachine import transition
     cur = ArticleStatus(art["status"])
     if cur == ArticleStatus.REVIEWED:
@@ -119,9 +141,10 @@ def finalize(aid: str, body: Finalize) -> dict:
         cur = ArticleStatus.EDITING
     transition(cur, ArticleStatus.FINALIZED)
     dao.set_article_status(aid, ArticleStatus.FINALIZED)
-    events.bus.publish(events.DRAFT_FINALIZED, aid, version=draft["version"],
+    events.bus.publish(events.DRAFT_FINALIZED, aid, version=(cp.version if cp else draft["version"]),
                        forced=bool(body.force and blockers))
-    return {"ok": True, "version": draft["version"], "forced_blockers": blockers if body.force else 0}
+    return {"ok": True, "version": (cp.version if cp else draft["version"]),
+            "forced_blockers": blockers if body.force else 0}
 
 
 @router.post("/{aid}/reopen")

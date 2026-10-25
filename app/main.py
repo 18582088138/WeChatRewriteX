@@ -22,6 +22,8 @@ def create_app(start_worker: bool = True, llm=None) -> FastAPI:
     data_dir().mkdir(parents=True, exist_ok=True)
     config.set_db_overlay(dao.db_settings)
     hooks.register_hooks()
+    from . import logging_setup
+    logging_setup.configure(bool(config.get("dev.mode", False)))
 
     app = FastAPI(title="WeChatRewritingAssistant", version="0.1.0")
 

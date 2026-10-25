@@ -12,7 +12,8 @@ Base URL: `http://127.0.0.1:8000`，所有接口前缀 `/api`。运行时可访�
 
 - 错误体统一 `{ "detail": "人类可读信息" }`；状态码 `400` 参数错误 · `404` 不存在 ·
   `409` 状态冲突 · `502` 外部调用失败（爬取/LLM） · `503` 所需渠道未配置。
-- 文案的**一切修改产生新版本**（`origin` ∈ agent / human / auto_fix / insert_refs），
+- 文案版本为**块级增量**（V1.2）：drafts 表仅存稀疏 checkpoint（创建/定稿/回滚），
+  每次编辑只记变更块差异（draft_changes）；HEAD = 最近 checkpoint + 变更重放；
   改动超阈值（默认 ≥3 块或字数变化 >20%）自动触发增量复审。
 - 文章状态机与 UI 三态（New/Process/Done）映射见 `docs/design/02`；定稿/发布态下的复审为
   **软审**（只出报告，不改文章状态）。
@@ -64,8 +65,10 @@ SSE 推送，前端工作台实时展示。主题与报道主体提取为**纯�
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/articles/{aid}/draft?version=` | 取文案（默认最新版）+ 版本列表；`draft.doc` 为块模型 |
-| GET | `/api/articles/{aid}/versions` | 版本列表（version/origin/word_count/status） |
-| PUT | `/api/drafts/{draft_id}/edit` | 批量编辑 `{ops: [...]}`。op ∈ `update`(block_id+text) / `remove` / `replace_image`(asset_id) / `set_caption` / `update_meta`(field ∈ `title_selected` `title_candidates` `one_liner` `keywords`)。返回 `{version, recheck_enqueued}` |
+| GET | `/api/articles/{aid}/versions` | 版本时间线（checkpoint 快照 + 编辑变更组） |
+| POST | `/api/articles/{aid}/rollback` | `{version}` 一键回滚：重建目标态存为新 checkpoint |
+| PUT | `/api/articles/{aid}/selection` | `{material_ids: []}` 保存创作会话勾选素材集合（左窗数据源） |
+| PUT | `/api/drafts/{draft_id}/edit` | 批量编辑 `{ops: [...]}`。op ∈ `update` / `remove` / `replace_image` / `set_caption` / `insert_after`（新增块/插图） / `update_meta`。返回 `{version, recheck_enqueued, folder_renamed}`；`title_selected` 触发标题联动（正文一级标题+项目文件夹改名） |
 | POST | `/api/drafts/{draft_id}/regenerate` | 段落 AI 重生成 `{block_ids: [], instruction}` → 新版本；LLM 未配置 → 503 |
 | POST | `/api/drafts/{draft_id}/insert-refs` | 参考素材融合插入 `{material_ids: [], after_block_id?, instruction?}` → 新版本 |
 
@@ -100,3 +103,5 @@ SSE 推送，前端工作台实时展示。主题与报道主体提取为**纯�
 | PUT | `/api/settings` | `{key: "a.b.c", value}` 写 DB 覆盖层（优先级最高；`llm.channels` 仅可改 yaml） |
 | GET | `/api/sse` | 事件流。事件：`status.changed` `job.enqueued` `job.failed` `collect.finished` `create.finished` `review.finished` `draft.saved` `draft.finalized` `publish.finished` `material.ingested` |
 | GET | `/api/health` | 健康检查（免鉴权） |
+| GET | `/api/logs/tail?lines=` | 运行日志尾部（须开启开发者模式，否则 403） |
+| GET | `/api/articles/{aid}/costs` | API 费用监控：按 收集/创作/审稿 环节聚合调用数与 tokens + 全流程汇总 |
