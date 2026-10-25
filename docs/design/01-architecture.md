@@ -59,6 +59,8 @@ flowchart TB
 | 爬虫 | trafilatura（主）+ 自写公众号解析器 + Playwright（兜底） | 公众号正文是静态 HTML，直接解析 `#js_content` 节点比通用提取器还原更准；JS 重页面（X、部分官网）走 Playwright |
 | 论文 | arXiv API + pypdf | 新模型/论文类要闻的标准来源 |
 | 视频 | yt-dlp（X / B站 支持好）+ 微博走 Playwright 抓包补位 | yt-dlp 的微博 extractor 脆弱，需要降级链 |
+| 搜索 | Tavily（有 key 优先）→ DuckDuckGo HTML（零配置兜底）；arXiv 搜索器专供论文 | 关联搜索不依赖任何 key 也能工作；限频时单篇失败不阻断主流程 |
+| 媒体补充 | Pexels / Pixabay API（图+视频，用现有 key） | 原文配图不足时按主题关键词补可商用素材，带来源署名 |
 | 查重 | SimHash（字符 n-gram  shingles，无第三方依赖）+ 向量余弦 | 字面 + 语义双阈值，见 `02` 审稿 |
 | 向量 | **OpenAI 兼容 embedding API**（火山方舟 doubao-embedding 等）；不可用时降级纯 FTS5 | 已拍板（2026-10-24）：不本地装 torch 大模型，接口预留本地 ONNX 扩展 |
 | 卡片组图 | 自写 HTML 模板 + Playwright 截图出 PNG | 参考 guizang-social-card-skill 的管线模式（AGPL，只借鉴不自用代码） |
@@ -66,54 +68,73 @@ flowchart TB
 | 前端编辑器 | 自研块编辑器（预览默认 / 双击编辑） | 段落级再生成、图片替换天然落在块模型上，见 `04` |
 | 公众号排版 | doocs/md 主题 CSS 思路（WTFPL 协议） | Markdown → 公众号排版 HTML 的成熟方案 |
 
-## 后端包结构（目标形态）
+## 代码结构（M1 已实现，2026-10-25 与代码核对同步）
 
 ```
 app/
-├── main.py                  # FastAPI 入口，挂载路由与静态前端
+├── main.py                  # FastAPI 组装: 初始化 DB/配置覆盖/hooks/队列, 挂载路由与静态前端
+├── __main__.py              # python -m app 启动入口 (--host/--port/--reload)
 ├── core/
-│   ├── config.py            # 三层配置合并: 默认 < settings.yaml < UI(DB)
-│   ├── models.py            # Pydantic 领域模型
-│   ├── statemachine.py      # Article 状态机 (见 02)
-│   ├── events.py            # 事件定义 + Hook 触发
-│   └── errors.py
+│   ├── config.py            # 三层配置合并: 默认 < config/settings.yaml < DB settings 表; .env 密钥
+│   ├── models.py            # Pydantic 领域模型 (ArticleStatus/Block/DraftDoc/ChecklistItem/Variant...)
+│   ├── blocks.py            # 文档块操作 + Markdown 导出 + [^mat_*] 引用标记剥离
+│   ├── statemachine.py      # Article 状态机 (见 02; 非法迁移抛错, 同态迁移幂等)
+│   ├── events.py            # 进程内事件总线 (SSE 订阅 + hook 触发)
+│   └── ids.py               # 带前缀短 id (art_/mat_/drf_/rev_/ri_/job_/pj_)
 ├── agents/
-│   ├── base.py              # AgentBase: prompt 渲染 / 模型选择 / schema 校验 / 重试
-│   ├── collector/           # 资料收集 Agent
-│   ├── rewriter/            # 洗稿 Agent
-│   └── reviewer/            # 审稿 Agent
+│   ├── base.py              # AgentBase: config/prompts 模板渲染 / 风格包加载 / LLM 调用封装
+│   ├── collector.py         # 资料收集: 抓取→主题提炼→关联搜索(网页+arXiv)→媒体补充→notes.md
+│   ├── rewriter.py          # 洗稿: 证据包 grounding→成稿→词数控制→必配图兜底→分页; 段落重生成/融合插入
+│   └── reviewer.py          # 审稿: layout/banlist/originality 规则 + LLM 四维, 输出 checklist
 ├── services/
-│   ├── llm/                 # litellm 薄路由: 渠道注册 / fallback / 成本日志
-│   ├── crawl/               # 爬虫插件: base.py + trafilatura_/wechat_mp_/playwright_/arxiv_/x_
-│   ├── search/              # 搜索插件: tavily_/bing_/arxiv_
-│   ├── media/               # 图片下载去重、水印检测、yt-dlp 封装
-│   ├── rag/                 # 素材索引与检索 (全文 + 向量)
-│   ├── cards/               # 小红书卡片: 模板渲染 + Playwright 截图
-│   ├── dedup/               # simhash / minhash / 向量相似度
-│   └── publish/             # Publisher 插件: wechat_mp_api_ / rpa_ / exporter_
+│   ├── llm/router.py        # OpenAI 兼容薄路由: 渠道优先级+fallback+schema 校验重试+成本日志
+│   ├── crawl/               # 爬虫插件 (registry 分派): wechat_mp / trafilatura / arxiv / fixture
+│   ├── search/              # 搜索插件: tavily / duckduckgo(零配置兜底) / arxiv(论文) / registry
+│   ├── media/               # download.py(防盗链 Referer+并发下载) / stock.py(Pexels+Pixabay 补充) / watermark.py
+│   ├── rag/index.py         # 素材检索: FTS5 trigram(短语化+LIKE 兜底) + embedding 向量(可选)
+│   ├── dedup/similarity.py  # 字符 n-gram SimHash + Jaccard 查重
+│   ├── embed/embedder.py    # ApiEmbedder(OpenAI 兼容) / NullEmbedder(降级)
+│   ├── cards/render.py      # 小红书卡片: 主题模板渲染 + 浏览器内分页/溢出校验 + Playwright 截图
+│   │   └── themes/tech-note/  # 「编辑部快报」主题 (theme.yaml + theme.html)
+│   ├── publish/             # Publisher 插件接口 base.py + exporter.py(统一导出包, 一阶段唯一实现)
+│   └── draft_service.py     # 草稿版本服务: 一切修改产生新版本+落盘+增量复审判断(update_meta 等 op)
 ├── pipeline/
-│   ├── orchestrator.py      # 阶段推进、auto/manual 模式
-│   ├── queue.py             # SQLite 任务队列
-│   └── hooks.py             # Hook 加载与执行 (shell / python callable)
-├── storage/                 # SQLite DAO + 文件库读写
-├── api/                     # routers: articles/materials/drafts/reviews/publish/settings/jobs
-├── plugins/                 # 第三方插件落点 (目录扫描 + entry_points)
-└── logging_setup.py
+│   ├── orchestrator.py      # 阶段推进/准入 STAGE_ENTRY/auto 连跑/软审(定稿后复审不动状态)
+│   ├── queue.py             # 后台线程 + jobs 表持久化, 崩溃恢复, 失败重试(上限 2)
+│   └── hooks.py             # config/settings.yaml 注册的 shell hooks (事件占位符替换)
+├── storage/
+│   ├── schema.sql           # 全量建表 (articles 含 lib_dir)
+│   ├── db.py                # 连接/WAL/FTS5 初始化与降级标记/轻量迁移
+│   ├── dao.py               # 类型化 DAO (全部 SQL 集中)
+│   └── library.py           # 素材库文件系统: 标题命名文件夹/中文分项/sha256 去重/图片嗅探
+└── api/
+    ├── articles.py          # 文章 CRUD + 阶段推进 + 定稿/回炉 + jobs 列表
+    ├── materials.py         # 素材列表/上传/网址摄取/inbox 扫描/删除/文件与文本直取
+    ├── drafts.py            # 草稿读取/版本/批量编辑/段落重生成/融合插入
+    └── ops.py               # 审稿报告与条目处理/发布导出/卡片生成/设置/SSE/health
 
-web/                         # 前端源码 (Vue3 + Vite)
+web/                         # 前端源码 (Vue3 + Vite + TS + Naive UI + Tailwind)
+├── src/views/               # ArticleList(三态列表) / Workbench(四 tab 工作台) / Settings
+├── src/components/          # StatusChip / MaterialsPanel / BlockEditor(块编辑器+meta 三独立框)
+│                            #   / ReviewPanel(checklist 联动+采纳即修复) / PublishPanel(导出+卡片预览)
+├── src/stores/app.ts        # 全局 store + SSE 事件驱动刷新
+└── src/api.ts               # fetch 封装(令牌) + SSE 客户端
 config/                      # 一切可手动调整的提示词与参数 (拍板 2026-10-24)
 ├── settings.yaml            # 非密钥参数 (窗口/阈值/模型档位/并发/hooks)
-├── prompts/                 # 版本化 Jinja2 模板, 按 Agent 分目录, 每版带 changelog
-│   ├── collector/  rewriter/  reviewer/
-└── styles/                  # 风格包 (默认 tech-evangelist)
-data/                        # 运行期数据, gitignore
-├── app.db
-├── library/                 # 素材库 (见 03)
-├── drafts/                  # 文案版本落盘
-└── exports/                 # 平台导出包
-docs/design/                 # 本文档集
+├── prompts/                 # Jinja2 模板: collector/topic_extract, rewriter/{draft,regenerate,
+│                            #   insert_refs,compress}, reviewer/review
+└── styles/tech-evangelist/  # 风格包: style.yaml / system.md / rules.md / banlist.txt / fewshots/
+data/                        # 唯一数据根 (gitignore): app.db + library/ + drafts/
+docs/                        # design/(本文档集) + api.md + user-manual.md + dev-plan.md
+tests/                       # pytest: core/storage/agents/exporter/api e2e (离线 fixture + FakeLLM)
+scripts/                     # (预留) 通知/备份等 hook 脚本
 .env                         # 密钥 (不进 git)
 ```
+
+**与目标形态的差异说明**：`app/plugins/` 未单列——插件点用 services 下的 registry 模式实现
+（crawl/registry.py、search/registry.py、publish/base.py 的 Publisher 协议、cards/themes/ 目录即主题插件），
+二阶段接入公众号 API/RPA 时在 publish/ 下新增实现即可；`errors.py`/`logging_setup.py` 未单列，
+错误收敛在路由层与编排器（见 api.md 错误约定），日志暂用 uvicorn 默认。
 
 ## LLM 路由层设计
 
@@ -192,19 +213,22 @@ config/styles/tech-evangelist/   # 默认: 轻松诙谐+严谨科学的技术传
 
 设置中按平台绑定风格包；调优方法见 `06-style-guide.md`。
 
-## 并发与运行模型
+## 并发与运行模型（实现版）
 
-- 本地单用户：一个编排器协程 + 有界并发（默认 2 个 LLM 阶段任务、4 个下载任务），避免触发 LLM 限流与网站反爬。
-- 每个阶段任务 = `jobs` 表一行（类型、payload、状态、重试次数、结果引用），崩溃重启后可续跑。
-- 长任务（收集、洗稿、审稿、卡片渲染）通过 SSE 向前端推送进度事件。
+- 本地单用户：**一个后台工作线程** + `jobs` 表持久化队列（非协程），阶段任务串行执行；
+  媒体下载内部用 `ThreadPoolExecutor` 有界并发（默认 4），LLM 阶段不复用连接。
+- 任务重试上限 2 次；进程重启后 `running` 任务自动重置为 `pending` 续跑；
+  准入校验含「自身进行态」使重试幂等；定稿/发布态下的复审为软审（只出报告不动状态）。
+- 长任务（收集、洗稿、审稿、卡片渲染、导出）通过 `/api/sse` 向前端推送进度事件，前端 store 驱动刷新。
 
 ## 安全与边界
 
-- 密钥只读 `.env`；`settings.yaml` 与 DB 里**不存密钥**，UI 设置页只显示掩码。
-- 所有 outbound 请求（爬取/搜索/发布）走统一的 `http_client`，带 UA 池、超时、限速与重试。
-- 本地 API 默认绑定 `127.0.0.1`，如需手机访问开局域网模式并启用访问令牌。
+- 密钥只读 `.env`；`config/settings.yaml` 与 DB 里**不存密钥**，设置页只显示渠道是否已配置。
+- 爬虫/下载带 UA 与防盗链 Referer 规则；LLM 与搜索走各自渠道超时与重试。
+- 本地 API 默认绑定 `127.0.0.1`；`--host 0.0.0.0` 局域网/手机访问时需在 `.env` 设
+  `APP_ACCESS_TOKEN`（中间件校验 `?token=` 或 `Authorization: Bearer`）。
 
 ## 开放问题
 
-1. 向量索引用 sqlite-vec 还是纯 numpy？（倾向 sqlite-vec，待 M1 验证其 Windows 轮子可用性）
-2. 是否需要多用户？（当前设计按单用户；若未来要多人协作，认证与数据隔离需提前留口）
+1. ~~向量索引选型~~ 已落地：OpenAI 兼容 embedding API（如火山方舟），不可用降级纯 FTS5。
+2. 是否需要多用户？（当前按单用户；未来多人协作需提前留认证与数据隔离口）

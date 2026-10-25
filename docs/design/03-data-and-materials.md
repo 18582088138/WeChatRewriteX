@@ -12,6 +12,7 @@ articles(                              -- 任务
   id, url, title, source_site, published_at,
   status,                -- 状态机, 见 02
   style_pack, target_word_count, user_notes,
+  lib_dir,                 -- 素材文件夹名 (标题_短id, 标题后到自动迁移)
   created_at, updated_at)
 
 materials(                             -- 素材 (文章组与公共库统一一张表)
@@ -26,6 +27,10 @@ materials(                             -- 素材 (文章组与公共库统一一
   ref_type,                -- primary(原文) | reference | foundational
   fetch_status, note, meta_json,
   created_at)
+
+material_texts(material_id, content)    -- 文本素材正文 (入库即进 FTS 索引)
+material_fts                            -- FTS5 trigram 虚表 (SQLite 不支持时降级 LIKE)
+embeddings(material_id, dim, vector)    -- 向量索引 (float32 blob; 无 embedding 渠道时为空表)
 
 drafts(                                -- 文案版本链
   id, article_id, version,             -- version 单调递增
@@ -66,9 +71,10 @@ llm_calls(                             -- 成本审计
   id, article_id, stage, channel, model,
   prompt_tokens, completion_tokens, latency_ms, cost_est, created_at)
 
-settings(key, value_json)              -- UI 可改配置, 覆盖 settings.yaml
+settings(key, value_json)              -- UI 可改配置, 覆盖 config/settings.yaml
 
-prompt_templates(name, version, content, changelog, created_at)
+-- prompt 模板不进库: 按拍板结论 #8 外置在 config/prompts/ (文件即版本, git 管理 changelog)
+-- publish_targets 表已建, 一阶段发布走 exporter, 二阶段接 API/RPA 时启用
 ```
 
 ## 素材库文件布局（v2，2026-10-24 按反馈修订）
