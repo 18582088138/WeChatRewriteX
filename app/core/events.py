@@ -9,8 +9,8 @@ from typing import Any, Callable
 ARTICLE_ADDED = "article.added"
 COLLECT_STARTED = "collect.started"
 COLLECT_FINISHED = "collect.finished"
-CREATE_STARTED = "rewrite.started"
-CREATE_FINISHED = "rewrite.finished"
+CREATE_STARTED = "create.started"
+CREATE_FINISHED = "create.finished"
 REVIEW_STARTED = "review.started"
 REVIEW_FINISHED = "review.finished"
 DRAFT_SAVED = "draft.saved"
@@ -19,6 +19,7 @@ PUBLISH_FINISHED = "publish.finished"
 JOB_FAILED = "job.failed"
 MATERIAL_INGESTED = "material.ingested"
 STATUS_CHANGED = "status.changed"
+STAGE_PROGRESS = "stage.progress"      # 分阶段进度（等待动画 + 文字日志）
 
 
 class EventBus:

@@ -36,8 +36,9 @@ const textModalTitle = ref('')
 const textModalContent = ref('')
 const textLoading = ref(false)
 const lightboxUrl = ref('')
-const videoUrl = ref('')
+const playModalObj = ref<Material | null>(null)
 const dragOver = ref(false)
+const dragOverCommon = ref(false)
 
 async function load() {
   const url = scope.value === 'article'
@@ -129,8 +130,12 @@ async function recrawl(m: Material) {
 }
 
 async function reveal(m: Material) {
-  try { await api.post(`/api/materials/${m.id}/reveal`) }
-  catch (e: any) { message.error(e.message) }
+  try {
+    const r = await api.post(`/api/materials/${m.id}/reveal`)
+    if (r.external) window.open(r.external, '_blank')   // 链接型素材：浏览器打开来源
+  } catch (e: any) {
+    message.warning(e.message)                          // 路径失效：友好提示（反馈 3.5）
+  }
 }
 
 /* ---------- 添加 ---------- */
@@ -173,12 +178,21 @@ async function scanInbox() {
   await load()
 }
 
-function onVideoClick(m: Material) {
-  if (m.path && m.url) {
-    videoUrl.value = api.absUrl(m.url)          // 本地视频：弹窗播放
-  } else if (m.source_url) {
-    window.open(m.source_url, '_blank')         // 链接型视频(视频号)：外跳播放器页
+/* ---------- 视频封面与播放 ---------- */
+
+/** 视频素材的封面图：找 source_material_id 指向该视频的子图片 */
+const coverOf = computed(() => {
+  const map: Record<string, string> = {}
+  for (const m of materials.value) {
+    if (m.kind === 'image' && m.source_material_id && m.url && !map[m.source_material_id]) {
+      map[m.source_material_id] = api.absUrl(m.url)
+    }
   }
+  return map
+})
+
+function onVideoClick(m: Material) {
+  playModalObj.value = m       // 封面上的【在线播放】按钮唤起弹窗
 }
 
 function onGroupTitleClick(g: { key: string; title: string }) {
@@ -201,8 +215,21 @@ async function onDropToArticle(e: DragEvent) {
   if (!mid) return
   try {
     const r = await api.post(`/api/materials/${mid}/copy-to-article`, { article_id: props.articleId })
-    message.success(r.copied ? '已复制到本文素材库' : '该素材已在本文素材库')
+    message.success(r.copied ? '已复制到本文素材库' : (r.reason || '该素材已在本文素材库'))
     scope.value = 'article'
+    await load()
+  } catch (err: any) { message.error(err.message) }
+}
+
+async function onDropToCommon(e: DragEvent) {
+  e.preventDefault()
+  dragOverCommon.value = false
+  const mid = e.dataTransfer?.getData('text/material-id')
+  if (!mid) return
+  try {
+    const r = await api.post(`/api/materials/${mid}/copy-to-common`)
+    message.success(r.copied ? '已复制到公共素材库' : (r.reason || '公共库已存在，已跳过'))
+    scope.value = 'common'
     await load()
   } catch (err: any) { message.error(err.message) }
 }
@@ -219,22 +246,24 @@ function importCreate() {
   <div>
     <!-- 工具行 -->
     <div class="flex items-center gap-2 mb-4 flex-wrap">
-      <div class="panel p-0.5 flex" style="border-radius: 8px;"
-           @dragover.prevent="scope === 'common' && (dragOver = true)"
-           @dragleave="dragOver = false"
-           @drop="onDropToArticle">
+      <div class="panel p-0.5 flex" style="border-radius: 8px;">
         <button v-for="s in [['article', '本文素材库'], ['common', '公共素材库']]" :key="s[0]"
                 class="px-4 h-8 rounded-md text-sm transition-colors"
                 :style="[
                   scope === s[0]
                     ? 'background: var(--active); color: var(--text); font-weight: 600;'
                     : 'color: var(--muted);',
-                  s[0] === 'article' && dragOver ? 'outline: 2px dashed var(--accent);' : ''
+                  s[0] === 'article' && dragOver ? 'outline: 2px dashed var(--accent);' : '',
+                  s[0] === 'common' && dragOverCommon ? 'outline: 2px dashed var(--accent);' : ''
                 ]"
-                @click="scope = s[0] as any">{{ s[1] }}</button>
+                @click="scope = s[0] as any"
+                @dragover.prevent="s[0] === 'article' && scope === 'common' && (dragOver = true);
+                                    s[0] === 'common' && scope === 'article' && (dragOverCommon = true)"
+                @dragleave="s[0] === 'article' ? (dragOver = false) : (dragOverCommon = false)"
+                @drop="s[0] === 'article' ? onDropToArticle($event) : onDropToCommon($event)">{{ s[1] }}</button>
       </div>
-      <span v-if="scope === 'common'" class="text-xs" style="color: var(--faint);">
-        可拖拽素材条目到「本文素材库」完成复制
+      <span class="text-xs" style="color: var(--faint);">
+        拖拽条目到另一侧库名即可复制（公共 ⇄ 本文，sha 校验去重）
       </span>
       <div class="flex-1"></div>
       <NButton size="small" @click="showAddUrl = true">+ 粘贴网址</NButton>
@@ -272,7 +301,9 @@ function importCreate() {
       <div v-for="m in filtered" :key="m.id"
            class="px-4 py-3 flex items-center gap-3 hover:bg-[var(--raised)]"
            :draggable="scope === 'common'" @dragstart="onDragStart($event, m)">
-        <NCheckbox :checked="selected.has(m.id)" @update:checked="toggle(m.id)" />
+        <span class="px-1.5 -ml-1.5 py-1 inline-flex" @click.stop @mousedown.stop>
+          <NCheckbox :checked="selected.has(m.id)" @update:checked="toggle(m.id)" />
+        </span>
         <div class="flex-1 min-w-0">
           <button class="text-sm font-medium hover:underline text-left truncate block max-w-full"
                   @click="openText(m)">{{ m.title || m.id }}</button>
@@ -316,20 +347,24 @@ function importCreate() {
                 <img v-if="m.url" :src="api.absUrl(m.url)" class="w-full h-full object-cover" loading="lazy" />
               </div>
             </template>
-            <!-- 视频卡 -->
+            <!-- 视频卡：封面缩略图 + 中央【在线播放】按钮（反馈 3.1） -->
             <template v-else>
-              <div class="aspect-video rounded-md panel cursor-pointer grid place-items-center"
-                   style="background: #1D1F20; color: #fff;"
-                   @click="onVideoClick(m)">
-                <div class="text-center">
-                  <div class="text-2xl">▶</div>
-                  <div v-if="m.duration" class="text-xs mt-1 num">{{ Math.round(m.duration) }}s</div>
-                  <div v-else-if="!m.path" class="text-xs mt-1 opacity-70">在线播放</div>
+              <div class="aspect-video rounded-md overflow-hidden panel relative cursor-pointer group/v"
+                   style="background: #1D1F20;" @click="onVideoClick(m)">
+                <img v-if="coverOf[m.id]" :src="coverOf[m.id]"
+                     class="w-full h-full object-cover opacity-90" loading="lazy" />
+                <div class="absolute inset-0 grid place-items-center">
+                  <span class="px-3 py-1.5 rounded-full text-xs font-medium text-white
+                               bg-black/60 group-hover/v:bg-black/80 transition-colors">
+                    ▶ 在线播放</span>
                 </div>
+                <span v-if="m.duration" class="absolute bottom-1.5 right-1.5 text-[11px] text-white/90 num bg-black/60 px-1 rounded">
+                  {{ Math.round(m.duration) }}s</span>
               </div>
             </template>
-            <!-- 左上复选框 / 右上删除 -->
-            <div class="absolute top-1.5 left-1.5 bg-white/90 rounded px-0.5">
+            <!-- 左上复选框（扩大独立点击区，事件隔离） / 右上删除 -->
+            <div class="absolute top-0 left-0 p-2 bg-white/85 rounded-br-lg z-10"
+                 @click.stop @mousedown.stop>
               <NCheckbox :checked="selected.has(m.id)" @update:checked="toggle(m.id)" />
             </div>
             <button class="absolute top-1.5 right-1.5 w-6 h-6 rounded-full text-xs
@@ -352,7 +387,9 @@ function importCreate() {
            class="px-4 py-3 flex items-center gap-3 hover:bg-[var(--raised)] cursor-pointer"
            :draggable="scope === 'common'" @dragstart="onDragStart($event, m)"
            @click="reveal(m)">
-        <NCheckbox :checked="selected.has(m.id)" @update:checked="toggle(m.id)" @click.stop />
+        <span class="px-1.5 -ml-1.5 py-1 inline-flex" @click.stop @mousedown.stop>
+          <NCheckbox :checked="selected.has(m.id)" @update:checked="toggle(m.id)" />
+        </span>
         <span class="text-xs px-1.5 py-0.5 rounded shrink-0"
               style="background: var(--pill-info-bg); color: var(--pill-info-ink);">{{
                 { audio: '音频', doc: '文档', link: '链接' }[m.kind] || m.kind }}</span>
@@ -394,11 +431,26 @@ function importCreate() {
       <img :src="lightboxUrl" class="max-w-full max-h-[78vh] mx-auto rounded-md" />
     </NModal>
 
-    <!-- 视频播放 -->
-    <NModal :show="!!videoUrl" preset="card" class="!max-w-3xl"
-            @update:show="(v: boolean) => { if (!v) videoUrl = '' }">
-      <video v-if="videoUrl" :src="videoUrl" controls autoplay
-             class="w-full max-h-[70vh] rounded-md" style="background:#000;"></video>
+    <!-- 视频播放弹窗（遮罩点击关闭 + 关闭按钮；本地文件用 <video>，链接型用 iframe 播放器） -->
+    <NModal :show="!!playModalObj" preset="card" class="!max-w-3xl"
+            :title="playModalObj?.title || '视频播放'"
+            @update:show="(v: boolean) => { if (!v) playModalObj = null }">
+      <template v-if="playModalObj">
+        <video v-if="playModalObj.path && playModalObj.url"
+               :src="api.absUrl(playModalObj.url)" controls autoplay
+               class="w-full max-h-[70vh] rounded-md" style="background:#000;"></video>
+        <template v-else-if="playModalObj.source_url">
+          <iframe :src="playModalObj.source_url" class="w-full rounded-md"
+                  style="height: 60vh; border: 0; background:#000;" allowfullscreen></iframe>
+          <div class="text-xs mt-2 flex items-center gap-2" style="color: var(--faint);">
+            若播放器未加载，
+            <a :href="playModalObj.source_url" target="_blank"
+               class="hover:underline" style="color: var(--accent-ink);">点击在浏览器中打开</a>
+          </div>
+        </template>
+        <div v-else class="py-10 text-center text-sm" style="color: var(--faint);">
+          该视频没有可播放的地址</div>
+      </template>
     </NModal>
   </div>
 </template>

@@ -23,7 +23,14 @@ def register_defaults(llm=None) -> None:
         "review": lambda aid, payload: orchestrator.run_stage("review", aid, llm),
         "publish": _run_publish,
         "ingest": _run_ingest,
+        "deepsearch": _run_deepsearch,
     })
+
+
+def _run_deepsearch(article_id: str, payload: dict) -> dict:
+    """深度搜索：基于已提取主题的新一轮检索，仅增量补充 reference（不改状态）。"""
+    from ..agents.collector import CollectorAgent
+    return CollectorAgent().deep_search(article_id)
 
 
 def _run_ingest(article_id: str | None, payload: dict) -> dict:

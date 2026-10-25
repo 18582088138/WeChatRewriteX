@@ -58,11 +58,12 @@ const status = computed(() => article.value?.status || '')
 
 const actions = computed(() => {
   const s = status.value
-  const list: { key: string; label: string; stage?: string; primary?: boolean }[] = []
+  const list: { key: string; label: string; stage?: string; primary?: boolean; deep?: boolean }[] = []
   if (s === 'NEW' || s === 'FAILED') list.push({ key: 'collect', label: '开始收集', stage: 'collect', primary: true })
   if (s === 'COLLECTED') {
     list.push({ key: 'create', label: '开始创作', stage: 'create', primary: true })
     list.push({ key: 'recollect', label: '补充收集', stage: 'collect' })
+    list.push({ key: 'deepsearch', label: '深度搜索', deep: true })
   }
   if (s === 'DRAFTED') list.push({ key: 'review', label: '开始审稿', stage: 'review', primary: true })
   return list
@@ -81,11 +82,32 @@ async function runStage(stage: string) {
   }
 }
 
+async function runDeepSearch() {
+  busy.value = true
+  try {
+    await api.post(`/api/articles/${aid}/deepsearch`)
+    message.success('深度搜索已启动（增量补充参考，不覆盖原素材）')
+    setTimeout(load, 800)
+  } catch (e: any) {
+    message.error(e.message)
+  } finally {
+    busy.value = false
+  }
+}
+
 // 阶段指示：当前步用 accent，其余中性（taste: 色彩只给数据与当前态）
 const STAGES = ['收集资料', '创作与审稿', '定稿发布']
 const stageIndex = computed(() => {
   const u = article.value?.ui_status
   return u === 'New' ? 0 : u === 'Process' ? 1 : 2
+})
+
+/** 本文相关的进度消息（最新在后，取最近 8 条；任务结束 30s 后自动隐去由用户手动清除） */
+const progressMessages = computed(() => {
+  return store.progressLog
+    .filter(m => m.article_id === aid)
+    .slice(-8)
+    .map(m => m.message)
 })
 </script>
 
@@ -117,7 +139,26 @@ const stageIndex = computed(() => {
         <div class="flex-1"></div>
         <NButton v-for="act in actions" :key="act.key" size="small"
                  :type="act.primary ? 'primary' : 'default'" :loading="busy"
-                 @click="runStage(act.stage!)">{{ act.label }}</NButton>
+                 @click="act.deep ? runDeepSearch() : runStage(act.stage!)">{{ act.label }}</NButton>
+      </div>
+
+      <!-- 分阶段进度：等待动画 + 文字日志（反馈 3.4） -->
+      <div v-if="progressMessages.length" class="panel mb-4 px-4 py-3">
+        <div class="flex items-center gap-2 text-sm">
+          <span class="inline-block w-3.5 h-3.5 rounded-full border-2 animate-spin"
+                style="border-color: var(--accent); border-top-color: transparent;"></span>
+          <span class="font-medium">正在处理</span>
+          <span class="text-xs" style="color: var(--faint);">最新进展实时更新</span>
+          <div class="flex-1"></div>
+          <button class="text-xs hover:underline" style="color: var(--faint);"
+                  @click="store.clearProgress()">清除</button>
+        </div>
+        <div class="mt-2 space-y-1 max-h-28 overflow-auto">
+          <div v-for="(m, i) in progressMessages" :key="i" class="text-xs leading-relaxed"
+               :style="i === progressMessages.length - 1 ? 'color: var(--text);' : 'color: var(--faint);'">
+            · {{ m }}
+          </div>
+        </div>
       </div>
 
       <div v-if="article?.error" class="mb-4 px-4 py-3 text-sm rounded-md"

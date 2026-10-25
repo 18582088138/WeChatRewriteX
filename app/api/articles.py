@@ -136,6 +136,19 @@ def reopen(aid: str) -> dict:
     return {"ok": True}
 
 
+@router.post("/{aid}/deepsearch")
+def deepsearch(aid: str) -> dict:
+    """深度搜索（反馈 3.3）：基于已提取主题的新一轮检索，仅增量补充 reference。"""
+    art = dao.get_article(aid)
+    if not art:
+        raise HTTPException(404, "文章不存在")
+    if ArticleStatus(art["status"]) not in (ArticleStatus.COLLECTED, ArticleStatus.DRAFTED,
+                                            ArticleStatus.REVIEWED, ArticleStatus.EDITING):
+        raise HTTPException(409, "请先完成初次收集")
+    job_id = queue.enqueue("deepsearch", aid)
+    return {"job_id": job_id}
+
+
 @jobs_router.get("")
 def list_jobs(article_id: str | None = None, limit: int = 50) -> dict:
     return {"jobs": dao.list_jobs(article_id, limit)}

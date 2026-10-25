@@ -50,7 +50,7 @@ stateDiagram-v2
 1. **原文抓取与快照**
    - 爬虫插件按 URL 分派：公众号走自写解析器（`#js_content` 节点 + `data-src` 懒加载还原 + 带 Referer 下图，绕防盗链）；arXiv 走 API 拿元数据 + PDF；X/JS 重页面走 Playwright；其余 trafilatura。
    - 原文 HTML + 规范化 Markdown + 全部媒体存为不可变快照（后续审稿的「事实基准」）。
-2. **主题提炼**（LLM，summarize 档）：输出 `topic / keywords[] / core_points[] / entities[] / published_at`，作为关联搜索的种子。
+2. **主题提炼**（**纯规则，不调 LLM**，V1.1 起）：`services/textmine.py`——标题分句 ×3 + 英文/型号 token + 「」引号词 + 实体词典加权出 `keywords`；「含数字+含关键词」高分句出 `core_points`；实体词典+型号 token 出 `entities`（报道主体）。输出作为关联搜索的种子。
 3. **关联搜索**
    - 时间窗口：以原文发布日为中心 ±`search_window_days`（默认 3），用 keywords + entities 组合查询，目标凑齐 **3~5 篇**参考（配置 `ref_count_min/max`）；稀缺主题允许 1~2 篇并在报告中显式标注 `scarce=true`。
    - 搜索链（零配置可用）：Tavily（有 key 优先）→ Bing HTML（/ck/a 跳转还原）→ DuckDuckGo；论文走 arXiv 搜索器（foundational）。
@@ -60,7 +60,7 @@ stateDiagram-v2
 4. **素材抓取与规则过滤（不调 LLM）**
    - 文本：剔除广告/求关注/转载声明类行，砍掉「相关阅读/往期回顾」起的尾巴（`services/media/filter.py`）。
    - 图片：URL 黑名单特征 + 尺寸/比例/文件大小下限 + pHash 近似去重；被过滤项**不入库**。
-   - 视频：v.qq/bilibili/直链走 yt-dlp；**视频号 wxv_ 降级为「链接 + 封面」素材**（封面即可用配图，服务端不取流——wechatDownload 式本机凭证方案列为后续候选）。
+   - 视频：**公众号 mpvideo.qpic.cn 签名直链实体下载**（inline JS 反转义 `&amp;` 后正则提取 + H.264 码率优先 + 文件头校验，思路复用自 DailyNewsAssistant）；v.qq/bilibili/直链走 yt-dlp；无直链的懒加载 wxv_ 仍降级「链接 + 封面」素材。
    - 音频：mpvoice `voice_encode_fileid` → res.wx.qq.com 播放地址直接下载。
    - 链接管理：手动加链接（单/批量 ingest 任务）、单链重抓 recrawl、公共库素材可复制进本文库。
 5. **整理入库**：写素材索引，生成 `notes.md`（主题/关键词/核心论点/素材清单），触发 `collect.finished`。

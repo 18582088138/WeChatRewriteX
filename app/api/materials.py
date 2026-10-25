@@ -161,6 +161,37 @@ def copy_to_article(mid: str, body: CopyToArticle) -> dict:
     return {"material_id": new_id, "copied": True}
 
 
+@router.post("/materials/{mid}/copy-to-common")
+def copy_to_common(mid: str) -> dict:
+    """本文素材库反向复制到公共素材库（sha256 校验，公共库已有同文件则跳过）。"""
+    m = dao.get_material(mid)
+    if not m:
+        raise HTTPException(404, "素材不存在")
+    if m["scope"] == "common":
+        return {"material_id": mid, "copied": False, "reason": "已在公共素材库"}
+    if m.get("sha256"):
+        dup = dao.find_material_by_sha(m["sha256"])
+        if dup and dup["scope"] == "common":
+            return {"material_id": dup["id"], "copied": False, "reason": "公共库已存在同文件，已跳过"}
+    new_id = new_id_fn("material")
+    db.execute(
+        """INSERT INTO materials
+        (id,scope,article_id,kind,path,sha256,phash,source_url,source_material_id,
+         watermark,width,height,duration,ref_type,fetch_status,note,title,meta_json)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (new_id, "common", None, m["kind"], m.get("path"), m.get("sha256"),
+         m.get("phash"), m.get("source_url"), m.get("source_material_id"), m.get("watermark"),
+         m.get("width"), m.get("height"), m.get("duration"), m.get("ref_type"),
+         m.get("fetch_status"), (m.get("note") or "") + "（复制自项目素材）", m.get("title"),
+         m.get("meta_json") or "{}"),
+    )
+    if m["kind"] == "text":
+        db.execute("INSERT OR REPLACE INTO material_texts(material_id,content) VALUES(?,?)",
+                   (new_id, dao.get_material_text(mid)))
+    events.bus.publish(events.MATERIAL_INGESTED, None, material_id=new_id)
+    return {"material_id": new_id, "copied": True}
+
+
 @router.patch("/materials/{mid}")
 def patch_material(mid: str, body: PatchMaterial) -> dict:
     """改素材标题/备注。"""
@@ -176,13 +207,17 @@ def patch_material(mid: str, body: PatchMaterial) -> dict:
 
 @router.post("/materials/{mid}/reveal")
 def reveal_material(mid: str) -> dict:
-    """在系统文件管理器中打开素材所在文件夹（本机桌面场景）。"""
+    """在系统文件管理器中打开素材所在文件夹；路径失效时给出友好提示（反馈 3.5）。"""
     m = dao.get_material(mid)
     if not m:
         raise HTTPException(404, "素材不存在")
     p = library.material_abs_path(m.get("path"))
+    if (not p or not p.exists()) and m.get("source_url"):
+        # 无本地文件的链接型素材：改为浏览器打开来源
+        return {"ok": True, "external": m["source_url"]}
     if not p or not p.exists():
-        raise HTTPException(404, "文件不存在")
+        raise HTTPException(404, f"本地文件不存在或已被移动：{m.get('path') or '（无文件记录）'}。"
+                                 f"可在项目文件夹内检查，或重新抓取该素材")
     import subprocess
     import sys as _sys
     try:

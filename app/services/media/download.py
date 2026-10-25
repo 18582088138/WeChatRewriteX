@@ -121,16 +121,27 @@ def fetch_videos(entries: list, scope: str, article_id: str | None,
             if url.lower().split("?")[0].endswith((".mp4", ".mov", ".webm")):
                 data = download_file(url, referer=page_url, timeout=120)
                 fname = url.split("?")[0].rsplit("/", 1)[-1]
+                # 文件头校验：防防盗链错误页落盘（公众号签名直链尤其需要）
+                from ..crawl.wechat_video import looks_like_video
+                if not looks_like_video(data):
+                    continue
                 got = (data, fname)
             else:
                 got = download_video(url)
             if not got:
                 continue
             data, fname = got
+            # 文件命名标题：优先来源文章标题（供「idx-类型-标题」规则取前 5~8 字）
+            src_title = f"视频 · {urlparse(url).netloc}"
+            if source_material_id:
+                from ...storage import dao as _dao
+                parent = _dao.get_material(source_material_id)
+                if parent and parent.get("title"):
+                    src_title = parent["title"]
             mid, created = library.ingest_bytes(
                 data, filename=fname, scope=scope, article_id=article_id,
                 source_url=url, source_material_id=source_material_id, kind="video",
-                title=f"视频 · {urlparse(url).netloc}")
+                title=src_title)
             if created:
                 saved.append(mid)
                 count += 1

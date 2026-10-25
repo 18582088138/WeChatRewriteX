@@ -28,6 +28,7 @@ Base URL: `http://127.0.0.1:8000`，所有接口前缀 `/api`。运行时可访�
 | POST | `/api/articles/{aid}/advance` | 推进阶段 `{stage: collect\|create\|review, selected_material_ids?}`；当前状态不允许 → 409。`selected_material_ids` 为 create 阶段的「勾选参与创作素材集」（素材库「导入 & 创作」按钮）；收集 → 后续阶段需手动或 `pipeline.auto` 连跑 |
 | POST | `/api/articles/{aid}/finalize` | 定稿 `{force=false}`；存在未处理 blocker 时 409，`force=true` 强制定稿并留痕（返回 `forced_blockers`） |
 | POST | `/api/articles/{aid}/reopen` | 定稿/完成后回炉编辑（FINALIZED/DONE → EDITING） |
+| POST | `/api/articles/{aid}/deepsearch` | 深度搜索：基于已提取主题的新一轮检索，仅增量补充 reference（须先完成收集；入队 `deepsearch` 任务） |
 | GET | `/api/jobs?article_id=&limit=` | 任务队列状态（type/status/attempts/error/结果） |
 
 ## 素材 Materials
@@ -42,6 +43,7 @@ Base URL: `http://127.0.0.1:8000`，所有接口前缀 `/api`。运行时可访�
 | POST | `/api/articles/{aid}/materials/batch-url` | `{urls: [], ref_type?}` 批量链接批量抓取（入队 `ingest` 任务，逐链接记录成败） |
 | POST | `/api/materials/{mid}/recrawl` | 单链接独立重抓：更新正文标题并补充媒体 |
 | POST | `/api/materials/{mid}/copy-to-article` | `{article_id}` 公共库素材复制到本文素材库（同文件新行，不占盘；GUI 拖拽即调用此接口） |
+| POST | `/api/materials/{mid}/copy-to-common` | 本文素材反向复制到公共库（sha256 校验，公共库已有同文件则跳过） |
 | PATCH | `/api/materials/{mid}` | `{title?, note?}` 改素材标题/备注 |
 | POST | `/api/materials/{mid}/reveal` | 在系统文件管理器中打开素材所在文件夹 |
 | POST | `/api/articles/{aid}/materials/scan-inbox` · `/api/materials/scan-inbox` | 摄取对应 inbox/ 里手动拷入的文件 |
@@ -49,9 +51,13 @@ Base URL: `http://127.0.0.1:8000`，所有接口前缀 `/api`。运行时可访�
 | GET | `/api/materials/{mid}/text` | 取文本素材正文 |
 | DELETE | `/api/materials/{mid}` | 删除素材（行 + FTS/向量索引 + 文件） |
 
-**视频素材的两种形态**：`path` 非空 = 已下载的本地文件（可弹窗播放）；`path` 为空但
-`source_url` 非空 = 链接型视频（视频号 wxv_ 内嵌，服务端不取流，前端外跳播放器页；
-其封面已下载为图片素材，可作配图）。
+**视频素材的两种形态**：`path` 非空 = 已下载的本地文件（弹窗内 `<video>` 播放；公众号
+mpvideo.qpic.cn 签名直链已可实体下载）；`path` 为空但 `source_url` 非空 = 链接型视频
+（懒加载 wxv_，弹窗内 iframe 播放器 + 外跳兜底；封面已下载为图片素材可作配图）。
+
+**进度事件**：`stage.progress`（分阶段文字日志：抓取/提取/检索/爬取/下载/入库），
+SSE 推送，前端工作台实时展示。主题与报道主体提取为**纯规则**（services/textmine.py，
+不调 LLM）。
 
 ## 文案 Drafts（块模型）
 

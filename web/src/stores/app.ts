@@ -12,6 +12,8 @@ export const useAppStore = defineStore('app', {
     anchorBlockId: null as string | null,
     /** 工作台刷新信号：相关事件到达时自增，各面板监听后刷新 */
     workbenchTick: 0,
+    /** 分阶段进度日志（stage.progress 事件滚动保留 40 条） */
+    progressLog: [] as { ts: number; article_id?: string; message: string }[],
   }),
   actions: {
     async refreshArticles() {
@@ -25,6 +27,12 @@ export const useAppStore = defineStore('app', {
     startSse() {
       subscribeSse((e) => {
         this.lastEvent = e
+        if (e.type === 'stage.progress') {
+          this.progressLog.push({ ts: e.ts, article_id: e.article_id, message: String(e.message || '') })
+          if (this.progressLog.length > 40) this.progressLog.splice(0, this.progressLog.length - 40)
+          this.workbenchTick++
+          return
+        }
         if (e.type === 'status.changed' || e.type.startsWith('job.')) {
           this.refreshArticles()
           this.workbenchTick++
@@ -33,6 +41,9 @@ export const useAppStore = defineStore('app', {
           this.workbenchTick++
         }
       })
+    },
+    clearProgress() {
+      this.progressLog = []
     },
   },
 })

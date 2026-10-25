@@ -31,18 +31,28 @@ class TopicExtract(BaseModel):
 class CollectorAgent(AgentBase):
     name = "collector"
 
+    def _progress(self, article_id: str, message: str) -> None:
+        """分阶段进度事件：前端等待动画 + 文字日志（反馈 3.4）。"""
+        events.bus.publish(events.STAGE_PROGRESS, article_id,
+                           stage="collect", message=message)
+
     def run(self, article_id: str) -> CollectionReport:
         article = dao.get_article(article_id)
         if not article:
             raise ValueError(f"文章不存在: {article_id}")
 
-        raw = self._fetch_primary(article)          # 先拿标题，再建目录（文件夹用标题命名）
+        self._progress(article_id, "抓取原文与快照…")
+        raw = self._fetch_primary(article)
+        self._progress(article_id, f"抓取文章【{raw.title or article['url']}】完成")
         library.ensure_dirs(article_id)
         primary_mid = self._store_primary(article_id, raw)
-        self._collect_images(raw, article_id, primary_mid)
-
+        self._progress(article_id, "提取主题与报道主体（规则抽取）…")
         extract = self._extract_topic(raw)
+        self._progress(article_id, "抓取原文图片 / 视频 / 音频…")
+        self._collect_images(raw, article_id, primary_mid)
+        self._progress(article_id, "扩搜检索相关文章…")
         refs = self._search_and_fetch_refs(article_id, raw, extract)
+        self._progress(article_id, "补充可商用配图/视频素材…")
         media_stats = self._enrich_media(article_id, extract)
 
         report = CollectionReport(
@@ -55,6 +65,7 @@ class CollectorAgent(AgentBase):
         if len(refs) < int(config.get("collect.ref_count.scarce_min", 1)):
             report.scarce = True
 
+        self._progress(article_id, "素材入库与索引…")
         notes = self._render_notes(article, raw, extract, refs, media_stats)
         notes_path = library.write_notes(article_id, notes)
         report.notes_path = str(notes_path)
@@ -65,6 +76,35 @@ class CollectorAgent(AgentBase):
         events.bus.publish(events.COLLECT_FINISHED, article_id,
                            refs=len(refs), scarce=report.scarce)
         return report
+
+    def deep_search(self, article_id: str) -> dict:
+        """深度搜索（反馈 3.3）：基于已提取主题再跑一轮检索，仅增量补充 reference。"""
+        article = dao.get_article(article_id)
+        if not article:
+            raise ValueError(f"文章不存在: {article_id}")
+        primary = next((m for m in dao.list_materials(article_id=article_id, kind="text")
+                        if m.get("ref_type") == "primary"), None)
+        if not primary:
+            raise ValueError("缺少原文素材，先完成收集")
+        self._progress(article_id, "深度搜索：重新提取主题…")
+        from ..services.textmine import extract_topic_rules
+        content = dao.get_material_text(primary["id"])
+        g = extract_topic_rules(primary.get("title") or article.get("title") or "",
+                                content[:12000])
+        raw = RawArticle(url=article["url"], title=article.get("title") or "",
+                         markdown=content)
+        extract = TopicExtract(topic=g.topic, keywords=g.keywords,
+                               core_points=g.core_points, entities=g.entities,
+                               foundational_queries=g.foundational_queries)
+        before = len(dao.list_materials(article_id=article_id, kind="text"))
+        self._progress(article_id, "深度搜索：新一轮检索与爬取…")
+        refs = self._search_and_fetch_refs(article_id, raw, extract)
+        after = len(dao.list_materials(article_id=article_id, kind="text"))
+        self._progress(article_id, f"深度搜索完成：新增参考 {len(refs)} 篇")
+        rag_index.index_materials(article_id=article_id)
+        events.bus.publish(events.COLLECT_FINISHED, article_id,
+                           refs=len(refs), deep_search=True)
+        return {"new_refs": len(refs), "text_materials": after - before, "keywords": g.keywords}
 
     # ---- 步骤 ----
 
@@ -89,10 +129,14 @@ class CollectorAgent(AgentBase):
     def _collect_images(self, raw: RawArticle, article_id: str, source_mid: str) -> list[str]:
         saved = []
         if raw.images:
-            saved += media_download.fetch_images(
+            imgs = media_download.fetch_images(
                 raw.images, scope="article", article_id=article_id,
                 source_material_id=source_mid, page_url=raw.url)
-        for v in (getattr(raw, "videos", None) or []):
+            saved += imgs
+            self._progress(article_id, f"图片下载完成（入库 {len(imgs)} 张）")
+        vids = getattr(raw, "videos", None) or []
+        dl_count = 0
+        for v in vids:
             url = v.url if hasattr(v, "url") else str(v)
             if "readtemplate" in url or (hasattr(v, "vid") and v.vid.startswith("wxv_")):
                 # wxv_ 视频号：降级为「链接 + 封面」素材；重收时按来源链接去重
@@ -115,9 +159,14 @@ class CollectorAgent(AgentBase):
                         scope="article", article_id=article_id,
                         source_material_id=link_mid, page_url=raw.url, limit=1)
             else:
-                saved += media_download.fetch_videos(
+                got = media_download.fetch_videos(
                     [v], scope="article", article_id=article_id,
                     source_material_id=source_mid, page_url=raw.url)
+                saved += got
+                dl_count += len(got)
+        if vids:
+            self._progress(article_id, f"视频抓取完成（下载 {dl_count} 个，链接素材 "
+                                       f"{len(vids) - dl_count} 个）")
         if getattr(raw, "audios", None):
             saved += media_download.fetch_audios(
                 raw.audios, scope="article", article_id=article_id,
@@ -125,18 +174,15 @@ class CollectorAgent(AgentBase):
         return saved
 
     def _extract_topic(self, raw: RawArticle) -> TopicExtract:
-        if not self.llm_available():
-            return TopicExtract(topic=raw.title, keywords=[raw.title] if raw.title else [],
-                                core_points=[], entities=[])
-        prompt = self.prompt("topic_extract", title=raw.title,
-                             published_at=raw.published_at,
-                             content=raw.markdown[:6000])
-        try:
-            result = self.complete("summarize", [{"role": "user", "content": prompt}],
-                                   schema=TopicExtract, stage="collector.topic_extract")
-            return result.parsed
-        except Exception:
-            return TopicExtract(topic=raw.title, keywords=[raw.title] if raw.title else [])
+        """纯规则抽取主题/报道主体/关键词（不调 LLM，控制成本）。
+
+        规则：标题分句 ×3 + 英文/型号 token + 「」引号词 + 实体词典，
+        核心句取「含数字+含关键词」高分句（services/textmine.py）。"""
+        from ..services.textmine import extract_topic_rules
+        g = extract_topic_rules(raw.title, raw.markdown[:12000])
+        return TopicExtract(topic=g.topic, keywords=g.keywords,
+                            core_points=g.core_points, entities=g.entities,
+                            foundational_queries=g.foundational_queries)
 
     def _search_and_fetch_refs(self, article_id: str, raw: RawArticle,
                                extract: TopicExtract) -> list[tuple[str, str, str]]:
@@ -216,6 +262,7 @@ class CollectorAgent(AgentBase):
                                 source_url=url, ref_type=ref_type.value,
                                 fetch_status="fetch_error", title=url)
             return None
+        self._progress(article_id, f"爬取参考【{raw.title or url}】")
         folder = library.save_ref_snapshot(article_id, "", raw.html or "", raw.markdown,
                                            {"url": url, "title": raw.title,
                                             "published_at": raw.published_at})
