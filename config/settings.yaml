@@ -18,6 +18,7 @@ create:
 # ---- 审稿 ----
 review:
   block_on_blocker: true       # 存在 blocker 时禁止定稿(可强制定稿并留痕)
+  evidence_chars: 8000         # LLM 审稿每条素材的证据窗口长度(字符); 过小会把「节选未覆盖」误判成「不存在」
   originality:
     simhash_warn: 0.35         # 字面相似度 ≥ 此值 → warn
     simhash_block: 0.55        # ≥ 此值 → blocker

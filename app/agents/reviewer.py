@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+import re
+
 from pydantic import BaseModel, Field
 
 from ..core import blocks as bk
@@ -17,7 +19,9 @@ from ..services.rag import index as rag_index
 from .base import AgentBase
 
 _WORD_PARA_LIMIT = 150          # 公众号段落字数上限
-_XHS_PAGE_LIMIT = 300
+# 审稿引文中的成对引号：「」/『』/“”/""，用于 LLM 条目引文接地校验
+_QUOTE_RE = re.compile(r"[「『“\"]([^「」『』“”\"]{4,80})[」』”\"]")
+_QUOTE_CHARS = "「」『』“”\"'‘’"
 
 
 class ReviewLLMItem(BaseModel):
@@ -95,13 +99,28 @@ class ReviewerAgent(AgentBase):
                 id="", category="layout", severity="info",
                 message="全文无配图，图文平台观感偏弱",
                 suggestion="从素材库补 1~3 张配图", auto_fixable=False))
+        lo_hi = config.get("variants.wechat_mp.word_range") or []
+        if len(lo_hi) == 2:
+            lo, hi = int(lo_hi[0]), int(lo_hi[1])
+            total = bk.doc_word_count(doc)
+            if hi and total > hi:
+                out.append(ChecklistItem(
+                    id="", category="layout", severity="warn",
+                    message=f"正文 {total} 字，超出公众号建议区间 {lo}~{hi} 上限",
+                    suggestion="压缩次要段落，或把延展内容移到评论区置顶", auto_fixable=False))
+            elif lo and total < lo:
+                out.append(ChecklistItem(
+                    id="", category="layout", severity="info",
+                    message=f"正文 {total} 字，低于公众号建议区间 {lo}~{hi} 下限",
+                    suggestion="补充事实细节或案例分析", auto_fixable=False))
+        xhs_limit = int(config.get("cards.max_chars_per_page", 300))
         for page in doc.meta.xhs_pages:
             chars = sum(bk.word_count((bk.get_block(doc, bid) or Block(id="", type=BlockType.PARAGRAPH)).text)
                         for bid in page.block_ids)
-            if chars > _XHS_PAGE_LIMIT:
+            if chars > xhs_limit:
                 out.append(ChecklistItem(
                     id="", category="layout", severity="warn",
-                    message=f"小红书某分页约 {chars} 字，超过 {_XHS_PAGE_LIMIT} 字/页",
+                    message=f"小红书某分页约 {chars} 字，超过 {xhs_limit} 字/页",
                     suggestion="重新分页或压缩该页文字", auto_fixable=False))
         return out
 
@@ -164,8 +183,9 @@ class ReviewerAgent(AgentBase):
     def _llm_review(self, doc: DraftDoc, article_id: str,
                     style: dict) -> tuple[list[ChecklistItem], int | None]:
         text_blocks = list(bk.iter_text_blocks(doc))
+        evidence_chars = int(config.get("review.evidence_chars", 8000))
         evidence = [{"id": m["id"], "title": m.get("title") or "",
-                     "content": dao.get_material_text(m["id"])[:3000]}
+                     "content": dao.get_material_text(m["id"])[:evidence_chars]}
                     for m in dao.list_materials(article_id=article_id, kind="text")
                     if m["fetch_status"] == "ok"]
         prompt = self.prompt("review", style=style, text_blocks=text_blocks,
@@ -176,10 +196,11 @@ class ReviewerAgent(AgentBase):
                                    stage="reviewer.llm", max_tokens=4000)
         except Exception:
             return [], None
+        raw = [it for it in result.parsed.items
+               if it.category in ("fact", "attribution", "compliance", "ai_flavor")]
+        self._ground_llm_items(raw, doc, evidence)
         out: list[ChecklistItem] = []
-        for it in result.parsed.items:
-            if it.category not in ("fact", "attribution", "compliance", "ai_flavor"):
-                continue
+        for it in raw:
             if it.severity not in ("info", "warn", "blocker"):
                 it.severity = "warn"
             block_id = None
@@ -205,3 +226,35 @@ class ReviewerAgent(AgentBase):
                 suggestion="按反模式清单改写：去套话、打散排比、补具体细节",
                 auto_fixable=True))
         return out, score
+
+    # ---------- LLM 条目引文接地 ----------
+
+    @staticmethod
+    def _norm_quote(s: str) -> str:
+        for ch in _QUOTE_CHARS:
+            s = s.replace(ch, "")
+        s = re.sub(r"[*_`#]+", "", s)      # 爬取 markdown 的强调/标题符号
+        s = re.sub(r"<[^>]+>", "", s)      # 残留 HTML 标签
+        return re.sub(r"\s+", "", s)
+
+    def _ground_llm_items(self, items: list[ReviewLLMItem], doc: DraftDoc,
+                          evidence: list[dict]) -> None:
+        """LLM 审稿条目的引文接地校验：message 中成对引号包裹的片段，
+        必须能在稿件或证据包中逐字找到（归一化后包含）；都找不到即疑似
+        幻觉引文，严重级降一档并在 message 留痕。suggestion 里的引号片段
+        是建议替换文本，不参与校验。"""
+        draft_hay = self._norm_quote(
+            "\n".join(b.text or "" for b in bk.iter_text_blocks(doc)))
+        evidence_hay = self._norm_quote("\n".join(e.get("content") or ""
+                                                  for e in evidence))
+        downgrade = {"blocker": "warn", "warn": "info"}
+        for it in items:
+            for q in _QUOTE_RE.findall(it.message or ""):
+                nq = self._norm_quote(q)
+                if len(nq) < 4:
+                    continue
+                if nq not in draft_hay and nq not in evidence_hay:
+                    if it.severity in downgrade:
+                        it.severity = downgrade[it.severity]
+                        it.message = (it.message or "") + "（引文未在稿件/证据中逐字核实，已自动降级）"
+                    break

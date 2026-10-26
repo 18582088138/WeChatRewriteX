@@ -45,7 +45,7 @@
 [风格]   {style_pack.system.md 全文}
 [硬约束] 词数 {target}±10%；禁用词表 {banlist}；
          每个关键事实末尾带 [^素材id] 引用标记；
-         小标题 ≤ 6 个；段落 ≤ 150 字(小红书变体 ≤300 字/页)。
+         小标题 ≤ 6 个；段落 ≤ 150 字(小红书变体 ≤380 字/页，对齐 cards.max_chars_per_page)。
 [输出]   严格 JSON schema: {title_candidates, blocks[], keywords, one_liner}
 [自检]   输出前逐条核对硬约束, 不满足则自我修订后重新输出。
 ```

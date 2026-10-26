@@ -3,14 +3,52 @@
 > **给下一次会话**：这份文档 + `docs/design/` 设计文档 + git log 即可恢复全部上下文。
 > 读法：先看本文件「当前状态」与「下一轮该做什么」，细节查设计文档对应章节。
 
-## 当前状态（截至 2026-10-25）
+## 当前状态（截至 2026-10-26）
 
-**功能完整可用、本地运行中的 M1+ 产品**。三轮主迭代 + 四轮修订全部落地，
-测试 26 项全绿，git main 分支 10 次提交（未推 GitHub：本机无 gh CLI，远端未配）。
+**功能完整可用、本地运行中的 M1+ 产品，完成首轮真实案例校准（V1.5）**。
+测试 29 项全绿。git remote 已配（github.com/18582088138/WeChatRewriteX），V1.4 及之前已推远端。
 
-- 启动：conda `xkd_env_py312`（Python 3.12.14）→ `python -m app` → http://127.0.0.1:8000
+- 启动：`C:\Users\75203\miniforge3\envs\xkd_env_py312\python.exe -m app` → http://127.0.0.1:8000
+  （conda 环境在 miniforge3，Git Bash 里 `conda activate` 不生效，直接用绝对路径 python）
 - 前端已构建于 `web/dist/`（改前端后需 `cd web && npm run build`）
 - 数据根 `resource/`（gitignore），日志 `log/`（gitignore，开发者模式才写）
+
+## V1.5 真实案例校准（2026-10-26）
+
+用 3 篇量子位真实选题（OpenAI 断网训练/云生意格局/Anthropic 奇点演讲）完整走通
+「收集→创作→审稿→定稿→四平台导出」，并据审稿报告做了一轮系统性校准：
+
+**发现的问题（全部实锤根因）**
+1. attribution 误报洪水：citations 是块级结构化字段（`Block.citations`），但审稿 prompt
+   只渲染块文本 → 审稿模型永远看不见引用标注，每篇误报 4~5 条「未标注 citations」。
+2. 证据截断假 blocker：证据窗口 3000 字符，长文关键数据在窗口外 → 「未见此数据」误判
+   （44 万亿 GDP 在 3243 字符处被截断，冤产生 blocker）。
+3. 幻觉引文：审稿模型引用稿中不存在的话（如「为了保证系统的绝对安全」）并据此判违规。
+4. 配置不一致：创作分页按 `cards.max_chars_per_page=380` 打包，审稿硬编码 300 字/页 →
+   每篇 3~4 条无解 warn；公众号正文词数无检查（两篇超 1800 字上限无人报）。
+
+**修复（代码+prompt 双侧）**
+- `reviewer.py`：小红书分页上限改读 `cards.max_chars_per_page`；新增正文词数对
+  `variants.wechat_mp.word_range` 检查（超上限 warn/不足 info）；证据窗口
+  `review.evidence_chars` 默认 8000；新增 `_ground_llm_items` 引文接地校验——
+  审稿条目 message 中成对引号片段归一化（去空白/引号/markdown 强调符/HTML 标签）后
+  必须在稿件或证据语料中逐字找到，找不到即降一档 severity 并留痕「已自动降级」。
+- `config/prompts/reviewer/review.j2` 重写：渲染块 citations；attribution 只判
+  「关键事实块无 citations」；severity 分级明确（blocker=直接矛盾/凭空捏造/严重合规，
+  范围放大/口径差异=warn，修饰词省略不改含义不报）；「证据节选未覆盖」只 warn 且仅关键主张；
+  引文约定「」=稿件、『』=证据、逐字复制；ai_flavor 豁免风格包规定的开头功能句。
+- 同步：`rules.md`/`05-publishing.md`/`06-style-guide.md` 的小红书每页 300→380；
+  `rules.md` 数据引用改为「citations 字段结构化标注」描述。
+
+**校准效果（同三篇稿件前后对比）**
+- blocker 7→0（原 7 个中 6 个是假阳/严重级错配，1 个真阳「十五个月二十多倍」自相矛盾
+  以 info 保留可见）；warn 40→18，留存项均真实可操作。
+- 首轮复审曾出现真阳被误降级（证据原文 `**4000亿**` 的 markdown 强调符破坏逐字包含）
+  → 归一化加 strip `*_`#` 与 HTML 标签修复，已入测试。
+- 三篇均无 force 定稿，四平台导出各 32 文件（小红书卡片 10 页/篇，页脚页码一致）。
+
+`scripts/calib_drive.py` 是可复用的校准驱动（submit/status/jobs/advance），下轮校准换
+SEEDS 链接即可。
 
 ## 产品是什么
 
@@ -79,6 +117,16 @@ resource/
 
 ## 踩过的坑（别再踩）
 
+- **审稿 prompt 三坑（V1.5）**：① LLM 看不见的字段等于不存在——citations 不渲染进 prompt，
+  attribution 维度必然误报；② 证据截断窗口外的数据会被判「不存在」→ 冤 blocker，
+  窗口默认 8000 且 prompt 声明「节选未覆盖≠不存在」；③ LLM 会幻觉引文，必须程序侧
+  逐字接地校验兜底（`_ground_llm_items`）。
+- **引文归一化**：爬取的 markdown 带 `**强调**`，LLM 引文时会剥掉 → 接地校验的归一化
+  必须同步 strip `*_`#` 与 HTML 标签，否则真阳条目被误降级。
+- **同一数字多处定义必漂移**：分页容量曾同时存在 300（审稿硬编码/rules.md/设计文档）与
+  380（cards 配置）两套值——规则侧一律读配置，文档同步改。
+- **curl 中文 body**：Windows Git Bash 下 curl `-d` 带中文必 400（编码被 mangling），
+  API 驱动一律走 python 脚本（scripts/calib_drive.py）。
 - **FTS5 MATCH** 遇标点语法错误 → 短语化包裹 + LIKE 兜底（dao.search_materials_fts）。
 - **任务重试**：阶段准入必须含自身进行态 + 同态迁移幂等，否则重试被防呆误杀。
 - **mpvideo.qpic.cn 直链**：藏在文章 inline JS，`&` 转义为 `\x26amp;` 必须先反转义再匹配，
@@ -101,6 +149,8 @@ resource/
 ## 下一轮怎么接
 
 1. 本目录说「继续」即可——项目记忆 + 本文档 + git log 提供全部上下文。
-2. 若要继续优化：优先用 3~5 篇真实选题完整走全流程，把风格包与审稿阈值用真实案例校准。
-3. 若要推 GitHub：先装/配 gh CLI，再 `gh repo create` 推送（`.env`/`resource/`/`log/` 已在 gitignore）。
+2. 校准轮已做过一轮（V1.5）。再做就换 `scripts/calib_drive.py` 的 SEEDS 跑新选题，
+   重点观察：attribution warn 是否仍偏多（可收紧创作侧 citations 覆盖率）、
+   演讲类稿件的 fact warn 密度（当前 13 warn/篇，仍偏吵）。
+3. 推 GitHub：remote 已配好，`git push` 即可（`.env`/`resource/`/`log/` 已在 gitignore）。
 4. 若要二阶段发布：读 `docs/design/05-publishing.md` 的 Publisher 插件接口与降级链。
