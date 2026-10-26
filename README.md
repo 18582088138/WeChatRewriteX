@@ -33,15 +33,16 @@ python -m app            # → http://127.0.0.1:8000
 
 | 文档 | 内容 |
 |---|---|
+| **[docs/PROGRESS.md](docs/PROGRESS.md)** | **开发进度交接：当前状态 / 架构速查 / 坑清单 / 待办（新会话先读它）** |
 | [docs/design/](docs/design/README.md) | 产品设计文档（00 总览 ~ 08 路线图，含拍板结论） |
-| [docs/dev-plan.md](docs/dev-plan.md) | M1 开发计划与切片验收 |
+| [docs/dev-plan.md](docs/dev-plan.md) | 开发计划与各轮修订记录 |
 | [docs/api.md](docs/api.md) | 接口文档 |
 | [docs/user-manual.md](docs/user-manual.md) | 使用手册 |
 
 ## 测试
 
 ```bash
-python -m pytest tests/        # 24 项（含 fixture 离线端到端 + Playwright 卡片渲染）
+python -m pytest tests/        # 26 项（含块级增量版本 + fixture 离线端到端 + Playwright 卡片渲染）
 ```
 
 ## 合规说明
