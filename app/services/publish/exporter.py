@@ -139,9 +139,15 @@ def export_variants(article_id: str, platforms: list[str]) -> dict:
 
     results: dict[str, dict] = {}
     for platform in platforms:
+        from ...core import events
+        events.bus.publish(events.STAGE_PROGRESS, article_id,
+                           stage="publish",
+                           message=f"导出 {_PLATFORM_LABEL.get(platform, platform)} 发布包…")
         pid = dao.create_publish_job(article_id, draft["id"], platform, {})
         try:
             res = _export_one(doc, article_id, platform, root)
+            events.bus.publish(events.STAGE_PROGRESS, article_id, stage="publish",
+                               message=f"{_PLATFORM_LABEL.get(platform, platform)} 完成：{res.message[:60]}")
             dao.finish_publish_job(pid, res.__dict__, ok=res.ok)
         except Exception as e:
             dao.finish_publish_job(pid, {"message": str(e)}, ok=False)

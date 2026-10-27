@@ -65,3 +65,12 @@ class AgentBase:
 
     def llm_available(self) -> bool:
         return self._llm_injected or router.available()
+
+    # ---- 进度事件（对齐收集 Agent：前端等待动画 + 文字日志 + 文件日志） ----
+
+    def progress(self, article_id: str, message: str) -> None:
+        from ..core import events
+        events.bus.publish(events.STAGE_PROGRESS, article_id,
+                           stage=self.name, message=message)
+        from .. import logging_setup
+        logging_setup.log("info", "[%s] %s (article=%s)", self.name, message, article_id)

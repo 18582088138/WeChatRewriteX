@@ -59,7 +59,18 @@ def ensure_runtime_assets() -> None:
         pass        # 播种失败不致命：默认值兜底，界面首启再提示
 
 
+def setup_playwright_browsers() -> None:
+    """冻结态：发布包内附带的 playwright-browsers/ 优先于用户目录，
+    实现卡片渲染开箱可用（免 playwright install）。"""
+    if not _is_frozen() or os.environ.get("PLAYWRIGHT_BROWSERS_PATH"):
+        return
+    bundled = RUNTIME_ROOT / "playwright-browsers"
+    if bundled.is_dir():
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(bundled)
+
+
 ensure_runtime_assets()
+setup_playwright_browsers()
 load_dotenv(RUNTIME_ROOT / ".env")
 
 DEFAULTS: dict[str, Any] = {

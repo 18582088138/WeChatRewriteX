@@ -16,6 +16,24 @@
 - 数据根 `resource/`（gitignore）；日志 `log/wenshu.log`（gitignore，常驻持久化）
 - 一键打包：`python tools/pack_release.py`（默认全平台，产物进 release/）
 
+## V1.8 发布页优化（2026-10-28）
+
+1. **exports 平台文件夹跳转**：发布页平台条目生成完毕出现「打开文件夹」按钮 →
+   `POST /api/articles/{aid}/exports/reveal {platform}` 系统文件管理器直达 exports/<平台>/。
+2. **Playwright 浏览器随包（免 install）**：冻结态启动时若发布包含 `playwright-browsers/`
+   则注入 `PLAYWRIGHT_BROWSERS_PATH`（`config.setup_playwright_browsers`）；打包流水线
+   `bundle_browsers()` 把本机 `ms-playwright/chromium_headless_shell-*` 拷进包；
+   bat/ps1 仅在包内与用户目录都没有浏览器时才跑 `--install-browser` 兜底。
+   实证：屏蔽用户目录缓存后冻结 exe 卡片渲染正常产出。
+3. **发布页同步创作信息**：总结/关键词/参考链接（读 draft meta，与创作分页同源）。
+4. **参考链接**：写入侧去重（creator + apply_ops 走 `blocks.dedupe_ref_links`，URL 归一化
+   保序去重）；展示统一「标题 - 链接地址」+ 新窗口打开（rel=noopener）；展示层再去重兜底。
+5. **日志补齐**：`AgentBase.progress()` 统一进度事件（stage.progress + 文件日志），
+   创作/审稿/导出/批量抓取全部逐步打点（此前只有收集有）。
+6. **GIF 调研结论（跳过）**：卡片=HTML→Playwright 静态 PNG 截图，动图嵌入只会定格首帧，
+   PNG 卡片原理上不支持动图 → 按需求分支「不支持则跳过」，不改动。若未来要动图，
+   方向是单独出 GIF/视频物料（imageio-ffmpeg 已在依赖链可复用），而非嵌入卡片。
+
 ## V1.7 审稿优化与 bug 修复（2026-10-28）
 
 1. **冻结态收集崩溃修复**：PyInstaller 漏收 justext 的 stoplists 静态资源（trafilatura
@@ -197,6 +215,9 @@ resource/
   curl_cffi(DLL)。冻结态跑通收集才算验证（单测测不到）。
 - **sha 去重饿死（V1.7）**：ingest 的 sha256 去重若直接返回他篇素材 id，后收同源的
   文章会「素材库为空」。去重只省文件不省行：同归属复用、跨归属同文件克隆新行。
+- **项目文件夹名粒度到分钟（V1.8 发现，已知边界）**：同名标题同分钟创建的两篇文章会共用
+  项目文件夹（lib_dir 无唯一化）。修法方向：article_dir 生成时撞名追加短 id 后缀
+  （注意 `_DT_SUFFIX` 校验与改名联动）。测试侧已用 tag 参数隔离。
 - **复现实验污染生产库（V1.7）**：绕过 pytest 直接跑 `create_app()` 的调试脚本会写
   生产 resource/！调试脚本开头先 `os.environ["WENSHU_DATA_DIR"] = 临时目录`。
 - **PowerShell 5.1 两坑（V1.6）**：不支持 `&&`（报错「不是有效的语句分隔符」，逐行或

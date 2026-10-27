@@ -122,6 +122,34 @@ def advance(aid: str, body: Advance) -> dict:
     return {"job_id": job_id, "stage": body.stage}
 
 
+@router.post("/{aid}/exports/reveal")
+def reveal_export_dir(aid: str, body: RevealExport) -> dict:
+    """在系统文件管理器中打开平台发布包文件夹（exports/<platform>/）。"""
+    art = dao.get_article(aid)
+    if not art:
+        raise HTTPException(404, "文章不存在")
+    from ..storage import library
+    d = library.exports_dir(aid) / body.platform
+    if not d.is_dir():
+        raise HTTPException(404, f"{body.platform} 发布包还没生成——先点「生成发布包」")
+    import subprocess
+    import sys as _sys
+    try:
+        if _sys.platform == "win32":
+            subprocess.Popen(["explorer", str(d)])
+        elif _sys.platform == "darwin":
+            subprocess.Popen(["open", str(d)])
+        else:
+            subprocess.Popen(["xdg-open", str(d)])
+    except OSError as e:
+        raise HTTPException(500, f"打开文件夹失败: {e}")
+    return {"ok": True, "folder": str(d)}
+
+
+class RevealExport(BaseModel):
+    platform: str
+
+
 @router.post("/{aid}/finalize")
 def finalize(aid: str, body: Finalize) -> dict:
     art = dao.get_article(aid)

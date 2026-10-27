@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import shutil
 import subprocess
 import sys
@@ -56,6 +57,20 @@ def targz_dir(src: Path, out: Path) -> None:
     with tarfile.open(out, "w:gz") as t:
         t.add(src, arcname=src.name)
     print("  tar.gz →", out.name, out.stat().st_size // 1024, "KB")
+
+
+def bundle_browsers(pkg_dir: Path) -> None:
+    """把本机 ms-playwright 缓存的 chromium_headless_shell 打进发布包（卡片渲染免安装）。"""
+    local = os.environ.get("LOCALAPPDATA")
+    src_root = Path(local) / "ms-playwright" if local else None
+    shells = sorted(src_root.glob("chromium_headless_shell-*")) if src_root else []
+    if not shells:
+        print("  [warn] 本机无 chromium_headless_shell 缓存，包内不带浏览器；"
+              "首启脚本会引导安装（--install-browser）")
+        return
+    dst = pkg_dir / "playwright-browsers"
+    shutil.copytree(shells[-1], dst / shells[-1].name)
+    print(f"  浏览器已打入发布包：{shells[-1].name}")
 
 
 def copy_docs(dst: Path) -> None:
@@ -116,6 +131,7 @@ def main() -> None:
         shutil.copy(ROOT / "scripts" / "start_windows.bat", win_dir / "启动文枢.bat")
         shutil.copy(ROOT / "scripts" / "start_windows.ps1", win_dir / "启动文枢.ps1")
         copy_docs(win_dir)
+        bundle_browsers(win_dir)
         zip_path = RELEASE / f"文枢-v{ver}-windows-x64.zip"
         zip_dir(win_dir, zip_path)
         artifacts.append(zip_path)

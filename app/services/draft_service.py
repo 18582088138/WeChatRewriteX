@@ -179,9 +179,9 @@ def apply_ops(doc: DraftDoc, ops: list[dict]) -> int:
                 doc.meta.subtitle = value.strip()
                 changed += 1
             elif field == "ref_links" and isinstance(value, list):
-                doc.meta.ref_links = [{"title": str(x.get("title", "")),
-                                       "url": str(x.get("url", ""))}
-                                      for x in value if isinstance(x, dict)][:20]
+                doc.meta.ref_links = bk.dedupe_ref_links(
+                    [{"title": str(x.get("title", "")), "url": str(x.get("url", ""))}
+                     for x in value if isinstance(x, dict)])[:20]
                 changed += 1
             elif field == "title_selected" and isinstance(value, str):
                 cands = [c for c in doc.meta.title_candidates if c != value]

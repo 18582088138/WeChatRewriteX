@@ -41,8 +41,11 @@ def _run_deepsearch(article_id: str, payload: dict) -> dict:
 def _run_ingest(article_id: str | None, payload: dict) -> dict:
     """批量链接抓取（单链接失败不阻断，逐个记录结果）。"""
     from ..services import ingest as ingest_svc
+    urls = payload.get("urls", [])
     results = []
-    for url in payload.get("urls", []):
+    for i, url in enumerate(urls, 1):
+        events.bus.publish(events.STAGE_PROGRESS, article_id, stage="ingest",
+                           message=f"抓取链接 {i}/{len(urls)}：{url[:60]}")
         try:
             r = ingest_svc.ingest_url(article_id, url, payload.get("ref_type"))
             results.append({"url": url, "ok": True, "title": r.get("title"),

@@ -20,6 +20,7 @@ const selected = ref<string[]>(['wechat_mp', 'xhs'])
 const jobs = ref<PublishJob[]>([])
 const exportFiles = ref<string[]>([])
 const cardFiles = ref<string[]>([])
+const docMeta = ref<any>(null)
 const busy = ref(false)
 const cardsBusy = ref(false)
 
@@ -28,6 +29,9 @@ async function load() {
   const ex = await api.get(`/api/articles/${props.articleId}/exports`)
   exportFiles.value = ex.files
   cardFiles.value = exportFiles.value.filter(f => f.includes('cards') && f.endsWith('.png'))
+  try {
+    docMeta.value = (await api.get(`/api/articles/${props.articleId}/draft`)).draft.doc.meta
+  } catch { docMeta.value = null }
 }
 onMounted(load)
 watch(() => store.workbenchTick, load)
@@ -36,6 +40,18 @@ const latestByPlatform = computed(() => {
   const map: Record<string, PublishJob> = {}
   for (const j of jobs.value) map[j.platform] = j   // 列表按时间倒序，先出现为最新
   return map
+})
+
+/** 参考链接（与创作分页同源）：去重后展示「标题 - 链接」，新窗口打开 */
+const refLinks = computed(() => {
+  const seen = new Set<string>()
+  return (docMeta.value?.ref_links || [])
+    .filter((r: any) => {
+      const k = (r.url || '').trim().toLowerCase().replace(/\/+$/, '') || 't:' + (r.title || '')
+      if ((!r.url && !r.title) || seen.has(k)) return false
+      seen.add(k)
+      return true
+    })
 })
 
 async function publish() {
@@ -57,6 +73,13 @@ async function genCards() {
   } catch (e: any) { message.error(e.message) } finally { cardsBusy.value = false }
 }
 
+/** 点击平台条目：打开该平台发布包的本地文件夹（exports/<platform>/） */
+async function openPlatformDir(platform: string) {
+  try {
+    await api.post(`/api/articles/${props.articleId}/exports/reveal`, { platform })
+  } catch (e: any) { message.warning(e.message) }
+}
+
 function jobMessage(j: PublishJob): string {
   try { return JSON.parse(j.result_json).message || '' } catch { return '' }
 }
@@ -72,13 +95,13 @@ function jobMessage(j: PublishJob): string {
           自动推送草稿箱为二阶段能力。
         </div>
         <div class="space-y-2">
-          <label v-for="p in PLATFORMS" :key="p.key"
-                 class="flex items-start gap-3 p-3 rounded-md cursor-pointer transition-colors hover:bg-[var(--raised)]"
+          <div v-for="p in PLATFORMS" :key="p.key"
+                 class="flex items-start gap-3 p-3 rounded-md transition-colors hover:bg-[var(--raised)]"
                  style="border: 1px solid var(--border);">
             <NCheckbox :checked="selected.includes(p.key)"
                        @update:checked="(v: boolean) => {
                          selected = v ? [...selected, p.key] : selected.filter(x => x !== p.key) }" />
-            <div>
+            <div class="flex-1 min-w-0">
               <div class="font-medium text-sm">{{ p.label }}</div>
               <div class="text-xs mt-0.5" style="color: var(--faint);">{{ p.desc }}</div>
               <div v-if="latestByPlatform[p.key]" class="text-xs mt-1"
@@ -89,11 +112,44 @@ function jobMessage(j: PublishJob): string {
                 <span class="num"> · {{ latestByPlatform[p.key].created_at.slice(5, 16) }}</span>
               </div>
             </div>
-          </label>
+            <button v-if="latestByPlatform[p.key]?.status === 'done'"
+                    class="text-xs shrink-0 px-2 py-1 rounded hover:bg-[var(--surface)]"
+                    style="color: var(--accent-ink); border: 1px solid var(--border);"
+                    title="打开该平台发布包文件夹"
+                    @click.stop="openPlatformDir(p.key)">打开文件夹</button>
+          </div>
         </div>
         <NButton block type="primary" class="mt-4" :loading="busy" @click="publish">
           生成发布包
         </NButton>
+      </div>
+
+      <!-- 创作信息同步（与创作分页底部信息窗同源） -->
+      <div class="panel p-5">
+        <div class="font-semibold mb-3">文案信息</div>
+        <div class="space-y-3 text-sm">
+          <div>
+            <div class="text-[11px] mb-1" style="color: var(--faint);">文章总结</div>
+            <div style="color: var(--ink-700);">{{ docMeta?.one_liner || '（无）' }}</div>
+          </div>
+          <div>
+            <div class="text-[11px] mb-1" style="color: var(--faint);">关键词</div>
+            <div style="color: var(--accent-ink);">
+              {{ (docMeta?.keywords || []).map((k: string) => '#' + k).join('，') || '（无）' }}</div>
+          </div>
+          <div>
+            <div class="text-[11px] mb-1" style="color: var(--faint);">参考链接</div>
+            <div v-if="refLinks.length" class="space-y-1">
+              <div v-for="(r, i) in refLinks" :key="i" class="truncate text-xs">
+                <a v-if="r.url" :href="r.url" target="_blank" rel="noopener"
+                   class="hover:underline" style="color: var(--accent-ink);"
+                   :title="r.url">{{ r.title || r.url }} - {{ r.url }}</a>
+                <span v-else style="color: var(--muted);">{{ r.title }}</span>
+              </div>
+            </div>
+            <div v-else class="text-xs" style="color: var(--faint);">（无）</div>
+          </div>
+        </div>
       </div>
 
       <div class="panel p-5">

@@ -91,11 +91,17 @@ def test_settings_and_health(app_client):
     config.reload()
 
 
-def _drafted_article(client) -> str:
-    """fixture 离线链路走到 REVIEWED（收集→创作→审稿，全降级模式）。"""
+def _drafted_article(client, tag: str = "") -> str:
+    """fixture 离线链路走到 REVIEWED（收集→创作→审稿，全降级模式）。
+
+    tag：同分钟跑多个 fixture 文章时标题会撞项目文件夹名（标题-分钟 粒度），
+    用 tag 改标题隔离文件夹。"""
     r = client.post("/api/articles", json={"url": "fixture://sample_article.md"})
     assert r.status_code == 200, r.text
     aid = r.json()["article"]["id"]
+    if tag:
+        from app.storage import db
+        db.execute("UPDATE articles SET title=?, lib_dir=NULL WHERE id=?", (f"sample_{tag}", aid))
     _wait_status(client, aid, {"COLLECTED"})
     client.post(f"/api/articles/{aid}/advance", json={"stage": "create"})
     _wait_status(client, aid, {"DRAFTED"})
@@ -179,3 +185,20 @@ def test_local_batch_upload_classification(app_client):
     assert "正文内容" in content
     # 本地收集：上传即完成收集
     assert app_client.get(f"/api/articles/{art['id']}").json()["status"] == "COLLECTED"
+
+
+def test_exports_reveal_and_publish_progress(app_client, monkeypatch):
+    """exports/reveal：未生成时 404；生成后返回文件夹路径（Popen 打桩防真弹窗）。"""
+    import subprocess
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: None)
+    aid = _drafted_article(app_client, tag="reveal")
+    r = app_client.post(f"/api/articles/{aid}/exports/reveal", json={"platform": "weibo"})
+    assert r.status_code == 404                      # 还没生成
+    app_client.post(f"/api/articles/{aid}/finalize", json={"force": True})
+    r = app_client.post(f"/api/articles/{aid}/publish", json={"platforms": ["weibo"]})
+    assert r.status_code == 200
+    _wait_status(app_client, aid, {"DONE"})
+    r = app_client.post(f"/api/articles/{aid}/exports/reveal", json={"platform": "weibo"})
+    assert r.status_code == 200 and r.json()["folder"].endswith("weibo")
+    r = app_client.post(f"/api/articles/{aid}/exports/reveal", json={"platform": "xhs"})
+    assert r.status_code in (200, 404)               # xhs 未勾选导出则 404

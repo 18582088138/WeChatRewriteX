@@ -1,8 +1,8 @@
 @echo off
 rem ============================================================
 rem  Wenshu Studio - one-click launcher (Windows only)
-rem  ASCII-only on purpose: cmd parses bat with the OEM codepage;
-rem  non-ASCII bytes break parsing across encodings. See docs/DEPLOY.md.
+rem  ASCII-only + CRLF on purpose: cmd parses bat with the OEM codepage;
+rem  non-ASCII or LF breaks parsing. See docs/DEPLOY.md.
 rem ============================================================
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
@@ -42,8 +42,9 @@ if not defined PORT (
     exit /b 1
 )
 
-rem ---- first run: install Chromium for XHS card rendering (one-time, online) ----
-if not exist "%LOCALAPPDATA%\ms-playwright" (
+rem ---- Chromium for XHS cards: bundled in package (playwright-browsers/) ----
+rem ---- only install when neither bundled nor user-profile copy exists ----
+if not exist "playwright-browsers" if not exist "%LOCALAPPDATA%\ms-playwright" (
     echo First run: installing Chromium component for card rendering ...
     echo [%date% %time%] first run: install chromium >> "%START_LOG%"
     "%APP_EXE%" --install-browser >> "%START_LOG%" 2>&1

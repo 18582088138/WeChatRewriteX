@@ -70,7 +70,7 @@ wenshu                 # 启动；首启在当前目录自动铺 config/、web/d
 | README 命令报 `&& 不是有效的语句分隔符` | Windows PowerShell 5.1 不支持 `&&`：逐行执行或改用 `;` |
 | 双击 bat 闪退 | 看 `log/start.log`；bat 会自动顺延端口（8000~8005），全占用才失败；首次运行可能被 SmartScreen 拦（点「更多信息 → 仍要运行」），杀毒软件同理加白名单 |
 | 浏览器未自动打开 | 手动访问 http://127.0.0.1:8000；exe 默认启动后自动开浏览器，`--no-browser` 关闭 |
-| 小红书卡片导出失败 | Chromium 未安装：执行 `.\文枢.exe --install-browser`（Linux: `./文枢 --install-browser`）一次 |
+| 小红书卡片导出失败 | 发布包已自带 Chromium（`playwright-browsers/`），正常无需安装；若该文件夹被删，执行 `.\文枢.exe --install-browser`（Linux: `./文枢 --install-browser`）一次 |
 | LLM 全部降级 | `.env` 密钥未配或填错；看 `log/wenshu.log` 的渠道 fallback 记录 |
 | 页面 404/空白 | 前端未播种：删除程序目录 `web/` 后重启（自动重新播种），或联系交付方 |
 | 数据迁移 | 整个发布包目录原样拷贝即可（`resource/` + `config/` + `.env` 即全部状态） |

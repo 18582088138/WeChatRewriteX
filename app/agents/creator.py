@@ -40,17 +40,21 @@ class CreatorAgent(AgentBase):
         if not article:
             raise ValueError(f"文章不存在: {article_id}")
         style = self.load_style_pack(article.get("style_pack"))
+        self.progress(article_id, "汇总证据包与可用素材…")
         evidence = self._evidence_pack(article_id, selected_material_ids)
         media = self._available_media(article_id, selected_material_ids)
         images = media["images"]
         videos = media["videos"]
+        self.progress(article_id, f"证据 {len(evidence)} 份 · 图片 {len(images)} 张 · 视频 {len(videos)} 个")
         word_target = int(article.get("target_word_count")
                           or config.get("create.target_word_count", 1500))
         self._evidence_now = evidence            # 供 ref_links 使用
 
         if not self.llm_available():
+            self.progress(article_id, "LLM 未配置，走降级保底稿…")
             doc = self._degraded_doc(article_id, evidence)
         else:
+            self.progress(article_id, f"LLM 成稿中（目标 {word_target} 字）…")
             prompt = self.prompt("draft", style=style, word_target=word_target,
                                  evidence=evidence, images=images, videos=videos,
                                  user_notes=article.get("user_notes") or "")
@@ -61,11 +65,13 @@ class CreatorAgent(AgentBase):
             doc = self._enforce_word_count(doc, style, word_target, article_id)
             self._ensure_images(doc, images)
             doc.meta.xhs_pages = self._paginate_xhs(doc)
+            self.progress(article_id, f"成稿完成：{doc.meta.word_count or 0} 字 · "
+                                      f"{len(doc.blocks)} 块 · 小红书分页 {len(doc.meta.xhs_pages)} 页")
         # 参考文字链接：记录本次创作用到的文章素材（标题+链接）
-        doc.meta.ref_links = [
+        doc.meta.ref_links = bk.dedupe_ref_links([
             {"title": m.get("title") or "", "url": m.get("source_url") or ""}
             for m in getattr(self, "_evidence_now", [])
-        ]
+        ])
 
         # 创作定题 → 项目文件夹从「输入标题-日期」改名为「拟定标题-日期」（先于落盘）
         new_title = (doc.meta.title_candidates or [""])[0]

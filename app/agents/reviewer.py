@@ -49,8 +49,10 @@ class ReviewerAgent(AgentBase):
         style = self.load_style_pack()
 
         items: list[ChecklistItem] = []
+        self.progress(article_id, "规则检查（排版/禁用词）…")
         items += self._check_layout(doc)
         items += self._check_banlist(doc, style.get("banlist", []))
+        self.progress(article_id, "撞稿查重（SimHash 双阈值）…")
         orig_items, orig_score = self._check_originality(doc, article_id)
         items += orig_items
 
@@ -58,12 +60,15 @@ class ReviewerAgent(AgentBase):
                         "layout_issues": sum(1 for i in items if i.category == "layout")}
 
         if self.llm_available():
+            self.progress(article_id, "LLM 四维审稿（事实/来源/合规/AI味）…")
             llm_items, ai_score = self._llm_review(doc, article_id, style)
             items += llm_items
             scores["ai_flavor"] = ai_score
         else:
             scores["ai_flavor"] = None
 
+        self.progress(article_id, f"审稿完成：{len(items)} 条意见"
+                                  f"（阻断 {sum(1 for i in items if i.severity == 'blocker')}）")
         review_id = dao.create_review(article_id, draft["id"], draft["version"],
                                       items, scores)
         events.bus.publish(events.REVIEW_FINISHED, article_id,

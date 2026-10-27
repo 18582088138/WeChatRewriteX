@@ -40,7 +40,9 @@ if ($port -eq 0) {
 }
 
 # ---- first run: install Chromium for XHS card rendering (one-time, online) ----
-if (-not (Test-Path "$env:LOCALAPPDATA\ms-playwright")) {
+# bundled playwright-browsers/ in the package makes this unnecessary
+if (-not (Test-Path "playwright-browsers") -and
+    -not (Test-Path "$env:LOCALAPPDATA\ms-playwright")) {
     Write-Log "First run: installing Chromium component for card rendering ..."
     & $exe.FullName --install-browser 2>&1 | Out-File -Append -Encoding ASCII $startLog
     if ($LASTEXITCODE -ne 0) {

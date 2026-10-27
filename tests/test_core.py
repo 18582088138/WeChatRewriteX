@@ -144,3 +144,20 @@ def test_logging_persist_and_levels(tmp_path, monkeypatch):
     assert "该出现的错误" in content2
     assert "不该出现的信息" not in content2.replace("普通运行信息", "")
     logging_setup._logger.handlers.clear()          # 不影响其他测试
+
+
+def test_dedupe_ref_links():
+    """参考链接去重：URL 归一化（大小写/尾斜杠）保序去重；无 URL 按标题；空条目剔除。"""
+    from app.core.blocks import dedupe_ref_links
+    links = [
+        {"title": "甲文", "url": "https://a.com/x/"},
+        {"title": "甲文重复", "url": "https://A.com/x"},
+        {"title": "乙文", "url": "https://b.com/y"},
+        {"title": "", "url": ""},
+        {"title": "只有标题", "url": ""},
+        {"title": "只有标题", "url": ""},
+    ]
+    out = dedupe_ref_links(links)
+    assert len(out) == 3
+    assert out[0]["title"] == "甲文" and out[1]["url"] == "https://b.com/y"
+    assert out[2]["title"] == "只有标题"

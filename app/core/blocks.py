@@ -183,3 +183,19 @@ def changed_blocks(old: DraftDoc, new: DraftDoc) -> tuple[int, float]:
     ow, nw = doc_word_count(old), doc_word_count(new)
     delta = abs(nw - ow) / max(ow, 1)
     return changed, delta * 100
+
+def dedupe_ref_links(links: list[dict]) -> list[dict]:
+    """参考链接去重：按归一化 URL（小写 host、去尾斜杠/空白）保序去重；无 URL 的按标题去重。"""
+    seen: set[str] = set()
+    out: list[dict] = []
+    for x in links:
+        title = str(x.get("title") or "").strip()
+        url = str(x.get("url") or "").strip()
+        if not title and not url:
+            continue
+        key = re.sub(r"/+$", "", url.strip().lower()) if url else "t:" + title
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"title": title, "url": url})
+    return out

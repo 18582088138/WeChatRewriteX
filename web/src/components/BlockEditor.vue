@@ -165,6 +165,17 @@ async function loadArticle() {
     : all
 }
 
+/** 参考链接展示：去重（写入侧已去重，此处兜底历史数据） */
+const refLinksView = computed(() => {
+  const seen = new Set<string>()
+  return (doc.value?.meta.ref_links || []).filter((r: any) => {
+    const k = (r.url || '').trim().toLowerCase().replace(/\/+$/, '') || 't:' + (r.title || '')
+    if ((!r.url && !r.title) || seen.has(k)) return false
+    seen.add(k)
+    return true
+  })
+})
+
 function syncMetaForm() {
   const d = doc.value
   if (!d) return
@@ -662,10 +673,10 @@ async function runInsert() {
                     @blur="saveMeta('ref_links')" />
         </template>
         <div v-else class="info-value info-links">
-          <template v-if="doc?.meta.ref_links?.length">
-            <div v-for="(r, i) in doc.meta.ref_links.slice(0, 4)" :key="i" class="truncate">
-              <a v-if="r.url" :href="r.url" target="_blank" class="hover:underline"
-                 style="color: var(--accent-ink);" @click.stop>{{ r.title || r.url }}</a>
+          <template v-if="refLinksView.length">
+            <div v-for="(r, i) in refLinksView.slice(0, 4)" :key="i" class="truncate">
+              <a v-if="r.url" :href="r.url" target="_blank" rel="noopener" class="hover:underline"
+                 style="color: var(--accent-ink);" @click.stop>{{ r.title || r.url }} - {{ r.url }}</a>
               <span v-else>{{ r.title }}</span>
             </div>
           </template>

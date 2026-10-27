@@ -93,6 +93,7 @@ SSE 推送，前端工作台实时展示。主题与报道主体提取为**纯�
 | POST | `/api/articles/{aid}/publish` | `{platforms: [wechat_mp,xhs,weibo,x]}` 入队导出任务；须 FINALIZED/DONE，否则 409 |
 | GET | `/api/articles/{aid}/publish-jobs` | 各平台导出结果（`export_dir`、文件清单、消息） |
 | GET | `/api/articles/{aid}/exports` | 文章文件夹 `exports/` 下的文件列表（含 `lib_dir` 绝对路径） |
+| POST | `/api/articles/{aid}/exports/reveal` | `{platform}` 在系统文件管理器打开该平台发布包文件夹（exports/<平台>/）；未生成 404 |
 | POST | `/api/articles/{aid}/cards?theme=` | 单独生成小红书卡片 PNG（Playwright 截图，含溢出校验） |
 
 导出位置：`data/library/articles/<标题_短id>/exports/<平台>/`，各含 README.txt 发布说明；
