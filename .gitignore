@@ -21,8 +21,8 @@ web/node_modules/
 .DS_Store
 Thumbs.db
 
-# packaging（构建产物不入库；packaging/*.spec 为源文件需入库）
+# packaging（构建产物不入库，锚定仓库根；packaging/*.spec 与 docs/release/ 为源文件需入库）
 app/_assets/
-build/
-dist/
-release/
+/build/
+/dist/
+/release/
