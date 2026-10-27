@@ -39,7 +39,16 @@
    前端 title 与头部（宽屏显示全称，`hidden md:inline`）、设置注释、README、
    scraper 标题；环境变量 `WRA_DATA_DIR` → `WENSHU_DATA_DIR`（旧名兼容回退）。
 6. **交付文档**：`docs/release/ARTIFACTS.md`（产物清单+选型理由）、
-   `docs/release/DEPLOY.md`（Windows/Linux/Docker/pip 部署 + 故障排查）。
+   `docs/release/DEPLOY.md`（Windows/Linux/Docker/pip 部署 + 故障排查）、
+   `docs/release/VERSIONING.md`（版本管理建议：SemVer+版本号单一来源+CHANGELOG+tag/
+   GitHub Release+发布检查清单）。
+7. **一键打包**：`tools/pack_release.py`（默认全平台：测试门槛→资产归集→sdist→exe→
+   组装 zip→SHA256SUMS，统一进 release/；`--skip-*`/`--reuse-exe` 开关）。
+   版本号单一来源 `app/__init__.py::__version__`（pyproject dynamic 读取）。
+8. **bat 运行失败实修**：根因=LF 行尾（cmd 括号块解析错乱）+ 非 ASCII 跨编码；
+   重写为纯 ASCII + CRLF + `for %%F in (*.exe)` 通配发现主程序 + 端口 8000~8005
+   自检顺延。已实测：dev 服务占 8000 时 bat 自动用 8001 起服、浏览器自动打开。
+   sh 同步端口顺延逻辑。
 
 发布包组装（不入库，gitignore release/）：`release/文枢-v1.6.0-windows-x64.zip`
 = 文枢.exe + 启动文枢.bat + docs/；Linux 包结构同（二进制 + start_linux.sh）。
@@ -154,6 +163,9 @@ resource/
   no known parent package）→ 用包外跳板 `packaging/launcher.py` 绝对导入；② 包内运行期
   数据文件（`schema.sql`、卡片主题 theme.html/yaml）必须显式进 spec datas，否则冻结态
   FileNotFoundError。
+- **bat 铁律（V1.6）**：cmd 的 bat 必须**纯 ASCII + CRLF 行尾**。LF 让 if/for 括号块
+  解析错乱（报错形如 `'yedExpansion' 不是内部或外部命令`）；非 ASCII 按 OEM 代码页
+  解析，UTF-8/GBK 互读必乱甚至 0x5C 尾字节吃换行。中文 exe 名用通配符发现。
 - **Git Bash 调 Docker（V1.6）**：`-v $PWD:/src` 会被 MSYS 路径转换搞坏（`/src` 变
   `C:/Program Files/Git/src`）→ `cygpath -w` 转 Windows 路径 + `MSYS_NO_PATHCONV=1`。
 - **Bash `&` 优先级**：`A && B && C & sleep N` 会把整条 && 链后台化——构建+冒烟必须

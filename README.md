@@ -31,8 +31,10 @@ docker build -t wenshu-studio:1.6.0 . && \
 ```
 
 发布包产物与部署细节见 [docs/release/ARTIFACTS.md](docs/release/ARTIFACTS.md) 与
-[docs/release/DEPLOY.md](docs/release/DEPLOY.md)；应用使用见 [docs/user-manual.md](docs/user-manual.md)。
-独立爬取小工具：`python tools/scraper/server.py`（→ 127.0.0.1:8765）。
+[docs/release/DEPLOY.md](docs/release/DEPLOY.md)；版本管理约定见
+[docs/release/VERSIONING.md](docs/release/VERSIONING.md)；应用使用见
+[docs/user-manual.md](docs/user-manual.md)。一键打包全平台发布包：`python tools/pack_release.py`
+（产物统一进 `release/`）。独立爬取小工具：`python tools/scraper/server.py`（→ 127.0.0.1:8765）。
 
 ## 架构速览
 

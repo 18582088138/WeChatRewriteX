@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wenshu"
-version = "1.6.0"
+dynamic = ["version"]          # 版本单一来源：app/__init__.py 的 __version__
 description = "文枢 - 自媒体 Studio：AI 行业要闻「收集→创作→审稿→定稿→多平台发布包导出」本地助手"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -31,6 +31,9 @@ dev = ["pytest>=8.0"]
 
 [project.scripts]
 wenshu = "app.__main__:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "app.__init__.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["app*"]
