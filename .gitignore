@@ -20,3 +20,9 @@ web/node_modules/
 # os
 .DS_Store
 Thumbs.db
+
+# packaging（构建产物不入库；packaging/*.spec 为源文件需入库）
+app/_assets/
+build/
+dist/
+release/

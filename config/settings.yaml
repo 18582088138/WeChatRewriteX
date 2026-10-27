@@ -1,4 +1,4 @@
-# WeChatRewritingAssistant 主配置（非密钥；密钥在 .env）
+# 文枢 - 自媒体 Studio 主配置（非密钥；密钥在 .env）
 # 优先级: 本文件 < 数据库 settings 表（GUI 设置页修改）。键路径用 a.b.c 寻址。
 
 # ---- 收集 ----
@@ -50,9 +50,15 @@ variants:
   weibo:     { max_chars: 140 }
   x:         { max_tweets: 6 }
 
+# ---- 日志（常驻持久化）----
+log:
+  level: INFO        # 仅 INFO / ERROR 两档；ERROR 只记异常
+  path: log          # 日志目录：相对运行根目录或绝对路径；按日期自动拆分
+  keep_days: 14      # 轮转保留天数
+
 # ---- 开发者模式（默认关闭）----
 dev:
-  mode: false        # 开启后: log/ 持久化日志、界面日志可视化、API 费用监控面板
+  mode: false        # 开启后: 界面日志可视化、API 费用监控面板（文件日志始终持久化，与此开关无关）
 
 # ---- LLM 渠道与路由 ----
 # channel.provider 决定 base_url 预设(deepseek/volcengine/openai)与 env_key

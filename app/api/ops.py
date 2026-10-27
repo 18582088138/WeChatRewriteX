@@ -144,9 +144,7 @@ def put_setting(body: SettingPut) -> dict:
         raise HTTPException(400, "llm.channels 请直接编辑 config/settings.yaml")
     dao.set_setting(body.key, body.value)
     config.reload()
-    if body.key == "dev.mode":                      # 开发者模式即时生效
-        from .. import logging_setup
-        logging_setup.configure(bool(body.value))
+    # 日志持久化常驻（log.* 配置），dev.mode 仅控制设置页日志面板可见性，即时生效
     return {"ok": True}
 
 

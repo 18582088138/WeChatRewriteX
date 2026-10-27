@@ -3,15 +3,48 @@
 > **给下一次会话**：这份文档 + `docs/design/` 设计文档 + git log 即可恢复全部上下文。
 > 读法：先看本文件「当前状态」与「下一轮该做什么」，细节查设计文档对应章节。
 
-## 当前状态（截至 2026-10-26）
+## 当前状态（截至 2026-10-27）
 
-**功能完整可用、本地运行中的 M1+ 产品，完成首轮真实案例校准（V1.5）**。
-测试 29 项全绿。git remote 已配（github.com/18582088138/WeChatRewriteX），V1.4 及之前已推远端。
+**功能完整可用、本地运行中的 M1+ 产品；V1.5 真实案例校准 + V1.6 工程化发布均落地**
+（需求方称本轮为「项目优化 V1.5」，因编号已被校准轮占用，记为 V1.6）。
+测试 30 项全绿。git remote：github.com/18582088138/WeChatRewriteX，已推送。
 
 - 启动：`C:\Users\75203\miniforge3\envs\xkd_env_py312\python.exe -m app` → http://127.0.0.1:8000
   （conda 环境在 miniforge3，Git Bash 里 `conda activate` 不生效，直接用绝对路径 python）
+- **产品已更名「文枢 - 自媒体 Studio」**（短名 文枢；pip 包名/进程标识 `wenshu`）
 - 前端已构建于 `web/dist/`（改前端后需 `cd web && npm run build`）
-- 数据根 `resource/`（gitignore），日志 `log/`（gitignore，开发者模式才写）
+- 数据根 `resource/`（gitignore）；日志 `log/wenshu.log`（gitignore，**常驻持久化**，见下）
+
+## V1.6 工程化发布（2026-10-27）
+
+启动、打包、日志、更名配套：
+
+1. **运行根三态统一**（`app/core/config.py`）：仓库态=仓库根；PyInstaller 冻结态=exe 旁
+   （只读资产在 `_MEIPASS/wenshu_assets`）；pip 安装态=启动 cwd（资产在包内 `app/_assets`）。
+   首启 `ensure_runtime_assets()` 自动播种 config/、web/dist、.env.example 到运行根（幂等）。
+2. **日志标准化**（`app/logging_setup.py`）：常驻持久化（不再由 dev.mode 门控——dev.mode
+   只管设置页日志面板）；仅 INFO/ERROR 两档（`log.level` 切换）；`log.path` 自定义路径，
+   默认 `log/wenshu.log` 按日期轮转（`log.keep_days` 保留）；格式 时间/级别/[模块]/内容，
+   ERROR 带堆栈（含 `sys.excepthook` + `threading.excepthook` 兜底）。
+3. **打包产物**：`pyproject.toml`+`MANIFEST.in` → sdist `dist/wenshu-1.6.0.tar.gz`
+   （含内置资产，提供 `wenshu` 命令）；`packaging/wenshu.spec` + `packaging/launcher.py`
+   → Windows 单文件 `文枢.exe`（~141MB，冒烟通过：健康检查/SPA/播种/日志全过）；
+   `packaging/build_linux_binary.sh`（Docker 内出 Linux 二进制）与 `Dockerfile` 已就绪，
+   **本版按需求方要求未实际构建 Linux 二进制/镜像**，需要时一条命令出包。
+   构建前置：`python scripts/build_assets.py`（归集 config+web/dist+.env.example → app/_assets）。
+4. **一键启动**：`scripts/start_windows.bat`（仅 Windows）/ `scripts/start_linux.sh`
+   （仅 Linux）：目录自检自建、首启自动装 Chromium（`--install-browser`）、失败写
+   `log/start.log` 并给排查提示。
+5. **更名**：代码内 APP_NAME/APP_FULL_NAME/APP_ID（app/__init__.py）、FastAPI 标题、
+   前端 title 与头部（宽屏显示全称，`hidden md:inline`）、设置注释、README、
+   scraper 标题；环境变量 `WRA_DATA_DIR` → `WENSHU_DATA_DIR`（旧名兼容回退）。
+6. **交付文档**：`docs/release/ARTIFACTS.md`（产物清单+选型理由）、
+   `docs/release/DEPLOY.md`（Windows/Linux/Docker/pip 部署 + 故障排查）。
+
+发布包组装（不入库，gitignore release/）：`release/文枢-v1.6.0-windows-x64.zip`
+= 文枢.exe + 启动文枢.bat + docs/；Linux 包结构同（二进制 + start_linux.sh）。
+
+## V1.5 真实案例校准（2026-10-26）
 
 ## V1.5 真实案例校准（2026-10-26）
 
@@ -117,6 +150,14 @@ resource/
 
 ## 踩过的坑（别再踩）
 
+- **PyInstaller 两坑（V1.6）**：① 入口脚本不能是包内 `__main__.py`（相对导入报
+  no known parent package）→ 用包外跳板 `packaging/launcher.py` 绝对导入；② 包内运行期
+  数据文件（`schema.sql`、卡片主题 theme.html/yaml）必须显式进 spec datas，否则冻结态
+  FileNotFoundError。
+- **Git Bash 调 Docker（V1.6）**：`-v $PWD:/src` 会被 MSYS 路径转换搞坏（`/src` 变
+  `C:/Program Files/Git/src`）→ `cygpath -w` 转 Windows 路径 + `MSYS_NO_PATHCONV=1`。
+- **Bash `&` 优先级**：`A && B && C & sleep N` 会把整条 && 链后台化——构建+冒烟必须
+  拆成独立命令调用。
 - **审稿 prompt 三坑（V1.5）**：① LLM 看不见的字段等于不存在——citations 不渲染进 prompt，
   attribution 维度必然误报；② 证据截断窗口外的数据会被判「不存在」→ 冤 blocker，
   窗口默认 8000 且 prompt 声明「节选未覆盖≠不存在」；③ LLM 会幻觉引文，必须程序侧

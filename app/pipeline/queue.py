@@ -102,7 +102,8 @@ def _loop(lane_types: tuple[str, ...]) -> None:
             requeue = job["attempts"] < MAX_ATTEMPTS
             dao.fail_job(job["id"], str(e)[:500], requeue=requeue)
             logging_setup.log("error", "任务失败 %s (article=%s): %s",
-                              job["type"], job["article_id"], str(e)[:300])
+                              job["type"], job["article_id"], str(e)[:300],
+                              exc_info=True)
             if not requeue:
                 orchestrator.mark_failed(job["article_id"], str(e))
 

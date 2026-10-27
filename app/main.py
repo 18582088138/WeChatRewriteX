@@ -8,13 +8,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import APP_FULL_NAME, APP_VERSION
 from .api import articles, drafts, materials, ops
 from .core import config
-from .core.config import PROJECT_ROOT, data_dir
+from .core.config import RUNTIME_ROOT, data_dir
 from .pipeline import hooks, queue
 from .storage import dao, db
 
-WEB_DIST = PROJECT_ROOT / "web" / "dist"
+WEB_DIST = RUNTIME_ROOT / "web" / "dist"
 
 
 def create_app(start_worker: bool = True, llm=None) -> FastAPI:
@@ -23,9 +24,9 @@ def create_app(start_worker: bool = True, llm=None) -> FastAPI:
     config.set_db_overlay(dao.db_settings)
     hooks.register_hooks()
     from . import logging_setup
-    logging_setup.configure(bool(config.get("dev.mode", False)))
+    logging_setup.configure()       # 常驻持久化：级别/路径走 log.* 配置
 
-    app = FastAPI(title="WeChatRewritingAssistant", version="0.1.0")
+    app = FastAPI(title=APP_FULL_NAME, version=APP_VERSION)
 
     # 本地工具默认可跨域（开发期 Vite 端口不同）
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
@@ -59,7 +60,7 @@ def create_app(start_worker: bool = True, llm=None) -> FastAPI:
             if full_path and target.exists() and target.is_file():
                 return FileResponse(target)
             return FileResponse(WEB_DIST / "index.html")
-        return JSONResponse({"name": "WeChatRewritingAssistant",
+        return JSONResponse({"name": APP_FULL_NAME,
                              "hint": "前端未构建：cd web && npm install && npm run build",
                              "api": "/docs"})
 

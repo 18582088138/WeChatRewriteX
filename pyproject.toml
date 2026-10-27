@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wenshu"
+version = "1.6.0"
+description = "文枢 - 自媒体 Studio：AI 行业要闻「收集→创作→审稿→定稿→多平台发布包导出」本地助手"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",
+    "pydantic>=2.7",
+    "pyyaml>=6.0",
+    "jinja2>=3.1",
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+    "trafilatura>=1.12",
+    "playwright>=1.44",
+    "yt-dlp>=2024.8.6",
+    "Pillow>=10.0",
+    "imagehash>=4.3",
+    "pypdf>=4.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+wenshu = "app.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.setuptools.package-data]
+app = ["_assets/**"]
+
+# 注意：sdist/wheel 内置资产由 scripts/build_assets.py 预先生成（app/_assets/）。
+# 从源码树直接 pip install 前，先执行 python scripts/build_assets.py。

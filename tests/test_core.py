@@ -113,3 +113,34 @@ def test_config_layers(tmp_path, monkeypatch):
     finally:
         config.set_db_overlay(lambda: {})
     assert config.get("collect.search_window_days") == 3
+
+
+def test_logging_persist_and_levels(tmp_path, monkeypatch):
+    """日志标准化：常驻写文件（按日期轮转）、格式含 时间/级别/模块/内容、
+    ERROR 档下 INFO 被过滤。"""
+    import logging
+    from app import logging_setup
+
+    monkeypatch.setattr(logging_setup, "log_dir", lambda: tmp_path)
+    logging_setup._logger.handlers.clear()          # 解除幂等，重挂到临时目录
+    logging_setup.configure()
+    logging_setup.log("info", "普通运行信息")
+    logging_setup.log("error", "异常报错内容")
+    for h in logging_setup._logger.handlers:
+        h.flush()
+    content = (tmp_path / "wenshu.log").read_text(encoding="utf-8")
+    assert "普通运行信息" in content and "异常报错内容" in content
+    assert "[wenshu]" in content and "INFO" in content and "ERROR" in content
+
+    # ERROR 档：INFO 不再落盘
+    monkeypatch.setattr(logging_setup, "_level", lambda: logging.ERROR)
+    logging_setup._logger.handlers.clear()
+    logging_setup.configure()
+    logging_setup.log("info", "不该出现的信息")
+    logging_setup.log("error", "该出现的错误")
+    for h in logging_setup._logger.handlers:
+        h.flush()
+    content2 = (tmp_path / "wenshu.log").read_text(encoding="utf-8")
+    assert "该出现的错误" in content2
+    assert "不该出现的信息" not in content2.replace("普通运行信息", "")
+    logging_setup._logger.handlers.clear()          # 不影响其他测试

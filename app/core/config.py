@@ -1,22 +1,66 @@
 """三层配置：代码默认值 < config/settings.yaml < 数据库 settings 表（GUI 修改）。
 
 密钥只从 .env / 环境变量读（`get_env`），不进入本模块的值体系。
+
+运行根解析（三种部署形态统一）：
+- 仓库/开发态：仓库根目录（config/ 就地存在）；
+- PyInstaller 冻结态：exe 所在目录（可写），只读资产在 sys._MEIPASS/wenshu_assets；
+- pip 安装态：启动时的工作目录（可写），只读资产在包内 app/_assets。
+首启时自动把 config/ 与 web/dist 从只读资产播种到运行根（已存在则不覆盖）。
 """
 from __future__ import annotations
 
 import copy
 import os
+import shutil
+import sys
 from pathlib import Path
 from typing import Any, Callable
 
 import yaml
 from dotenv import load_dotenv
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-CONFIG_DIR = PROJECT_ROOT / "config"
-DATA_DIR = PROJECT_ROOT / "data"
 
-load_dotenv(PROJECT_ROOT / ".env")
+def _is_frozen() -> bool:
+    return bool(getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"))
+
+
+_repo_root = Path(__file__).resolve().parents[2]
+if _is_frozen():
+    RUNTIME_ROOT = Path(sys.executable).resolve().parent
+    BUNDLE_ROOT = Path(getattr(sys, "_MEIPASS")) / "wenshu_assets"
+elif (_repo_root / "config").is_dir():
+    RUNTIME_ROOT = BUNDLE_ROOT = _repo_root
+else:                                       # pip 安装态：包内资产 → 启动 cwd
+    RUNTIME_ROOT = Path.cwd()
+    BUNDLE_ROOT = Path(__file__).resolve().parent.parent / "_assets"
+
+PROJECT_ROOT = RUNTIME_ROOT                 # 兼容旧引用（可写运行根）
+CONFIG_DIR = RUNTIME_ROOT / "config"
+DATA_DIR = RUNTIME_ROOT / "data"
+
+
+def ensure_runtime_assets() -> None:
+    """首启播种：把内置 config/、web/dist、.env.example 铺到运行根（幂等）。"""
+    if BUNDLE_ROOT == RUNTIME_ROOT:
+        return
+    try:
+        src_cfg = BUNDLE_ROOT / "config"
+        if src_cfg.is_dir() and not (CONFIG_DIR / "settings.yaml").exists():
+            shutil.copytree(src_cfg, CONFIG_DIR, dirs_exist_ok=True)
+        src_web = BUNDLE_ROOT / "web" / "dist"
+        dst_web = RUNTIME_ROOT / "web" / "dist"
+        if src_web.is_dir() and not (dst_web / "index.html").exists():
+            shutil.copytree(src_web, dst_web, dirs_exist_ok=True)
+        src_env = BUNDLE_ROOT / ".env.example"
+        if src_env.is_file() and not (RUNTIME_ROOT / ".env").exists():
+            shutil.copy(src_env, RUNTIME_ROOT / ".env")
+    except OSError:
+        pass        # 播种失败不致命：默认值兜底，界面首启再提示
+
+
+ensure_runtime_assets()
+load_dotenv(RUNTIME_ROOT / ".env")
 
 DEFAULTS: dict[str, Any] = {
     "collect": {
@@ -59,6 +103,7 @@ DEFAULTS: dict[str, Any] = {
         "cost_log": True,
     },
     "storage": {"data_dir": "resource", "material_size_limit_mb": 500},
+    "log": {"level": "INFO", "path": "log", "keep_days": 14},
     "hooks": {},
 }
 
@@ -141,8 +186,9 @@ def style_dir(pack_name: str | None = None) -> Path:
 
 
 def data_dir() -> Path:
-    env = os.environ.get("WRA_DATA_DIR")     # 测试/便携模式可覆盖数据目录
+    # 测试/便携模式可覆盖数据目录；旧名 WRA_DATA_DIR 仅作兼容回退
+    env = os.environ.get("WENSHU_DATA_DIR") or os.environ.get("WRA_DATA_DIR")
     if env:
         return Path(env)
     d = Path(get("storage.data_dir", "data"))
-    return d if d.is_absolute() else PROJECT_ROOT / d
+    return d if d.is_absolute() else RUNTIME_ROOT / d

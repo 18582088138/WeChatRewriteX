@@ -70,8 +70,9 @@ onMounted(store.refreshArticles)
       <div class="max-w-[1200px] mx-auto px-6 h-12 flex items-center gap-3">
         <div class="flex items-center gap-2.5">
           <span class="inline-block w-4 h-4" style="background: var(--accent);"></span>
-          <span class="font-semibold text-[15px] tracking-tight">创作助手</span>
-          <span class="text-xs" style="color: var(--faint);">AI 要闻再创作工作台</span>
+          <span class="font-semibold text-[15px] tracking-tight">文枢</span>
+          <span class="text-xs hidden md:inline" style="color: var(--faint);">文枢 - 自媒体 Studio · AI 要闻再创作工作台</span>
+          <span class="text-xs md:hidden" style="color: var(--faint);">AI 要闻再创作工作台</span>
         </div>
         <div class="flex-1"></div>
         <button class="text-sm h-8 px-3 rounded-md hover:bg-[var(--raised)]"

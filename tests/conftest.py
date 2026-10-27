@@ -8,8 +8,8 @@ import pytest
 
 @pytest.fixture(scope="session", autouse=True)
 def _isolated_data_dir(tmp_path_factory):
-    d = tmp_path_factory.mktemp("wra-data")
-    os.environ["WRA_DATA_DIR"] = str(d)
+    d = tmp_path_factory.mktemp("wenshu-data")
+    os.environ["WENSHU_DATA_DIR"] = str(d)
     # 测试确定性：屏蔽本机/`.env` 中的真实密钥，全流程走降级路径与 FakeLLM
     saved = {}
     for k in ("DEEPSEEK_API_KEY", "ARK_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY",
@@ -18,7 +18,7 @@ def _isolated_data_dir(tmp_path_factory):
         if k in os.environ:
             saved[k] = os.environ.pop(k)
     yield d
-    os.environ.pop("WRA_DATA_DIR", None)
+    os.environ.pop("WENSHU_DATA_DIR", None)
     os.environ.update(saved)
 
 
