@@ -32,6 +32,24 @@ PY = sys.executable
 RELEASE = ROOT / "release"
 
 
+def _web_dist_fresh() -> bool:
+    """web/dist 比 web/src 新才算新鲜；防止打过时的前端进包。"""
+    dist = ROOT / "web" / "dist" / "index.html"
+    if not dist.exists():
+        return False
+    newest_src = max((f.stat().st_mtime for f in (ROOT / "web" / "src").rglob("*")
+                      if f.is_file()), default=0)
+    return dist.stat().st_mtime >= newest_src
+
+
+def _npm_build() -> None:
+    npm = shutil.which("npm") or shutil.which("npm.cmd")
+    if not npm:
+        raise SystemExit("未找到 npm——先装 Node.js 或手动 cd web && npm run build")
+    print("  $ npm run build (web/)")
+    subprocess.run([npm, "run", "build"], cwd=ROOT / "web", check=True)
+
+
 def run(cmd: list[str], **kw) -> None:
     print("  $", " ".join(str(c) for c in cmd))
     subprocess.run(cmd, cwd=ROOT, check=True, **kw)
@@ -98,10 +116,11 @@ def main() -> None:
         print("[0] 测试门槛")
         run([PY, "-m", "pytest", "tests/", "-q"])
 
-    # 1. 前置检查 + 资产归集
+    # 1. 前置检查 + 资产归集（前端落后先重建，防止打旧界面包）
     print("[1] 资产归集（config + web/dist + .env.example → app/_assets）")
-    if not (ROOT / "web" / "dist" / "index.html").exists():
-        raise SystemExit("web/dist 未构建：先 cd web && npm install && npm run build")
+    if not _web_dist_fresh():
+        print("  web/src 有改动未构建，先 npm run build")
+        _npm_build()
     run([PY, "scripts/build_assets.py"])
 
     # 2. sdist 源码包

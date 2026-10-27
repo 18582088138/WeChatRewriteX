@@ -55,7 +55,7 @@ export interface Material {
   id: string
   scope: 'article' | 'common'
   article_id?: string
-  kind: 'text' | 'image' | 'video' | 'doc' | 'link'
+  kind: 'text' | 'image' | 'video' | 'audio' | 'doc' | 'link'
   path?: string
   url?: string | null
   title: string

@@ -66,16 +66,19 @@ function sourceTitle(m: Material): string {
 }
 
 const filtered = computed(() => {
+  // 文章栏含 text（全文入库）与 link（文章/资料链接形态）；其他栏只放实体文件（音频/文档/压缩包）
   if (tab.value === 'other')
-    return materials.value.filter(m => ['audio', 'doc', 'link'].includes(m.kind))
+    return materials.value.filter(m => ['audio', 'doc'].includes(m.kind))
+  if (tab.value === 'text')
+    return materials.value.filter(m => ['text', 'link'].includes(m.kind))
   return materials.value.filter(m => m.kind === tab.value)
 })
 
 const counts = computed(() => ({
-  text: materials.value.filter(m => m.kind === 'text').length,
+  text: materials.value.filter(m => ['text', 'link'].includes(m.kind)).length,
   image: materials.value.filter(m => m.kind === 'image').length,
   video: materials.value.filter(m => m.kind === 'video').length,
-  other: materials.value.filter(m => ['audio', 'doc', 'link'].includes(m.kind)).length,
+  other: materials.value.filter(m => ['audio', 'doc'].includes(m.kind)).length,
 }))
 
 const grouped = computed(() => {
@@ -342,8 +345,12 @@ async function currentSelection(): Promise<string[]> {
         </span>
         <div class="flex-1 min-w-0">
           <button class="text-sm font-medium hover:underline text-left truncate block max-w-full"
-                  @click="openText(m)">{{ m.title || m.id }}</button>
+                  :title="m.kind === 'link' ? '链接形态素材：点击新窗口打开来源' : ''"
+                  @click="m.kind === 'link' && m.source_url ? openSource(m) : openText(m)">
+            {{ m.title || m.id }}</button>
           <div class="text-xs flex items-center gap-2 mt-0.5 flex-wrap" style="color: var(--faint);">
+            <span v-if="m.kind === 'link'" class="px-1.5 py-0.5 rounded"
+                  style="background: var(--raised); color: var(--muted);">链接</span>
             <span v-if="m.ref_type" class="px-1.5 py-0.5 rounded"
                   style="background: var(--pill-info-bg); color: var(--pill-info-ink);">
               {{ REF_LABEL[m.ref_type] || m.ref_type }}</span>

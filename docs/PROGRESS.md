@@ -16,6 +16,12 @@
 - 数据根 `resource/`（gitignore）；日志 `log/wenshu.log`（gitignore，常驻持久化）
 - 一键打包：`python tools/pack_release.py`（默认全平台，产物进 release/）
 
+## V1.9 素材库分栏修复（2026-10-28）
+
+- **「其他」栏目混入文章链接修复**：其他 = 仅实体文件（audio/doc：音频、文档、压缩包等）；
+  文章链接（kind=link，收集扩搜产生的参考链接）归入「文章」栏目，带「链接」标签、
+  点击新窗口打开来源。types.ts 的 kind 枚举补上遗漏的 'audio'。
+
 ## V1.8 发布页优化（2026-10-28）
 
 1. **exports 平台文件夹跳转**：发布页平台条目生成完毕出现「打开文件夹」按钮 →
@@ -215,6 +221,9 @@ resource/
   curl_cffi(DLL)。冻结态跑通收集才算验证（单测测不到）。
 - **sha 去重饿死（V1.7）**：ingest 的 sha256 去重若直接返回他篇素材 id，后收同源的
   文章会「素材库为空」。去重只省文件不省行：同归属复用、跨归属同文件克隆新行。
+- **打包顺序陷阱（V1.8 两次踩中）**：exe 内嵌 app/_assets（含 web/dist）——改了前端
+  必须 npm run build → build_assets → 再打 exe，任何一步漏了就是旧界面进新包。
+  pack_release.py 已内置「web/src 比 dist 新则自动重建」防护。
 - **项目文件夹名粒度到分钟（V1.8 发现，已知边界）**：同名标题同分钟创建的两篇文章会共用
   项目文件夹（lib_dir 无唯一化）。修法方向：article_dir 生成时撞名追加短 id 后缀
   （注意 `_DT_SUFFIX` 校验与改名联动）。测试侧已用 tag 参数隔离。

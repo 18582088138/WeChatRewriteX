@@ -192,7 +192,9 @@ def test_exports_reveal_and_publish_progress(app_client, monkeypatch):
     import subprocess
     monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: None)
     aid = _drafted_article(app_client, tag="reveal")
-    r = app_client.post(f"/api/articles/{aid}/exports/reveal", json={"platform": "weibo"})
+    # xhs 在本测试套件中无人导出（卡片单独测），其目录必不存在 → 稳定 404；
+    # 不能用 weibo：test_full_flow 同分钟发布过 weibo，fixture 同标题文章会撞项目文件夹
+    r = app_client.post(f"/api/articles/{aid}/exports/reveal", json={"platform": "xhs"})
     assert r.status_code == 404                      # 还没生成
     app_client.post(f"/api/articles/{aid}/finalize", json={"force": True})
     r = app_client.post(f"/api/articles/{aid}/publish", json={"platforms": ["weibo"]})
@@ -201,4 +203,4 @@ def test_exports_reveal_and_publish_progress(app_client, monkeypatch):
     r = app_client.post(f"/api/articles/{aid}/exports/reveal", json={"platform": "weibo"})
     assert r.status_code == 200 and r.json()["folder"].endswith("weibo")
     r = app_client.post(f"/api/articles/{aid}/exports/reveal", json={"platform": "xhs"})
-    assert r.status_code in (200, 404)               # xhs 未勾选导出则 404
+    assert r.status_code == 404                      # xhs 未勾选导出仍 404
