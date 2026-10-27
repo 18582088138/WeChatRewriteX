@@ -32,7 +32,8 @@
 ```
 文枢-v1.6.0-windows-x64/
 ├── 文枢.exe              # 主程序（单文件绿色执行，进程名「文枢」）
-├── 启动文枢.bat          # 一键启动脚本（双击拉起，仅适配 Windows）
+├── 启动文枢.bat          # 一键启动脚本（双击拉起，仅适配 Windows/cmd）
+├── 启动文枢.ps1          # 一键启动脚本（PowerShell 原生，与 bat 功能一致）
 ├── docs/                 # 交付文档（产物清单 + 部署步骤）
 ├── config/               # 首启自动生成：settings.yaml / prompts / styles（可手调）
 ├── .env                  # 首启自动生成自 .env.example，填入 LLM 密钥后生效

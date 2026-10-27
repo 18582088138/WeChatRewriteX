@@ -166,6 +166,10 @@ resource/
 - **bat 铁律（V1.6）**：cmd 的 bat 必须**纯 ASCII + CRLF 行尾**。LF 让 if/for 括号块
   解析错乱（报错形如 `'yedExpansion' 不是内部或外部命令`）；非 ASCII 按 OEM 代码页
   解析，UTF-8/GBK 互读必乱甚至 0x5C 尾字节吃换行。中文 exe 名用通配符发现。
+- **PowerShell 5.1 两坑（V1.6）**：不支持 `&&`（报错「不是有效的语句分隔符」，逐行或
+  用 `;`）；不搜索当前目录（脚本必须 `.\xxx.bat` 前缀）。PS 用户给原生
+  `scripts/start_windows.ps1`（发布包内「启动文枢.ps1」），执行策略拦截用
+  `-ExecutionPolicy Bypass -File` 绕过；ps1 同样只写纯 ASCII。
 - **Git Bash 调 Docker（V1.6）**：`-v $PWD:/src` 会被 MSYS 路径转换搞坏（`/src` 变
   `C:/Program Files/Git/src`）→ `cygpath -w` 转 Windows 路径 + `MSYS_NO_PATHCONV=1`。
 - **Bash `&` 优先级**：`A && B && C & sleep N` 会把整条 && 链后台化——构建+冒烟必须

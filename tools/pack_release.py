@@ -114,6 +114,7 @@ def main() -> None:
         win_dir.mkdir()
         shutil.copy(exe, win_dir / "文枢.exe")
         shutil.copy(ROOT / "scripts" / "start_windows.bat", win_dir / "启动文枢.bat")
+        shutil.copy(ROOT / "scripts" / "start_windows.ps1", win_dir / "启动文枢.ps1")
         copy_docs(win_dir)
         zip_path = RELEASE / f"文枢-v{ver}-windows-x64.zip"
         zip_dir(win_dir, zip_path)

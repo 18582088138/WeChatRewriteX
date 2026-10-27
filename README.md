@@ -9,25 +9,38 @@
 
 **方式一：绿色执行包（无需 Python 环境，推荐）**
 
-- Windows：解压发布包，双击 `启动文枢.bat`（或运行 `文枢.exe`）→ 浏览器自动打开 http://127.0.0.1:8000
+- Windows：解压发布包，双击 `启动文枢.bat`；PowerShell 用户：`.\启动文枢.ps1`
+  （注意：PowerShell 运行当前目录脚本必须带 `.\` 前缀）→ 浏览器自动打开 http://127.0.0.1:8000
 - Linux：解压后执行 `./start_linux.sh`
 
 **方式二：源码运行**
+
+Windows PowerShell（注意 PS 5.1 不支持 `&&`，请逐行执行或用 `;` 分隔）：
+
+```powershell
+pip install -r requirements.txt
+python -m playwright install chromium
+cd web; npm install; npm run build; cd ..
+Copy-Item .env.example .env   # 填入 DEEPSEEK_API_KEY 等
+python -m app                 # → http://127.0.0.1:8000
+```
+
+Linux / macOS（bash）：
 
 ```bash
 pip install -r requirements.txt
 python -m playwright install chromium
 cd web && npm install && npm run build && cd ..
-copy .env.example .env   # 填入 DEEPSEEK_API_KEY 等（Windows）；Linux: cp .env.example .env
-python -m app            # → http://127.0.0.1:8000
+cp .env.example .env          # 填入 DEEPSEEK_API_KEY 等
+python -m app                 # → http://127.0.0.1:8000
 ```
 
 **方式三：pip 本地安装 / Docker**
 
-```bash
-pip install dist/wenshu-1.6.0.tar.gz && wenshu          # 源码包安装（交付 sdist）
-docker build -t wenshu-studio:1.6.0 . && \
-  docker run -d --env-file .env -p 8000:8000 wenshu-studio:1.6.0   # 容器化（服务器批量部署）
+```powershell
+pip install dist/wenshu-1.6.0.tar.gz; wenshu            # 源码包安装（交付 sdist）
+docker build -t wenshu-studio:1.6.0 .                   # 容器化（服务器批量部署，本版未预构建）
+docker run -d --env-file .env -p 8000:8000 wenshu-studio:1.6.0
 ```
 
 发布包产物与部署细节见 [docs/release/ARTIFACTS.md](docs/release/ARTIFACTS.md) 与
