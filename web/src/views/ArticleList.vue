@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { NButton, NInput, NModal, useMessage } from 'naive-ui'
+import { NButton, NInput, NModal, NUpload, NUploadDragger,
+         useMessage, type UploadFileInfo } from 'naive-ui'
 import { api } from '../api'
 import { useAppStore } from '../stores/app'
 import StatusChip from '../components/StatusChip.vue'
@@ -13,8 +14,11 @@ const message = useMessage()
 const filter = ref<string>('全部')
 const q = ref('')
 const showCreate = ref(false)
+const createMode = ref<'url' | 'file'>('url')
 const newUrl = ref('')
 const newNotes = ref('')
+const newTitle = ref('')
+const fileList = ref<UploadFileInfo[]>([])
 const creating = ref(false)
 
 const list = computed(() => {
@@ -32,19 +36,50 @@ const counts = computed(() => ({
   Done: store.articles.filter(a => a.ui_status === 'Done').length,
 }))
 
+/** 从上传文件里推断主题名：优先公共父目录名（文件夹上传时 webkitRelativePath 带目录） */
+function guessTitle(files: UploadFileInfo[]): string {
+  const rel = (files[0]?.file as any)?.webkitRelativePath as string | undefined
+  if (rel && rel.includes('/')) return rel.split('/')[0]
+  return (files[0]?.name || '本地收集').replace(/\.[^.]+$/, '').slice(0, 40)
+}
+
 async function create() {
-  if (!newUrl.value.trim()) {
-    message.warning('请粘贴文章链接')
+  if (createMode.value === 'url') {
+    if (!newUrl.value.trim()) { message.warning('请粘贴文章链接'); return }
+    creating.value = true
+    try {
+      const r = await api.post('/api/articles', { url: newUrl.value.trim(), user_notes: newNotes.value })
+      showCreate.value = false
+      newUrl.value = ''; newNotes.value = ''
+      message.success('已录入，开始收集资料')
+      await store.refreshArticles()
+      router.push(`/articles/${r.article.id}`)
+    } catch (e: any) {
+      message.error(e.message)
+    } finally {
+      creating.value = false
+    }
     return
   }
+  // 本地文件模式：先立档（不自动收集），再批量上传（自动识别类型分流）
+  const files = fileList.value.filter(f => f.file).map(f => f.file as File)
+  if (!files.length) { message.warning('请先选择文件或文件夹'); return }
   creating.value = true
   try {
-    const r = await api.post('/api/articles', { url: newUrl.value.trim(), user_notes: newNotes.value })
+    const title = newTitle.value.trim() || guessTitle(fileList.value)
+    const r = await api.post('/api/articles',
+      { title, user_notes: newNotes.value, auto_collect: false })
+    const aid = r.article.id
+    const up = await api.uploadBatch(`/api/articles/${aid}/materials/upload-batch`, files)
+    if (up.failed?.length) {
+      message.warning(`已上传 ${up.ok.length}/${up.total}，失败 ${up.failed.length} 个（素材库可重试）`)
+    } else {
+      message.success(`已收集 ${up.ok.length} 个文件，自动分流到素材库对应目录`)
+    }
     showCreate.value = false
-    newUrl.value = ''; newNotes.value = ''
-    message.success('已录入，开始收集资料')
+    fileList.value = []; newTitle.value = ''; newNotes.value = ''
     await store.refreshArticles()
-    router.push(`/articles/${r.article.id}`)
+    router.push(`/articles/${aid}`)
   } catch (e: any) {
     message.error(e.message)
   } finally {
@@ -77,7 +112,7 @@ onMounted(store.refreshArticles)
         <div class="flex-1"></div>
         <button class="text-sm h-8 px-3 rounded-md hover:bg-[var(--raised)]"
                 style="color: var(--muted);" @click="router.push('/settings')">设置</button>
-        <NButton type="primary" size="small" class="!h-8" @click="showCreate = true">录入链接</NButton>
+        <NButton type="primary" size="small" class="!h-8" @click="showCreate = true">资料收集</NButton>
       </div>
     </header>
 
@@ -109,9 +144,9 @@ onMounted(store.refreshArticles)
         <div v-if="list.length === 0" class="py-20 text-center">
           <p class="text-[15px]" style="color: var(--muted);">还没有文章。</p>
           <p class="text-sm mt-2" style="color: var(--faint);">
-            点右上角「录入链接」，把一篇 AI 要闻交给收集、创作、审稿三个 Agent。
+            点右上角「资料收集」，把一篇 AI 要闻交给收集、创作、审稿三个 Agent。
           </p>
-          <NButton type="primary" size="small" class="mt-5" @click="showCreate = true">录入第一篇</NButton>
+          <NButton type="primary" size="small" class="mt-5" @click="showCreate = true">收集第一份资料</NButton>
         </div>
 
         <div v-for="(a, i) in list" :key="a.id"
@@ -134,19 +169,49 @@ onMounted(store.refreshArticles)
       </div>
     </main>
 
-    <!-- 新建弹窗 -->
-    <NModal v-model:show="showCreate" preset="card" title="录入文章链接" class="!max-w-lg">
+    <!-- 资料收集弹窗：网页链接 / 本地文件 双模式 -->
+    <NModal v-model:show="showCreate" preset="card" title="资料收集" class="!max-w-lg">
+      <div class="flex gap-1 p-1 rounded-lg mb-4" style="background: var(--raised);">
+        <button v-for="m in [{ k: 'url', t: '网页链接' }, { k: 'file', t: '本地文件 / 文件夹' }]"
+                :key="m.k" class="flex-1 h-8 text-sm rounded-md transition-colors"
+                :style="createMode === m.k
+                  ? 'background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 0 0 1px var(--border);'
+                  : 'color: var(--muted);'"
+                @click="createMode = (m.k as any)">{{ m.t }}</button>
+      </div>
       <div class="space-y-4">
-        <NInput v-model:value="newUrl" type="textarea" :autosize="{ minRows: 2 }"
-                placeholder="粘贴公众号 / 新闻 / arXiv 链接，如 https://mp.weixin.qq.com/s/..." />
+        <template v-if="createMode === 'url'">
+          <NInput v-model:value="newUrl" type="textarea" :autosize="{ minRows: 2 }"
+                  placeholder="粘贴公众号 / 新闻 / arXiv 链接，如 https://mp.weixin.qq.com/s/..." />
+          <p class="text-xs" style="color: var(--faint);">
+            录入后自动开始收集：抓原文与图片 → 提炼主题 → 关联搜索 3~5 篇参考（含 arXiv 论文）→
+            素材不足时用可商用图库补齐配图。
+          </p>
+        </template>
+        <template v-else>
+          <NInput v-model:value="newTitle" placeholder="主题名（可选，默认取文件夹名/首个文件名）" />
+          <div class="grid grid-cols-2 gap-3">
+            <NUpload v-model:file-list="fileList" multiple :default-upload="false">
+              <NUploadDragger>
+                <div class="py-4 text-sm" style="color: var(--muted);">点选 / 拖入文件（可多选）</div>
+              </NUploadDragger>
+            </NUpload>
+            <NUpload v-model:file-list="fileList" directory :default-upload="false">
+              <NUploadDragger>
+                <div class="py-4 text-sm" style="color: var(--muted);">选择整个文件夹</div>
+              </NUploadDragger>
+            </NUpload>
+          </div>
+          <p class="text-xs" style="color: var(--faint);">
+            已选 {{ fileList.length }} 个文件。自动识别类型并分流到素材目录：
+            文章（md/txt/html/pdf 抽取正文）· 图片 · 视频 · 音频 · 其他。
+          </p>
+        </template>
         <NInput v-model:value="newNotes" placeholder="备注（可选）：写作角度、强调重点等" />
-        <p class="text-xs" style="color: var(--faint);">
-          录入后自动开始收集：抓原文与图片 → 提炼主题 → 关联搜索 3~5 篇参考（含 arXiv 论文）→
-          素材不足时用可商用图库补齐配图。
-        </p>
         <div class="flex justify-end gap-2">
           <NButton size="small" @click="showCreate = false">取消</NButton>
-          <NButton type="primary" size="small" :loading="creating" @click="create">开始处理</NButton>
+          <NButton type="primary" size="small" :loading="creating" @click="create">
+            {{ createMode === 'url' ? '开始处理' : '收集入库' }}</NButton>
         </div>
       </div>
     </NModal>

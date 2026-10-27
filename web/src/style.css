@@ -73,6 +73,10 @@ body {
   100% { background: transparent; outline: 1px solid transparent; }
 }
 .highlight-review { background: #FFF6E5 !important; outline: 1px solid #F0D49A; }
+/* 审稿阅读区（双击编辑对齐创作分页，复用同一闪示动画） */
+.reader-block { position: relative; border-radius: 6px; transition: background .12s; }
+.reader-block:hover { background: var(--raised); }
+.reader-block.flash-fixed { animation: flashFix 2.4s ease-out; }
 
 /* —— 滚动条 —— */
 ::-webkit-scrollbar { width: 8px; height: 8px; }

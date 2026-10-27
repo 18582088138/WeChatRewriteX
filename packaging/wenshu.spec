@@ -15,8 +15,12 @@ datas = [(os.path.join(ROOT, "app", "_assets"), "wenshu_assets"),
 hiddenimports = collect_submodules("app")
 binaries = []
 
-# uvicorn / playwright / trafilatura 等含动态导入与数据文件的依赖，整包收集
-for pkg in ("uvicorn", "playwright", "trafilatura", "yt_dlp"):
+# uvicorn / playwright / trafilatura 等含动态导入与数据文件的依赖，整包收集。
+# justext（trafilatura 正文抽取的停用词表 stoplists）、certifi（CA 根证书）、
+# curl_cffi（yt-dlp 网络层的原生 DLL）漏收会在冻结态运行时炸：
+# justext 缺 stoplists → WinError 3 找不到 _MEIxxx/justext/stoplists。
+for pkg in ("uvicorn", "playwright", "trafilatura", "yt_dlp",
+            "justext", "certifi", "curl_cffi"):
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b

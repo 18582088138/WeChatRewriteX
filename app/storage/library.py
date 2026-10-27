@@ -166,6 +166,34 @@ def guess_kind(filename: str) -> str:
     return "doc"
 
 
+def _clone_for_scope(dup: dict, scope: str, article_id: str | None, note: str) -> str:
+    """sha256 命中但归属不同（别的文章/公共库）时：同文件克隆一行给新归属，不重复占盘。
+
+    防止「两篇文章引用同一原文时，后收的文章拿不到素材行」——去重只省文件，不省行。
+    """
+    mid = dao.insert_material(
+        scope=scope, article_id=article_id if scope == "article" else None,
+        kind=dup["kind"], path=dup.get("path"), sha256=dup.get("sha256"),
+        phash=dup.get("phash"), source_url=dup.get("source_url"),
+        source_material_id=dup.get("source_material_id"), watermark=dup.get("watermark"),
+        width=dup.get("width"), height=dup.get("height"), duration=dup.get("duration"),
+        ref_type=dup.get("ref_type"), fetch_status=dup.get("fetch_status", "ok"),
+        note=note or dup.get("note", ""), title=dup.get("title", ""),
+        meta=json.loads(dup.get("meta_json") or "{}"),
+    )
+    if dup["kind"] == "text":
+        txt = dao.get_material_text(dup["id"])
+        if txt:
+            dao.set_material_text(mid, txt)
+    return mid
+
+
+def _same_owner(dup: dict, scope: str, article_id: str | None) -> bool:
+    if dup["scope"] != scope:
+        return False
+    return scope != "article" or dup.get("article_id") == article_id
+
+
 def _group_folder(article_id: str, source_material_id: str | None, note: str) -> str:
     """媒体所属分组夹名：父文章标题；无父文章时按用途归入 _素材补充 / _手动添加。"""
     if source_material_id:
@@ -217,7 +245,9 @@ def ingest_bytes(data: bytes, filename: str, scope: str, article_id: str | None 
     digest = _sha256(data)
     dup = dao.find_material_by_sha(digest)
     if dup:
-        return dup["id"], False
+        if _same_owner(dup, scope, article_id):
+            return dup["id"], False
+        return _clone_for_scope(dup, scope, article_id, note), True
 
     kind = kind or guess_kind(filename)
     ensure_dirs(article_id if scope == "article" else None)
@@ -272,7 +302,9 @@ def ingest_text(content: str, title: str, scope: str, article_id: str | None = N
     digest = _sha256(content.encode("utf-8"))
     dup = dao.find_material_by_sha(digest)
     if dup:
-        return dup["id"]
+        if _same_owner(dup, scope, article_id):
+            return dup["id"]
+        return _clone_for_scope(dup, scope, article_id, note="")
     if folder is None:
         ensure_dirs(article_id if scope == "article" else None)
         if scope == "common":

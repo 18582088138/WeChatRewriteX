@@ -89,3 +89,93 @@ def test_settings_and_health(app_client):
     assert config.get("collect.search_window_days") == 5
     dao.set_setting("collect.search_window_days", 3)  # 还原，避免影响其他测试
     config.reload()
+
+
+def _drafted_article(client) -> str:
+    """fixture 离线链路走到 REVIEWED（收集→创作→审稿，全降级模式）。"""
+    r = client.post("/api/articles", json={"url": "fixture://sample_article.md"})
+    assert r.status_code == 200, r.text
+    aid = r.json()["article"]["id"]
+    _wait_status(client, aid, {"COLLECTED"})
+    client.post(f"/api/articles/{aid}/advance", json={"stage": "create"})
+    _wait_status(client, aid, {"DRAFTED"})
+    client.post(f"/api/articles/{aid}/advance", json={"stage": "review"})
+    _wait_status(client, aid, {"REVIEWED", "EDITING"})
+    return aid
+
+
+def test_finalize_version_node(app_client):
+    """V1.7 版本机制：定稿=正式版本快照（进回滚列表）；定稿幂等；定稿后可编辑；
+    编辑后再次定稿生成全新独立版本。"""
+    aid = _drafted_article(app_client)
+
+    # 定稿 → 生成 finalized 快照
+    r = app_client.post(f"/api/articles/{aid}/finalize", json={"force": False})
+    assert r.status_code == 200, r.text
+    v1 = r.json()["version"]
+    assert app_client.get(f"/api/articles/{aid}").json()["status"] == "FINALIZED"
+    vers = app_client.get(f"/api/articles/{aid}/versions").json()["versions"]
+    finals = [v for v in vers if v.get("checkpoint") and v["origin"] == "finalized"]
+    assert len(finals) == 1 and finals[0]["saved"] is True
+
+    # 已定稿再定稿 → 幂等，不重复产版本
+    r = app_client.post(f"/api/articles/{aid}/finalize", json={})
+    assert r.json().get("already_finalized") is True
+    vers2 = app_client.get(f"/api/articles/{aid}/versions").json()["versions"]
+    assert len([v for v in vers2 if v.get("checkpoint") and v["origin"] == "finalized"]) == 1
+
+    # 定稿后继续编辑：直接成功且状态自动回 EDITING
+    draft = app_client.get(f"/api/articles/{aid}/draft").json()["draft"]
+    para = next(b for b in draft["doc"]["blocks"] if b["type"] == "paragraph")
+    r = app_client.put(f"/api/drafts/{draft['id']}/edit",
+                       json={"ops": [{"op": "update", "block_id": para["id"],
+                                      "text": "定稿后还能继续改的一段话。"}]})
+    assert r.status_code == 200, r.text
+    assert app_client.get(f"/api/articles/{aid}").json()["status"] == "EDITING"
+
+    # 再次定稿 → 全新独立版本，回滚列表两个定稿快照
+    r = app_client.post(f"/api/articles/{aid}/finalize", json={})
+    v2 = r.json()["version"]
+    assert v2 > v1
+    vers3 = app_client.get(f"/api/articles/{aid}/versions").json()["versions"]
+    finals3 = [v for v in vers3 if v.get("checkpoint") and v["origin"] == "finalized"]
+    assert len(finals3) == 2 and {f["version"] for f in finals3} == {v1, v2}
+
+    # 可回滚到第一次定稿
+    r = app_client.post(f"/api/articles/{aid}/rollback", json={"version": v1})
+    assert r.status_code == 200
+
+
+def test_local_batch_upload_classification(app_client):
+    """本地文件收集模式：无链接立档 → 批量上传自动识别类型分流 → 状态直达 COLLECTED。"""
+    import io
+    from PIL import Image
+
+    r = app_client.post("/api/articles",
+                        json={"title": "本地测试集", "auto_collect": False})
+    assert r.status_code == 200, r.text
+    art = r.json()["article"]
+    assert art["url"].startswith("local://")
+
+    buf = io.BytesIO()
+    Image.new("RGB", (16, 16), (200, 30, 30)).save(buf, "PNG")
+    files = [
+        ("files", ("笔记.md", "# 标题\n\n正文内容。".encode(), "text/markdown")),
+        ("files", ("图.png", buf.getvalue(), "image/png")),
+        ("files", ("片.mp4", b"\x00\x00\x00\x18ftypmp42fake", "video/mp4")),
+        ("files", ("附件.xyz", b"unknown-bytes", "application/octet-stream")),
+    ]
+    r = app_client.post(f"/api/articles/{art['id']}/materials/upload-batch", files=files)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["total"] == 4 and len(out["ok"]) == 4 and not out["failed"]
+
+    mats = app_client.get(f"/api/articles/{art['id']}/materials?scope=article").json()["materials"]
+    kinds = {m["title"].split(".")[0].split("-")[-1]: m["kind"] for m in mats}
+    assert set(m["kind"] for m in mats) == {"text", "image", "video", "doc"}
+    # 文本素材正文进了可检索库（FTS 证据源）
+    text_m = next(m for m in mats if m["kind"] == "text")
+    content = app_client.get(f"/api/materials/{text_m['id']}/text").json()["content"]
+    assert "正文内容" in content
+    # 本地收集：上传即完成收集
+    assert app_client.get(f"/api/articles/{art['id']}").json()["status"] == "COLLECTED"

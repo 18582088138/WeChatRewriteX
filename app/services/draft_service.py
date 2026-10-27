@@ -81,7 +81,8 @@ def save_named_version(article_id: str, note: str = "") -> DraftDoc:
     return DraftDoc.model_validate_json(row["doc_json"])
 
 
-def save_new_version(doc: DraftDoc, origin: str, checkpoint: bool = False) -> DraftDoc:
+def save_new_version(doc: DraftDoc, origin: str, checkpoint: bool = False,
+                     note: str = "") -> DraftDoc:
     """保存：默认只记块级变更；checkpoint=True 时写稀疏全量快照（创建/定稿/回滚）。"""
     seq = dao.next_version(doc.article_id)
     head = dao.latest_draft(doc.article_id)
@@ -95,20 +96,21 @@ def save_new_version(doc: DraftDoc, origin: str, checkpoint: bool = False) -> Dr
     doc.id = f"{doc.article_id}-v{seq}"
     doc.meta.word_count = bk.doc_word_count(doc)
     if checkpoint or not head:
-        dao.save_draft(doc, origin=origin)
+        dao.save_draft(doc, origin=origin, note=note)
         library.save_draft_files(doc, bk.to_markdown(doc))   # 文件只随 checkpoint 落盘
     events.bus.publish(events.DRAFT_SAVED, doc.article_id, version=doc.version,
                        origin=origin, checkpoint=checkpoint)
     return doc
 
 
-def save_checkpoint(article_id: str, origin: str, status: str = "editing") -> DraftDoc | None:
+def save_checkpoint(article_id: str, origin: str, status: str = "editing",
+                    note: str = "") -> DraftDoc | None:
     """把当前 HEAD 落为一个稀疏 checkpoint（定稿/手动存档用）。"""
     head = dao.latest_draft(article_id)
     if not head:
         return None
     doc = DraftDoc.model_validate_json(head["doc_json"])
-    row = save_new_version(doc, origin=origin, checkpoint=True)
+    row = save_new_version(doc, origin=origin, checkpoint=True, note=note)
     dao.set_draft_status(row.id, status)
     return row
 

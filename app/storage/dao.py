@@ -282,7 +282,8 @@ def list_draft_versions(article_id: str) -> list[dict]:
     out = [{"version": c["version"], "origin": c["origin"], "status": c["status"],
             "word_count": c["word_count"], "created_at": c["created_at"],
             "checkpoint": True, "draft_id": c["id"], "note": c.get("note") or "",
-            "saved": c["origin"] == "manual"} for c in cps]
+            # 回滚列表 = 定稿快照（V1.7 定稿即版本节点）；manual 旧数据保留兼容
+            "saved": c["origin"] in ("finalized", "manual")} for c in cps]
     groups = db.query(
         "SELECT seq, origin, MIN(created_at) AS created_at, COUNT(*) AS n FROM draft_changes "
         "WHERE article_id=? GROUP BY seq ORDER BY seq DESC", (article_id,))

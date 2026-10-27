@@ -91,6 +91,13 @@ def edit_draft(draft_id: str, body: EditOps) -> dict:
     if not changed:
         raise HTTPException(400, "没有生效的修改")
 
+    # 定稿 = 版本快照而非只读锁（V1.7）：定稿后继续编辑自动回到 EDITING，
+    # 再次定稿生成全新独立版本
+    art = dao.get_article(aid)
+    if art and art["status"] == "FINALIZED":
+        from ..core.models import ArticleStatus
+        dao.set_article_status(aid, ArticleStatus.EDITING)
+
     # 标题联动（反馈 1.4）：改主标题 → 同步正文一级标题块 + 项目文件夹改名
     title_op = next((o for o in body.ops
                      if o.get("op") == "update_meta" and o.get("field") == "title_selected"),

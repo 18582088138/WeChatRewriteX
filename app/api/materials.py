@@ -1,6 +1,8 @@
 """素材库路由：列表 / 上传 / 网址摄取 / inbox 扫描 / 删除。"""
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -67,6 +69,67 @@ async def upload_article_material(aid: str, file: UploadFile = File(...)) -> dic
                                         "article", aid, note="GUI 上传")
     events.bus.publish(events.MATERIAL_INGESTED, aid, material_id=mid)
     return {"material_id": mid, "created": created}
+
+
+_TEXT_EXT = {".txt", ".md", ".markdown"}
+_HTML_EXT = {".html", ".htm"}
+
+
+def _ingest_upload(aid: str, filename: str, data: bytes) -> tuple[str, bool]:
+    """单个上传文件入库：按扩展名自动分流到 文章/图片/视频/音频/其他 素材目录。
+
+    文章类做正文抽取（html 走 trafilatura，pdf 走 pypdf），保证能进证据与检索。
+    """
+    ext = Path(filename).suffix.lower()
+    title = Path(filename).stem
+    if ext in _HTML_EXT:
+        raw = data.decode("utf-8", errors="replace")
+        text = None
+        try:
+            import trafilatura
+            text = trafilatura.extract(raw, include_comments=False, include_images=False)
+        except Exception:
+            text = None
+        mid = library.ingest_text(text or raw, title=title, scope="article",
+                                  article_id=aid, ref_type="upload")
+        return mid, True
+    if ext == ".pdf":
+        try:
+            import io
+            from pypdf import PdfReader
+            text = "\n".join((pg.extract_text() or "")
+                             for pg in PdfReader(io.BytesIO(data)).pages)
+            if text.strip():
+                mid = library.ingest_text(text, title=title, scope="article",
+                                          article_id=aid, ref_type="upload")
+                return mid, True
+        except Exception:
+            pass        # 抽取失败按二进制文档入库
+    return library.ingest_bytes(data, filename, "article", aid, note="本地上传")
+
+
+@router.post("/articles/{aid}/materials/upload-batch")
+async def upload_article_materials_batch(aid: str,
+                                         files: list[UploadFile] = File(...)) -> dict:
+    """批量上传（本地文件/文件夹）：逐文件自动识别类型、分流入库，逐条记录成败。"""
+    if not dao.get_article(aid):
+        raise HTTPException(404, "文章不存在")
+    ok, failed = [], []
+    for f in files:
+        name = f.filename or "upload.bin"
+        try:
+            data = await f.read()
+            mid, _created = _ingest_upload(aid, name, data)
+            ok.append({"filename": name, "material_id": mid})
+            events.bus.publish(events.MATERIAL_INGESTED, aid, material_id=mid)
+        except Exception as e:
+            failed.append({"filename": name, "error": str(e)[:200]})
+    # 本地收集模式（local:// 立档）：上传即收集完成，NEW 直达 COLLECTED
+    art = dao.get_article(aid)
+    if art and art["status"] == "NEW" and (art["url"] or "").startswith("local://") and ok:
+        from ..core.models import ArticleStatus
+        dao.set_article_status(aid, ArticleStatus.COLLECTED)
+    return {"ok": ok, "failed": failed, "total": len(files)}
 
 
 @router.post("/materials/upload")

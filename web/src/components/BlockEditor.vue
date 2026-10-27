@@ -77,8 +77,6 @@ const wholeArticle = ref(false)
 const lightboxUrl = ref('')
 const imgModal = ref(false)
 const imgBlockId = ref('')
-const saveVersionModal = ref(false)
-const saveVersionNote = ref('')
 const insertModal = ref(false)
 const insertIds = ref<string[]>([])
 const insertInstruction = ref('')
@@ -87,7 +85,7 @@ const editingCaptionId = ref<string | null>(null)
 const captionText = ref('')
 
 function startCaptionEdit(b: Block) {
-  if (!isLatest.value || finalized.value) return
+  if (!isLatest.value) return
   editingCaptionId.value = b.id
   captionText.value = b.caption || ''
 }
@@ -127,9 +125,11 @@ const headVersion = computed(() =>
   versions.value.length ? Math.max(...versions.value.map(v => v.version)) : 0)
 const isLatest = computed(() =>
   !versions.value.length || doc.value?.version === headVersion.value)
-/** 回滚列表只展示用户主动保存的版本（反馈 六.3） */
-const savedVersions = computed(() => versions.value.filter(v => v.saved))
-const finalized = computed(() => versions.value[0]?.status === 'finalized')
+/** 回滚列表 = 定稿快照（V1.7 定稿即版本节点；manual 为历史数据兼容） */
+const savedVersions = computed(() =>
+  versions.value.filter(v => v.saved && v.origin === 'finalized'))
+/** 定稿不再是只读锁（V1.7）：仅代表一个可回滚快照，仍可继续编辑 */
+const headFinalized = computed(() => savedVersions.value.some(v => v.version === headVersion.value))
 const textBlocks = computed(() =>
   doc.value?.blocks.filter(b => ['heading', 'paragraph', 'quote'].includes(b.type)) ?? [])
 
@@ -258,7 +258,6 @@ function clickBlock(b: Block) {
 }
 function dblclickBlock(b: Block) {
   if (!isLatest.value) { message.warning('历史版本只读，请先在右侧回滚或回到最新版'); return }
-  if (finalized.value) { message.warning('已定稿；如需修改请先在审稿页回炉'); return }
   if (b.type === 'image' || b.type === 'video') { openImagePicker(b.id); return }
   if (b.type === 'divider') return
   editingId.value = b.id
@@ -444,18 +443,6 @@ async function replaceImage(m: Material) {
   } catch (e: any) { message.error(e.message) }
 }
 
-/* ================= 保存版本（V1.4 主动保存模式） ================= */
-async function saveNamedVersion() {
-  try {
-    const r = await api.post(`/api/articles/${props.articleId}/versions/save`,
-                             { note: saveVersionNote.value })
-    message.success(`已保存版本 v${r.version}` + (r.note ? `（${r.note}）` : ''))
-    saveVersionModal.value = false
-    saveVersionNote.value = ''
-    await load()
-  } catch (e: any) { message.error(e.message) }
-}
-
 /* ================= 融合插入（素材页触发） ================= */
 function openInsertRefs(ids: string[]) {
   insertIds.value = ids
@@ -575,7 +562,7 @@ async function runInsert() {
               <div v-else-if="b.type === 'image'" class="my-3">
                 <img v-if="b.asset_id" :src="assetUrl(b.asset_id)" class="rounded-md max-w-full" />
                 <div v-if="editingCaptionId !== b.id" class="caption"
-                     :title="isLatest && !finalized ? '双击编辑图注' : ''"
+                     :title="isLatest ? '双击编辑图注' : ''"
                      @dblclick.stop="startCaptionEdit(b)">{{ b.caption || '（双击添加图注）' }}</div>
                 <input v-else v-model="captionText" class="caption-input" v-focus
                        @click.stop @keyup.enter="saveCaption(b)" @keyup.esc="editingCaptionId = null"
@@ -609,29 +596,33 @@ async function runInsert() {
         <div>
           <div class="text-xs font-semibold mb-2" style="color: var(--muted);">AI 重写</div>
           <div class="grid grid-cols-2 gap-1.5">
-            <NButton size="tiny" :disabled="!selectedId || !isLatest || finalized" @click="openAi('rewrite')">选段重写</NButton>
-            <NButton size="tiny" :disabled="!selectedId || !isLatest || finalized" @click="openAi('shorten')">缩写</NButton>
-            <NButton size="tiny" :disabled="!selectedId || !isLatest || finalized" @click="openAi('expand')">扩写</NButton>
-            <NButton size="tiny" :disabled="!selectedId || !isLatest || finalized" @click="openAi('custom')">自定义…</NButton>
+            <NButton size="tiny" :disabled="!selectedId || !isLatest" @click="openAi('rewrite')">选段重写</NButton>
+            <NButton size="tiny" :disabled="!selectedId || !isLatest" @click="openAi('shorten')">缩写</NButton>
+            <NButton size="tiny" :disabled="!selectedId || !isLatest" @click="openAi('expand')">扩写</NButton>
+            <NButton size="tiny" :disabled="!selectedId || !isLatest" @click="openAi('custom')">自定义…</NButton>
           </div>
-          <NButton size="tiny" block class="mt-1.5" :disabled="!doc || !isLatest || finalized"
+          <NButton size="tiny" block class="mt-1.5" :disabled="!doc || !isLatest"
                    @click="openAi('whole')">整篇重写</NButton>
         </div>
         <div>
-          <div class="text-xs font-semibold mb-2" style="color: var(--muted);">版本管理</div>
-          <NButton size="tiny" block type="primary" :disabled="!doc || finalized"
-                   @click="saveVersionModal = true">保存版本</NButton>
-          <div class="text-[11px] mt-1.5" style="color: var(--faint);">
-            编辑实时写入临时草稿；点「保存版本」才生成可回滚记录。</div>
-          <div class="mt-2 space-y-1.5">
+          <div class="text-xs font-semibold mb-2 flex items-center gap-2" style="color: var(--muted);">
+            版本管理
+            <span v-if="headFinalized" class="px-1.5 py-0.5 rounded text-[10px]"
+                  style="background: var(--pill-pos-bg); color: var(--pill-pos-ink);">当前已定稿</span>
+          </div>
+          <div class="text-[11px] mb-2" style="color: var(--faint);">
+            编辑实时写入草稿；「定稿」（审稿页）生成可回滚的正式版本快照，定稿后仍可继续编辑。</div>
+          <div class="space-y-1.5">
             <div v-if="!savedVersions.length" class="text-[11px]" style="color: var(--faint);">
-              暂无已保存版本</div>
+              暂无定稿版本</div>
             <div v-for="v in savedVersions" :key="v.version"
                  class="flex items-center gap-1.5 text-xs rounded-md px-2 py-1.5"
                  style="border: 1px solid var(--rule);">
               <button class="hover:underline font-medium" @click="load(v.version)">v{{ v.version }}</button>
+              <span class="px-1.5 py-0.5 rounded text-[10px]"
+                    style="background: var(--pill-pos-bg); color: var(--pill-pos-ink);">定稿</span>
               <span class="truncate flex-1" style="color: var(--muted);"
-                    :title="v.note">{{ v.note || '（无备注）' }}</span>
+                    :title="v.note">{{ v.note || '定稿快照' }}</span>
               <span class="num" style="color: var(--faint);">{{ (v.created_at || '').slice(5, 16) }}</span>
               <button class="hover:underline shrink-0" style="color: var(--accent-ink);"
                       @click="doRollback(v.version)">回滚</button>
@@ -682,18 +673,6 @@ async function runInsert() {
         </div>
       </div>
     </div>
-
-    <!-- 保存版本弹窗 -->
-    <NModal v-model:show="saveVersionModal" preset="card" title="保存版本" class="!max-w-md">
-      <div class="space-y-3">
-        <NInput v-model:value="saveVersionNote" placeholder="版本备注（可选），如：标题定稿前"
-                @keyup.enter="saveNamedVersion" />
-        <div class="flex justify-end gap-2">
-          <NButton size="small" @click="saveVersionModal = false">取消</NButton>
-          <NButton size="small" type="primary" @click="saveNamedVersion">保存</NButton>
-        </div>
-      </div>
-    </NModal>
 
     <!-- AI 重写弹窗 -->
     <NModal v-model:show="aiModal" preset="card"

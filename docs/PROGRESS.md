@@ -3,17 +3,43 @@
 > **给下一次会话**：这份文档 + `docs/design/` 设计文档 + git log 即可恢复全部上下文。
 > 读法：先看本文件「当前状态」与「下一轮该做什么」，细节查设计文档对应章节。
 
-## 当前状态（截至 2026-10-27）
+## 当前状态（截至 2026-10-28）
 
-**功能完整可用、本地运行中的 M1+ 产品；V1.5 真实案例校准 + V1.6 工程化发布均落地**
-（需求方称本轮为「项目优化 V1.5」，因编号已被校准轮占用，记为 V1.6）。
-测试 30 项全绿。git remote：github.com/18582088138/WeChatRewriteX，已推送。
+**功能完整可用、本地运行中的 M1+ 产品；V1.5 校准 + V1.6 工程化 + V1.7 审稿优化均落地**
+（需求方口头编号与文档编号的映射：其「V1.5 打包」=本文档 V1.6；其「V1.6 审稿优化」=本文档 V1.7）。
+测试 32 项全绿。git remote：github.com/18582088138/WeChatRewriteX，已推送。
 
 - 启动：`C:\Users\75203\miniforge3\envs\xkd_env_py312\python.exe -m app` → http://127.0.0.1:8000
   （conda 环境在 miniforge3，Git Bash 里 `conda activate` 不生效，直接用绝对路径 python）
 - **产品已更名「文枢 - 自媒体 Studio」**（短名 文枢；pip 包名/进程标识 `wenshu`）
-- 前端已构建于 `web/dist/`（改前端后需 `cd web && npm run build`）
-- 数据根 `resource/`（gitignore）；日志 `log/wenshu.log`（gitignore，**常驻持久化**，见下）
+- 前端已构建于 `web/dist/`（改前端后需 `cd web && npm run build`，再 `python scripts/build_assets.py`）
+- 数据根 `resource/`（gitignore）；日志 `log/wenshu.log`（gitignore，常驻持久化）
+- 一键打包：`python tools/pack_release.py`（默认全平台，产物进 release/）
+
+## V1.7 审稿优化与 bug 修复（2026-10-28）
+
+1. **冻结态收集崩溃修复**：PyInstaller 漏收 justext 的 stoplists 静态资源（trafilatura
+   正文抽取依赖）→ 收集炸 `WinError 3: _MEIxxx/justext/stoplists`。spec 补
+   `collect_all(justext/certifi/curl_cffi)`；已在干净目录用真实文章实证收集全通过。
+2. **资料收集入口改造**：列表页「录入链接」→「资料收集」；弹窗双模式（网页链接 /
+   本地文件·文件夹）。本地模式：`POST /api/articles` url 可空（title 立档为
+   `local://` 文章）→ `POST /api/articles/{aid}/materials/upload-batch` 批量上传，
+   自动识别分流（md/txt→文章；html/pdf 抽取正文→文章；图片/视频/音频按扩展名；
+   其余→其他），local:// 文章上传成功即 NEW→COLLECTED。
+3. **版本机制重构（废弃 V1.4 主动保存模式）**：**定稿=版本节点**。定稿生成
+   `origin=finalized` 快照并进回滚列表（dao.list_draft_versions 的 saved 标记含
+   finalized）；定稿后仍可编辑（编辑端点自动 FINALIZED→EDITING，不再是只读锁）；
+   已定稿无改动再定稿幂等（`already_finalized`）；再次定稿生成全新独立版本。
+   前端创作页「保存版本」按钮已移除，版本区改列定稿快照。
+4. **审稿交互重构**：意见列表改**右侧悬浮窗**（可收起为角标，正文阅读区全宽）；
+   条目按**对应段落顺序**排列（¶n 角标定位，无锚排尾、同级严重度优先）；
+   点击条目平滑滚动+高亮对应段落（原有能力保留）；审稿阅读区**双击文本块即编辑**
+   （与创作分页同一保存链路，改动达标自动触发复审）。
+
+**顺手修的存量 bug**：跨文章 sha256 去重饿死——两篇文章收同一原文时，后收文章的
+primary 素材被去重到首篇名下，导致第二篇「素材库为空」无法创作。ingest_bytes/
+ingest_text 改为：同归属命中才复用，跨归属命中则同文件克隆新行（不重复占盘），
+文本正文随行克隆进 FTS。
 
 ## V1.6 工程化发布（2026-10-27）
 
@@ -166,6 +192,13 @@ resource/
 - **bat 铁律（V1.6）**：cmd 的 bat 必须**纯 ASCII + CRLF 行尾**。LF 让 if/for 括号块
   解析错乱（报错形如 `'yedExpansion' 不是内部或外部命令`）；非 ASCII 按 OEM 代码页
   解析，UTF-8/GBK 互读必乱甚至 0x5C 尾字节吃换行。中文 exe 名用通配符发现。
+- **PyInstaller 静态资源（V1.7）**：trafilatura 依赖 justext 的 stoplists 数据文件——
+  只 collect_all(trafilatura) 不够，数据在 justext 包里；同类还有 certifi(cacert.pem)、
+  curl_cffi(DLL)。冻结态跑通收集才算验证（单测测不到）。
+- **sha 去重饿死（V1.7）**：ingest 的 sha256 去重若直接返回他篇素材 id，后收同源的
+  文章会「素材库为空」。去重只省文件不省行：同归属复用、跨归属同文件克隆新行。
+- **复现实验污染生产库（V1.7）**：绕过 pytest 直接跑 `create_app()` 的调试脚本会写
+  生产 resource/！调试脚本开头先 `os.environ["WENSHU_DATA_DIR"] = 临时目录`。
 - **PowerShell 5.1 两坑（V1.6）**：不支持 `&&`（报错「不是有效的语句分隔符」，逐行或
   用 `;`）；不搜索当前目录（脚本必须 `.\xxx.bat` 前缀）。PS 用户给原生
   `scripts/start_windows.ps1`（发布包内「启动文枢.ps1」），执行策略拦截用

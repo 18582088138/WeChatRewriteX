@@ -1,11 +1,12 @@
 /** API 客户端：fetch 薄封装 + SSE 订阅。访问令牌存 localStorage（局域网模式用）。 */
 
 export function getToken(): string {
-  return localStorage.getItem('wra_token') || ''
+  // wra_token 为旧名兼容回退（V1.6 更名文枢）
+  return localStorage.getItem('wenshu_token') || localStorage.getItem('wra_token') || ''
 }
 
 export function setToken(t: string) {
-  localStorage.setItem('wra_token', t)
+  localStorage.setItem('wenshu_token', t)
 }
 
 function withToken(url: string): string {
@@ -38,6 +39,15 @@ export const api = {
   async upload(url: string, file: File): Promise<any> {
     const form = new FormData()
     form.append('file', file)
+    const resp = await fetch(withToken(url), { method: 'POST', body: form })
+    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || resp.statusText)
+    return resp.json()
+  },
+
+  /** 批量上传（本地文件/文件夹收集）：后端逐文件自动识别类型分流入库 */
+  async uploadBatch(url: string, files: File[]): Promise<any> {
+    const form = new FormData()
+    for (const f of files) form.append('files', f, f.name)
     const resp = await fetch(withToken(url), { method: 'POST', body: form })
     if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || resp.statusText)
     return resp.json()

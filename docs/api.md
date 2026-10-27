@@ -24,11 +24,11 @@ Base URL: `http://127.0.0.1:8000`，所有接口前缀 `/api`。运行时可访�
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/articles` | 录入链接。`{url, user_notes?, style_pack?, target_word_count?, auto_collect=true}`，默认自动入队收集 |
+| POST | `/api/articles` | 资料收集录入。`{url?, title?, user_notes?, style_pack?, target_word_count?, auto_collect=true}`。链接模式：url 必填、默认自动入队收集；本地文件模式：url 留空 + title 主题名（立档为 `local://` 文章，不自动收集，素材走批量上传） |
 | GET | `/api/articles?status=&q=` | 列表。`status` ∈ `New/Process/Done`；返回含 `ui_status`、`progress`（运行/排队阶段） |
 | GET | `/api/articles/{aid}` | 详情：状态、素材数、版本列表、最新审稿、发布记录 |
 | POST | `/api/articles/{aid}/advance` | 推进阶段 `{stage: collect\|create\|review, selected_material_ids?}`；当前状态不允许 → 409。`selected_material_ids` 为 create 阶段的「勾选参与创作素材集」（素材库「导入 & 创作」按钮）；收集 → 后续阶段需手动或 `pipeline.auto` 连跑 |
-| POST | `/api/articles/{aid}/finalize` | 定稿 `{force=false}`；存在未处理 blocker 时 409，`force=true` 强制定稿并留痕（返回 `forced_blockers`） |
+| POST | `/api/articles/{aid}/finalize` | 定稿=版本节点（V1.7）：生成可回滚的正式版本快照（`origin=finalized` 进版本列表）。`{force=false}`；有未处理 blocker 时 409，`force=true` 强制并留痕。已定稿且无新编辑时幂等返回 `already_finalized=true`；定稿后仍可编辑（编辑自动转回 EDITING，再次定稿生成全新版本） |
 | POST | `/api/articles/{aid}/reopen` | 定稿/完成后回炉编辑（FINALIZED/DONE → EDITING） |
 | POST | `/api/articles/{aid}/deepsearch` | 深度搜索：基于已提取主题的新一轮检索，仅增量补充 reference（须先完成收集；入队 `deepsearch` 任务） |
 | GET | `/api/jobs?article_id=&limit=` | 任务队列状态（type/status/attempts/error/结果） |
@@ -40,6 +40,7 @@ Base URL: `http://127.0.0.1:8000`，所有接口前缀 `/api`。运行时可访�
 | GET | `/api/articles/{aid}/materials?scope=article&kind=` | 文章素材组（kind ∈ text/image/video/doc/link） |
 | GET | `/api/materials/common?kind=` | 公共素材库 |
 | POST | `/api/articles/{aid}/materials/upload` | multipart 上传（`file` 字段）；sha256 全局去重 |
+| POST | `/api/articles/{aid}/materials/upload-batch` | 批量上传（`files` 多文件，本地文件/文件夹收集）。自动识别类型分流：md/txt→文章，html/pdf 抽取正文→文章，图片/视频/音频按扩展名，其余→其他；返回 `{ok:[], failed:[], total}` 逐条成败。local:// 文章上传成功即转 COLLECTED |
 | POST | `/api/materials/upload` | 上传到公共库 |
 | POST | `/api/articles/{aid}/materials/url` | `{url, ref_type?}` 爬取网址入库（正文+图/视频/音频） |
 | POST | `/api/articles/{aid}/materials/batch-url` | `{urls: [], ref_type?}` 批量链接批量抓取（入队 `ingest` 任务，逐链接记录成败） |
