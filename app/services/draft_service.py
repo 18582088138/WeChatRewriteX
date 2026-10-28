@@ -94,9 +94,10 @@ def _project_checkpoint(doc: DraftDoc) -> None:
 
 def save_named_version(article_id: str, note: str = "", expected_version: int | None = None) -> DraftDoc:
     with db.transaction():
-        doc, _ = get_doc(article_id)
-        return save_new_version(doc, "manual", checkpoint=True, note=note.strip(),
-                                expected_version=expected_version)
+        doc, head = get_doc(article_id)
+        saved = save_new_version(doc, "manual", checkpoint=True, note=note.strip(), expected_version=expected_version)
+        dao.set_draft_status(saved.id, head["status"])
+        return saved
 
 
 def save_new_version(doc: DraftDoc, origin: str, checkpoint: bool = False,
@@ -130,7 +131,7 @@ def save_new_version(doc: DraftDoc, origin: str, checkpoint: bool = False,
             for c in changes:
                 dao.record_change(doc.article_id, doc.version, c["block_id"], c["op"],
                                   c["old"], c["new"], origin)
-        if old and content_hash(old) != content_hash(doc):
+        if old and (content_hash(old) != content_hash(doc) or origin == "rollback"):
             # Every mutation path shares this rule, including AI repair and rollback.
             art = dao.get_article(doc.article_id)
             if art and art["status"] in ("FINALIZED", "DONE", "PUBLISHING", "REVIEWING", "REVIEWED"):
@@ -167,6 +168,12 @@ def rollback(article_id: str, target_version: int, expected_version: int | None 
                                 note=f"回滚到 v{target_version}", expected_version=expected_version)
 
 
+def _editable_asset(doc: DraftDoc, mid: str) -> bool:
+    material = dao.get_material(mid)
+    return bool(material and not material.get("deleted_at") and
+                (material["scope"] == "common" or material.get("article_id") == doc.article_id))
+
+
 def apply_ops(doc: DraftDoc, ops: list[dict]) -> int:
     """应用编辑操作，返回改动计数。op: update|remove|replace_image|set_caption|update_meta|insert_after。"""
     changed = 0
@@ -181,7 +188,7 @@ def apply_ops(doc: DraftDoc, ops: list[dict]) -> int:
             b = bk.get_block(doc, bid)
             asset = op.get("asset_id")
             if b and b.type in (BlockType.IMAGE, BlockType.VIDEO) and asset \
-                    and dao.get_material(asset):
+                    and _editable_asset(doc, asset):
                 b.asset_id = asset
                 changed += 1
         elif kind == "set_caption":
@@ -195,7 +202,7 @@ def apply_ops(doc: DraftDoc, ops: list[dict]) -> int:
                        asset_id=op.get("asset_id"), caption=op.get("caption"))
             if bid and not bk.get_block(doc, bid):
                 raise ValueError("插入位置不存在")
-            if nb.type in (BlockType.IMAGE, BlockType.VIDEO) and not dao.get_material(nb.asset_id or ""):
+            if nb.type in (BlockType.IMAGE, BlockType.VIDEO) and not _editable_asset(doc, nb.asset_id or ""):
                 raise ValueError("素材不存在")
             bk.insert_block(doc, bid or None, nb)
             changed += 1

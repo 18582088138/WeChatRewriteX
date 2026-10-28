@@ -22,6 +22,14 @@ def main() -> None:
         _install_browser()
         return
 
+    from .core import config
+    import ipaddress
+    try:
+        loopback = ipaddress.ip_address(args.host).is_loopback
+    except ValueError:
+        loopback = args.host == "localhost"
+    if not loopback and not config.get_env("APP_ACCESS_TOKEN"):
+        parser.error("远程绑定必须设置 APP_ACCESS_TOKEN")
     import uvicorn
     print(f"{APP_FULL_NAME} v{APP_VERSION}  →  http://{args.host}:{args.port}")
     if not args.no_browser and not args.reload:

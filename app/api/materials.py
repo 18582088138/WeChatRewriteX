@@ -7,7 +7,8 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from ..core import events
+from ..core import events, config
+from starlette.concurrency import run_in_threadpool
 from ..core.ids import new_id as new_id_fn
 from ..storage import dao, db, library
 from ..services.crawl import registry as crawl_registry
@@ -52,7 +53,8 @@ def material_file(mid: str) -> FileResponse:
     p = library.material_abs_path(m.get("path"))
     if not p or not p.exists():
         raise HTTPException(404, "文件不存在")
-    return FileResponse(p)
+    from ..services.file_access import response
+    return response(p)
 
 
 @router.get("/materials/{mid}/text")
@@ -60,12 +62,20 @@ def material_text(mid: str) -> dict:
     return {"material_id": mid, "content": dao.get_material_text(mid)}
 
 
+async def _read_upload(file: UploadFile) -> bytes:
+    limit = int(config.get("storage.material_size_limit_mb", 500)) * 1024 * 1024
+    data = await file.read(limit + 1)
+    if len(data) > limit:
+        raise HTTPException(413, "上传文件超过大小限制")
+    return data
+
+
 @router.post("/articles/{aid}/materials/upload")
 async def upload_article_material(aid: str, file: UploadFile = File(...)) -> dict:
     if not dao.get_article(aid):
         raise HTTPException(404, "文章不存在")
-    data = await file.read()
-    mid, created = library.ingest_bytes(data, file.filename or "upload.bin",
+    data = await _read_upload(file)
+    mid, created = await run_in_threadpool(library.ingest_bytes, data, file.filename or "upload.bin",
                                         "article", aid, note="GUI 上传")
     events.bus.publish(events.MATERIAL_INGESTED, aid, material_id=mid)
     return {"material_id": mid, "created": created}
@@ -114,12 +124,14 @@ async def upload_article_materials_batch(aid: str,
     """批量上传（本地文件/文件夹）：逐文件自动识别类型、分流入库，逐条记录成败。"""
     if not dao.get_article(aid):
         raise HTTPException(404, "文章不存在")
+    if len(files) > 50:
+        raise HTTPException(413, "一次最多上传 50 个文件")
     ok, failed = [], []
     for f in files:
         name = f.filename or "upload.bin"
         try:
-            data = await f.read()
-            mid, _created = _ingest_upload(aid, name, data)
+            data = await _read_upload(f)
+            mid, _created = await run_in_threadpool(_ingest_upload, aid, name, data)
             ok.append({"filename": name, "material_id": mid})
             events.bus.publish(events.MATERIAL_INGESTED, aid, material_id=mid)
         except Exception as e:
@@ -134,8 +146,8 @@ async def upload_article_materials_batch(aid: str,
 
 @router.post("/materials/upload")
 async def upload_common_material(file: UploadFile = File(...)) -> dict:
-    data = await file.read()
-    mid, created = library.ingest_bytes(data, file.filename or "upload.bin",
+    data = await _read_upload(file)
+    mid, created = await run_in_threadpool(library.ingest_bytes, data, file.filename or "upload.bin",
                                         "common", note="GUI 上传(公共库)")
     events.bus.publish(events.MATERIAL_INGESTED, None, material_id=mid)
     return {"material_id": mid, "created": created}

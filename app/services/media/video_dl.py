@@ -11,6 +11,8 @@ MAX_MB = 200
 
 def download_video(url: str, max_mb: int = MAX_MB, timeout: int = 240) -> tuple[bytes, str] | None:
     """下载视频，返回 (bytes, 文件名)；不可下载/超限时返回 None。"""
+    from ..network_policy import validate_url
+    validate_url(url)
     try:
         import yt_dlp
     except ImportError:
@@ -20,10 +22,11 @@ def download_video(url: str, max_mb: int = MAX_MB, timeout: int = 240) -> tuple[
         opts = {
             "format": f"best[filesize<{max_mb}M]/best",
             "noplaylist": True,
+            "max_filesize": max_mb * 1024 * 1024,
+            "socket_timeout": min(timeout, 60),
             "quiet": True,
             "no_warnings": True,
             "outtmpl": out,
-            "socket_timeout": 60,
         }
         proxy = proxy_for(url)
         if proxy:
@@ -31,6 +34,11 @@ def download_video(url: str, max_mb: int = MAX_MB, timeout: int = 240) -> tuple[
         try:
             import yt_dlp.utils  # noqa
             with yt_dlp.YoutubeDL(opts) as ydl:
+                original_urlopen = ydl.urlopen
+                def checked_urlopen(request):
+                    validate_url(request if isinstance(request, str) else request.url)
+                    return original_urlopen(request)
+                ydl.urlopen = checked_urlopen
                 ydl.download([url])
         except Exception:
             return None
@@ -38,7 +46,6 @@ def download_video(url: str, max_mb: int = MAX_MB, timeout: int = 240) -> tuple[
         if not files:
             return None
         f = max(files, key=lambda x: x.stat().st_size)
-        data = f.read_bytes()
-        if len(data) > max_mb * 1024 * 1024:
+        if f.stat().st_size > max_mb * 1024 * 1024:
             return None
-        return data, f.name
+        return f.read_bytes(), f.name

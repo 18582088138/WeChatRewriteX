@@ -25,15 +25,38 @@ def get_article(aid: str) -> dict | None:
     return db.query_one("SELECT * FROM articles WHERE id=?", (aid,))
 
 
-def list_articles(status_ui: str | None = None, q: str | None = None) -> list[dict]:
-    rows = db.query("SELECT * FROM articles ORDER BY created_at DESC")
+def _article_where(status_ui=None, q=None):
+    clauses, params = [], []
     if q:
-        ql = q.lower()
-        rows = [r for r in rows if ql in (r["title"] or "").lower() or ql in (r["url"] or "").lower()]
+        clauses.append("(LOWER(title) LIKE ? OR LOWER(url) LIKE ?)")
+        # instr preserves literal substring behavior, including punctuation.
+        clauses[-1] = "(instr(LOWER(title), ?) > 0 OR instr(LOWER(url), ?) > 0)"
+        params.extend((q.lower(), q.lower()))
     if status_ui:
-        from ..core.statemachine import ui_status
-        rows = [r for r in rows if ui_status(ArticleStatus(r["status"])) == status_ui]
-    return rows
+        from ..core.models import UI_STATUS
+        statuses = [s.value for s, ui in UI_STATUS.items() if ui == status_ui]
+        if statuses:
+            clauses.append("status IN (" + ",".join("?" for _ in statuses) + ")")
+            params.extend(statuses)
+    return (" WHERE " + " AND ".join(clauses) if clauses else ""), tuple(params)
+
+
+def list_articles(status_ui: str | None = None, q: str | None = None,
+                  limit: int = 200, offset: int = 0) -> list[dict]:
+    where, params = _article_where(status_ui, q)
+    return db.query("SELECT * FROM articles" + where + " ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?",
+                    (*params, limit, offset))
+
+
+def article_counts(status_ui=None, q=None) -> dict:
+    from ..core.models import UI_STATUS
+    where, params = _article_where(None, q)
+    rows = db.query("SELECT status, COUNT(*) AS n FROM articles" + where + " GROUP BY status", params)
+    counts = {"全部": 0, "New": 0, "Process": 0, "Done": 0, "Failed": 0}
+    for row in rows:
+        counts[UI_STATUS[ArticleStatus(row["status"])]] += row["n"]
+        counts["全部"] += row["n"]
+    return {"total": counts.get(status_ui, counts["全部"]), "counts": counts}
 
 
 def set_article_status(aid: str, status: ArticleStatus, error: str | None = None) -> None:
@@ -111,17 +134,20 @@ def get_material_text(mid: str) -> str:
     return row["content"] if row else ""
 
 
-def search_materials_fts(query_str: str, limit: int = 20) -> list[tuple[str, str]]:
+def search_materials_fts(query_str: str, limit: int = 20, article_id: str | None = None) -> list[tuple[str, str]]:
     """返回 (material_id, snippet)。FTS 不可用时降级 LIKE。
 
     MATCH 查询一律转成带引号的短语并转义内部引号，防止标点触发 FTS5 语法错误；
     任何 FTS 错误都回退 LIKE，不让检索失败炸掉审稿。
     """
+    scope = " AND (m.article_id=? OR m.scope='common')" if article_id else ""
+    scope_params = (article_id,) if article_id else ()
     def _like() -> list[tuple[str, str]]:
         rows = db.query(
-            "SELECT material_id, substr(content,1,200) AS snip "
-            "FROM material_texts WHERE content LIKE ? LIMIT ?",
-            (f"%{query_str}%", limit),
+            "SELECT t.material_id, substr(t.content,1,200) AS snip "
+            "FROM material_texts t JOIN materials m ON m.id=t.material_id "
+            "WHERE m.deleted_at IS NULL AND t.content LIKE ?" + scope + " LIMIT ?",
+            (f"%{query_str}%", *scope_params, limit),
         )
         return [(r["material_id"], r["snip"]) for r in rows]
 
@@ -130,9 +156,10 @@ def search_materials_fts(query_str: str, limit: int = 20) -> list[tuple[str, str
     phrase = '"' + query_str.replace('"', '""') + '"'
     try:
         rows = db.query(
-            "SELECT material_id, snippet(material_fts,1,'','','…',8) AS snip "
-            "FROM material_fts WHERE material_fts MATCH ? LIMIT ?",
-            (phrase, limit),
+            "SELECT material_fts.material_id, snippet(material_fts,1,'','','…',8) AS snip "
+            "FROM material_fts JOIN materials m ON m.id=material_fts.material_id "
+            "WHERE m.deleted_at IS NULL AND material_fts MATCH ?" + scope + " LIMIT ?",
+            (phrase, *scope_params, limit),
         )
         return [(r["material_id"], r["snip"]) for r in rows]
     except Exception:
@@ -348,7 +375,7 @@ def create_review(article_id: str, draft_id: str, draft_version: int,
 
 def latest_review(article_id: str) -> dict | None:
     return db.query_one(
-        "SELECT * FROM reviews WHERE article_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1", (article_id,))
+        "SELECT * FROM reviews WHERE article_id=? ORDER BY draft_version DESC, created_at DESC, rowid DESC LIMIT 1", (article_id,))
 
 
 def list_review_items(review_id: str) -> list[dict]:
@@ -375,12 +402,17 @@ def pending_blockers(review_id: str) -> int:
 # ---------- jobs ----------
 
 def enqueue_job(job_type: str, article_id: str | None = None, payload: dict | None = None) -> str:
-    jid = new_id("job")
-    db.execute(
-        "INSERT INTO jobs(id,type,article_id,payload_json) VALUES(?,?,?,?)",
-        (jid, job_type, article_id, json.dumps(payload or {}, ensure_ascii=False)),
-    )
-    return jid
+    with db.transaction():
+        encoded = json.dumps(payload or {}, ensure_ascii=False, sort_keys=True)
+        existing = db.query_one("SELECT id FROM jobs WHERE type=? AND article_id IS ? "
+                     "AND payload_json=? AND status IN ('pending','running') LIMIT 1",
+                     (job_type, article_id, encoded))
+        if existing:
+            return existing["id"]
+        jid = new_id("job")
+        db.execute("INSERT INTO jobs(id,type,article_id,payload_json) VALUES(?,?,?,?)",
+                   (jid, job_type, article_id, encoded))
+        return jid
 
 
 def claim_job(types: tuple[str, ...] | None = None) -> dict | None:
@@ -415,10 +447,13 @@ def finish_job(jid: str, result: dict | None = None) -> None:
 
 
 def fail_job(jid: str, error: str, requeue: bool = False) -> None:
+    import time
     status = "pending" if requeue else "failed"
+    attempt = db.query_one("SELECT attempts FROM jobs WHERE id=?", (jid,))
+    run_after = time.time() + min(60, 2 ** (attempt["attempts"] if attempt else 1)) if requeue else 0
     db.execute(
-        "UPDATE jobs SET status=?, error=?, updated_at=datetime('now','localtime') WHERE id=?",
-        (status, error, jid),
+        "UPDATE jobs SET status=?, error=?, run_after=?, updated_at=datetime('now','localtime') WHERE id=?",
+        (status, error, run_after, jid),
     )
 
 

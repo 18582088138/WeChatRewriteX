@@ -22,7 +22,7 @@ class TrafilaturaCrawler:
     def fetch(self, url: str) -> RawArticle:
         from .wechat_mp import UA
         try:
-            response = http.get(url, headers={"User-Agent": UA}, timeout=30,
+            response = http.get(url, untrusted=True, headers={"User-Agent": UA}, timeout=30,
                                 follow_redirects=True)
             response.raise_for_status()
             html_text = response.text

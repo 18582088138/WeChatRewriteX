@@ -21,10 +21,11 @@ class FixtureCrawler:
 
     def fetch(self, url: str) -> RawArticle:
         rel = url[len("fixture://"):]
-        path = Path(rel)
-        if not path.is_absolute():
-            from ...core.config import PROJECT_ROOT
-            path = PROJECT_ROOT / "tests" / "fixtures" / rel
+        from ...core.config import PROJECT_ROOT
+        root = (PROJECT_ROOT / "tests" / "fixtures").resolve()
+        path = (root / rel).resolve()
+        if not path.is_relative_to(root):
+            raise CrawlError("fixture 路径超出测试目录")
         if not path.exists():
             raise CrawlError(f"fixture 不存在: {path}")
         text = path.read_text(encoding="utf-8")
@@ -38,10 +39,16 @@ class FixtureCrawler:
                           published_at="2026-10-20", site="fixture", images=[])
 
 
-_CRAWLERS: list[Crawler] = [WechatMpCrawler(), ArxivCrawler(), FixtureCrawler(), TrafilaturaCrawler()]
+_CRAWLERS: list[Crawler] = [WechatMpCrawler(), ArxivCrawler(), TrafilaturaCrawler()]
 
 
 def fetch(url: str) -> RawArticle:
+    if not (url.startswith("fixture://") and any(isinstance(c, FixtureCrawler) for c in _CRAWLERS)):
+        from ..network_policy import validate_url
+        try:
+            validate_url(url)
+        except ValueError as exc:
+            raise CrawlError(str(exc)) from exc
     for c in _CRAWLERS:
         if c.can_handle(url):
             return c.fetch(url)

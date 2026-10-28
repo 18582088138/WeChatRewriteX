@@ -57,7 +57,7 @@ def test_full_flow_degraded(app_client):
     r = app_client.post(f"/api/articles/{aid}/finalize", json={"force": False})
     if r.status_code == 409:
         r = app_client.post(f"/api/articles/{aid}/finalize", json={"force": True})
-        assert r.status_code == 200 and r.json()["forced_blockers"] >= 1
+        assert r.status_code == 200 and (r.json()["forced_blockers"] >= 1 or r.json()["forced_reasons"])
     else:
         assert r.status_code == 200
     art = app_client.get(f"/api/articles/{aid}").json()
@@ -139,6 +139,15 @@ def test_finalize_version_node(app_client):
     assert r.status_code == 200, r.text
     assert app_client.get(f"/api/articles/{aid}").json()["status"] == "EDITING"
 
+    # The previous review cannot approve edited content; rerun review explicitly.
+    app_client.post(f"/api/articles/{aid}/advance", json={"stage": "review"})
+    _wait_status(app_client, aid, {"EDITING"})
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        active = app_client.get(f"/api/jobs?article_id={aid}").json()["jobs"]
+        if not any(j["type"] == "review" and j["status"] in ("pending", "running") for j in active):
+            break
+        time.sleep(0.1)
     # 再次定稿 → 全新独立版本，回滚列表两个定稿快照
     r = app_client.post(f"/api/articles/{aid}/finalize", json={})
     v2 = r.json()["version"]

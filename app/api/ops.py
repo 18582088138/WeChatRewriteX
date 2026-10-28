@@ -5,7 +5,7 @@ import json
 import queue as queue_mod
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -51,6 +51,9 @@ def resolve_item(item_id: str, body: ResolveItem) -> dict:
         review = db.query_one("SELECT * FROM reviews WHERE id=?", (item["review_id"],))
         article_id = review["article_id"]
         doc, row = draft_service.get_doc(article_id)
+        from ..services.workflow import review_matches
+        if not review_matches(review, doc):
+            raise HTTPException(409, "审稿意见已过期，请重新审稿")
         from ..agents.creator import CreatorAgent
         agent = CreatorAgent()
         if not agent.llm_available():
@@ -154,16 +157,26 @@ def get_settings() -> dict:
                 for c in config.get("llm.channels", [])]
     return {"settings": config.all_settings(), "channels": channels,
             "llm_available": llm_router.available(),
+            "llm_purposes": {p: llm_router.available(p) for p in config.get("llm.routing", {})},
             "searcher": get_searcher().name,
             "embedding_available": get_embedder().available}
 
 
 @router.put("/settings")
 def put_setting(body: SettingPut) -> dict:
-    if body.key.startswith(("llm.channels",)):   # 渠道含密钥引用，走 yaml 不走 UI
-        raise HTTPException(400, "llm.channels 请直接编辑 config/settings.yaml")
-    dao.set_setting(body.key, body.value)
+    from ..core import settings_policy
+    from ..storage import db
+    try:
+        value = settings_policy.value_for(body.key, body.value)
+        with db.transaction():
+            proposed = config._deep_merge(config.all_settings(), config._expand_flat({body.key: value}))
+            settings_policy.validate(proposed)
+            dao.set_setting(body.key, value)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
     config.reload()
+    from .. import logging_setup
+    logging_setup.configure()
     # 日志持久化常驻（log.* 配置），dev.mode 仅控制设置页日志面板可见性，即时生效
     return {"ok": True}
 
@@ -192,6 +205,17 @@ def sse():
 @router.get("/health")
 def health() -> dict:
     return {"ok": True}
+
+
+@router.get("/ready")
+def ready(request: Request) -> dict:
+    from ..storage import db
+    runtime = getattr(request.app.state, "runtime", None)
+    db.query_one("SELECT 1")
+    workers_ok = not request.app.state.worker_enabled or bool(runtime and runtime.healthy())
+    if not request.app.state.ready or not workers_ok:
+        raise HTTPException(503, "服务未就绪")
+    return {"ok": True, "workers": len(runtime.threads) if runtime else 0}
 
 
 # ---------- 开发者模式：日志可视化 + 成本监控 ----------
@@ -223,11 +247,13 @@ def article_costs(aid: str) -> dict:
         g["calls"] += 1
         g["prompt_tokens"] += r["prompt_tokens"]
         g["completion_tokens"] += r["completion_tokens"]
-        g["cost_est"] += r["cost_est"]
+        g["cost_est"] += r["cost_est"] or 0.0
+        g["unknown_cost_calls"] = g.get("unknown_cost_calls", 0) + int(r["cost_est"] is None)
     for g in by_stage.values():
         g["cost_est"] = round(g["cost_est"], 6)
     total = {"calls": len(rows),
              "prompt_tokens": sum(r["prompt_tokens"] for r in rows),
              "completion_tokens": sum(r["completion_tokens"] for r in rows),
-             "cost_est": round(sum(r["cost_est"] for r in rows), 6)}
+             "cost_est": round(sum(r["cost_est"] or 0.0 for r in rows), 6)}
+    total["unknown_cost_calls"] = sum(r["cost_est"] is None for r in rows)
     return {"by_stage": by_stage, "total": total}

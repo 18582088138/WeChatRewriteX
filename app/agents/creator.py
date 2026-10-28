@@ -40,6 +40,10 @@ class CreatorAgent(AgentBase):
         if not article:
             raise ValueError(f"文章不存在: {article_id}")
         base = dao.latest_draft(article_id)
+        from ..core.execution import operation_id
+        key = operation_id()
+        if key and base and base.get("note") == f"job:{key}":
+            return DraftDoc.model_validate_json(base["doc_json"])
         expected_version = base["version"] if base else 0
         style = self.load_style_pack(article.get("style_pack"))
         self.progress(article_id, "汇总证据包与可用素材…")
@@ -80,7 +84,8 @@ class CreatorAgent(AgentBase):
 
         from ..services import draft_service
         doc = draft_service.save_new_version(doc, origin="agent", checkpoint=True,
-                                             expected_version=expected_version)
+                                             expected_version=expected_version,
+                                             note=f"job:{key}" if key else "")
         if new_title:
             library.rename_to_created_title(article_id, new_title)
         events.bus.publish(events.CREATE_FINISHED, article_id, version=doc.version,

@@ -88,6 +88,17 @@ def after_commit(callback) -> None:
 def init_db() -> None:
     data_dir().mkdir(parents=True, exist_ok=True)
     with connect() as conn:
+        previous = conn.execute("PRAGMA user_version").fetchone()[0]
+        if previous < 2 and conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='articles'").fetchone():
+            backups = data_dir() / "backups"
+            backups.mkdir(parents=True, exist_ok=True)
+            backup = backups / "before-schema-v2.sqlite3"
+            if not backup.exists():
+                target = sqlite3.connect(backup)
+                try:
+                    conn.backup(target)
+                finally:
+                    target.close()
         conn.executescript(_SCHEMA)
         # 轻量迁移：老库补 lib_dir 列 + sha256 唯一索引降级为普通索引
         for ddl in ("ALTER TABLE articles ADD COLUMN lib_dir TEXT",
@@ -98,14 +109,18 @@ def init_db() -> None:
                     "ALTER TABLE embeddings ADD COLUMN content_hash TEXT"):
             try:
                 conn.execute(ddl)
-            except sqlite3.OperationalError:
-                pass
+            except sqlite3.OperationalError as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise
         try:
             conn.execute("DROP INDEX IF EXISTS idx_materials_sha")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_materials_sha ON materials(sha256)")
         except sqlite3.OperationalError:
             pass
         _init_fts(conn)
+        conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT DEFAULT CURRENT_TIMESTAMP)")
+        conn.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(2)")
+        conn.execute("PRAGMA user_version=2")
 
 
 def _init_fts(conn: sqlite3.Connection) -> None:

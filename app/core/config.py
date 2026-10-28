@@ -179,8 +179,18 @@ def all_settings() -> dict:
     if _cache is None:
         merged = _deep_merge(DEFAULTS, _load_yaml())
         if _db_overlay:
-            merged = _deep_merge(merged, _expand_flat(_db_overlay()))
-        _cache = merged
+            from .settings_policy import MUTABLE
+            expanded = _expand_flat(_db_overlay())
+            overlay = {}
+            for key in MUTABLE:
+                value = expanded
+                for part in key.split("."):
+                    value = value.get(part) if isinstance(value, dict) else None
+                if value is not None:
+                    overlay[key] = value
+            merged = _deep_merge(merged, _expand_flat(overlay))
+        from .settings_policy import validate
+        _cache = validate(merged)
     return _cache
 
 
@@ -207,7 +217,10 @@ def set_db_overlay(provider: Callable[[], dict[str, Any]]) -> None:
 
 def style_dir(pack_name: str | None = None) -> Path:
     name = pack_name or get("create.style_pack", "tech-evangelist")
-    return CONFIG_DIR / "styles" / name
+    target = (CONFIG_DIR / "styles" / name).resolve()
+    if not target.is_relative_to((CONFIG_DIR / "styles").resolve()):
+        raise ValueError("风格包路径无效")
+    return target
 
 
 def data_dir() -> Path:

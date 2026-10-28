@@ -349,7 +349,7 @@ def ingest_text(content: str, title: str, scope: str, article_id: str | None = N
             d.mkdir(parents=True, exist_ok=True)
             idx = _next_idx(d, "其他")
             folder_file = d / f"{idx:03d}-其他-{_safe_name(title, '文档', 8)}.md"
-            folder_file.write_text(content, encoding="utf-8")
+            folder_file.write_text(content, encoding="utf-8", newline="")
             mid = dao.insert_material(
                 scope=scope, kind="text", path=str(folder_file.relative_to(library_root())),
                 sha256=digest, source_url=source_url, ref_type=ref_type,
@@ -362,7 +362,7 @@ def ingest_text(content: str, title: str, scope: str, article_id: str | None = N
         folder = _unique_dir(article_dir(article_id or "") / "reference",
                              _safe_name(title, digest[:8]))
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / "content.md").write_text(content, encoding="utf-8")
+    (folder / "content.md").write_text(content, encoding="utf-8", newline="")
     if meta and not (folder / "meta.json").exists():
         (folder / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2),
                                           encoding="utf-8")
@@ -395,7 +395,7 @@ def save_article_snapshot(article_id: str, html: str, markdown: str, meta: dict)
     folder = _unique_dir(base, _safe_name(meta.get("title") or "", "原文"))
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "page.html").write_text(html, encoding="utf-8")
-    (folder / "content.md").write_text(markdown, encoding="utf-8")
+    (folder / "content.md").write_text(markdown, encoding="utf-8", newline="")
     (folder / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2),
                                       encoding="utf-8")
     return folder
@@ -408,7 +408,7 @@ def save_ref_snapshot(article_id: str, material_id: str, html: str, markdown: st
     folder = _unique_dir(base, _safe_name(meta.get("title") or "", material_id))
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "page.html").write_text(html, encoding="utf-8")
-    (folder / "content.md").write_text(markdown, encoding="utf-8")
+    (folder / "content.md").write_text(markdown, encoding="utf-8", newline="")
     (folder / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2),
                                       encoding="utf-8")
     return folder
@@ -449,7 +449,7 @@ def drafts_dir(article_id: str) -> Path:
 def save_draft_files(doc, markdown: str) -> Path:
     d = drafts_dir(doc.article_id)
     d.mkdir(parents=True, exist_ok=True)
-    (d / f"v{doc.version:03d}.md").write_text(markdown, encoding="utf-8")
+    (d / f"v{doc.version:03d}.md").write_text(markdown, encoding="utf-8", newline="")
     (d / f"v{doc.version:03d}.json").write_text(doc.model_dump_json(indent=2), encoding="utf-8")
     return d
 

@@ -27,6 +27,8 @@ class EventBus:
         self._subs: list[queue.Queue] = []
         self._hooks: dict[str, list[Callable[[dict], None]]] = {}
         self._lock = threading.Lock()
+        self.sequence = 0
+        self.dropped = 0
 
     def subscribe(self) -> queue.Queue:
         q: queue.Queue = queue.Queue(maxsize=200)
@@ -40,22 +42,28 @@ class EventBus:
                 self._subs.remove(q)
 
     def on(self, event: str, fn: Callable[[dict], None]) -> None:
-        self._hooks.setdefault(event, []).append(fn)
+        with self._lock:
+            self._hooks.setdefault(event, []).append(fn)
 
     def publish(self, event: str, article_id: str | None = None, **payload: Any) -> None:
         msg = {"type": event, "article_id": article_id, "ts": time.time(), **payload}
         with self._lock:
+            self.sequence += 1
+            msg["sequence"] = self.sequence
             subs = list(self._subs)
+            hooks = list(self._hooks.get(event, []))
         for q in subs:
             try:
                 q.put_nowait(msg)
             except queue.Full:
-                pass
-        for fn in self._hooks.get(event, []):
+                with self._lock:
+                    self.dropped += 1
+        for fn in hooks:
             try:
                 fn(msg)
             except Exception:
-                pass  # hook 失败不影响主流程
+                from .. import logging_setup
+                logging_setup.log("error", "Event hook failed event=%s", event, exc_info=True)
 
 
 bus = EventBus()

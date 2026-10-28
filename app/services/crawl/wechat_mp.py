@@ -34,7 +34,7 @@ class WechatMpCrawler:
 
     def fetch(self, url: str) -> RawArticle:
         try:
-            resp = http.get(url, headers={"User-Agent": UA}, timeout=30, follow_redirects=True)
+            resp = http.get(url, untrusted=True, headers={"User-Agent": UA}, timeout=30, follow_redirects=True)
         except httpx.TimeoutException as e:
             raise CrawlError("公众号连接超时，请检查网络和系统代理；公司网络需启用 PAC 自动代理，"
                              "也可设置 WENSHU_HTTP_PROXY 后重试") from e

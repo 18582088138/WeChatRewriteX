@@ -41,7 +41,9 @@ def frozen(doc, directory: Path, expected: dict | None = None):
                 target = directory / f"{mid}{src.suffix.lower()}"
                 shutil.copy2(src, target)
                 digest = sha256_file(target)
-                if material.get("sha256") and digest != material["sha256"]:
+                # Older Windows text snapshots used CRLF on disk but hashed logical LF text.
+                canonical = hashlib.sha256(target.read_text(encoding="utf-8").encode("utf-8")).hexdigest() if material.get("kind") == "text" else digest
+                if material.get("sha256") and material["sha256"] not in (digest, canonical):
                     raise ValueError(f"素材内容与快照不符: {mid}")
                 item["path"] = str(target.relative_to(library.library_root()))
                 item["sha256"] = digest

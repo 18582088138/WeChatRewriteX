@@ -45,6 +45,12 @@ class ReviewerAgent(AgentBase):
         draft = draft or dao.latest_draft(article_id)
         if not draft:
             raise ValueError("没有可审稿的草稿")
+        from ..core.execution import operation_id
+        import json
+        key = operation_id()
+        previous = dao.latest_review(article_id)
+        if key and previous and json.loads(previous["scores_json"]).get("job_id") == key:
+            return previous["id"], [ChecklistItem.model_validate(i) for i in dao.list_review_items(previous["id"])], json.loads(previous["scores_json"])
         doc = DraftDoc.model_validate_json(draft["doc_json"])
         style = self.load_style_pack((dao.get_article(article_id) or {}).get("style_pack"))
 
@@ -78,6 +84,7 @@ class ReviewerAgent(AgentBase):
                                   f"（阻断 {sum(1 for i in items if i.severity == 'blocker')}）")
         from ..services.draft_service import content_hash
         scores["content_hash"] = content_hash(doc)
+        scores["job_id"] = key
         with db.transaction():
             review_id = dao.create_review(article_id, draft["id"], draft["version"], items, scores)
         events.bus.publish(events.REVIEW_FINISHED, article_id,

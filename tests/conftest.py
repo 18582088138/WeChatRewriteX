@@ -30,12 +30,16 @@ def _offline_stubs(_isolated_data_dir):
     from app.services.media import stock as stock_mod
     from app.services.search.registry import null_searcher
 
+    from app.services.crawl import registry as crawl_registry
+    fixture_crawler = crawl_registry.FixtureCrawler()
+    crawl_registry.register(fixture_crawler, first=True)
     orig_get, orig_paper = collector_mod.get_searcher, collector_mod.get_paper_searcher
     orig_enrich = stock_mod.enrich_media
     collector_mod.get_searcher = null_searcher
     collector_mod.get_paper_searcher = null_searcher
     stock_mod.enrich_media = lambda *a, **k: {"images": 0, "videos": 0}
     yield
+    crawl_registry._CRAWLERS.remove(fixture_crawler)
     collector_mod.get_searcher = orig_get
     collector_mod.get_paper_searcher = orig_paper
     stock_mod.enrich_media = orig_enrich

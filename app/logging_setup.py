@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 import sys
 import threading
+from collections import deque
+from .core.execution import context
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
@@ -35,13 +37,22 @@ def configure(*_args, **_kwargs) -> None:
     """挂载日期轮转文件 handler（幂等；参数忽略，兼容旧调用签名）。"""
     existing = [h for h in _logger.handlers if h.name == _HANDLER_NAME]
     if existing:
+        _logger.setLevel(_level())
+        for handler in existing:
+            handler.backupCount = int(_keep_days())
         return
     d = log_dir()
     d.mkdir(parents=True, exist_ok=True)
     h = TimedRotatingFileHandler(d / "wenshu.log", when="midnight", interval=1,
                                  backupCount=int(_keep_days()), encoding="utf-8")
     h.name = _HANDLER_NAME
-    h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
+    class ContextFilter(logging.Filter):
+        def filter(self, record):
+            values = context.get()
+            record.execution = " ".join(f"{k}={v}" for k, v in values.items() if v is not None)
+            return True
+    h.addFilter(ContextFilter())
+    h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(execution)s %(message)s"))
     _logger.addHandler(h)
     _logger.setLevel(_level())
     _logger.propagate = False
@@ -85,5 +96,5 @@ def tail(lines: int = 200) -> list[str]:
     f = log_dir() / "wenshu.log"
     if not f.exists():
         return []
-    data = f.read_text(encoding="utf-8", errors="replace").splitlines()
-    return data[-lines:]
+    with f.open(encoding="utf-8", errors="replace") as stream:
+        return [line.rstrip("\n") for line in deque(stream, maxlen=max(1, lines))]
