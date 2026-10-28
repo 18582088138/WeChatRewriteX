@@ -308,6 +308,10 @@ resource/
 - **bat 铁律（V1.6）**：cmd 的 bat 必须**纯 ASCII + CRLF 行尾**。LF 让 if/for 括号块
   解析错乱（报错形如 `'yedExpansion' 不是内部或外部命令`）；非 ASCII 按 OEM 代码页
   解析，UTF-8/GBK 互读必乱甚至 0x5C 尾字节吃换行。中文 exe 名用通配符发现。
+- **PyInstaller 两坑（V1.14 净室实证）**：① venv 从 conda 创建时，OpenSSL 运行库
+  （libssl/libcrypto）不再被自动收集，必须 spec 显式随包（sys.base_prefix 定位）；
+  ② 浏览器修订号必须与包内 playwright 库匹配——bundle_browsers 先 install 再按 mtime
+  取最新，不能拿宿主机旧缓存凑（本例 1243 vs 1248 导致 Executable doesn't exist）。
 - **PyInstaller 静态资源（V1.7）**：trafilatura 依赖 justext 的 stoplists 数据文件——
   只 collect_all(trafilatura) 不够，数据在 justext 包里；同类还有 certifi(cacert.pem)、
   curl_cffi(DLL)。冻结态跑通收集才算验证（单测测不到）。
