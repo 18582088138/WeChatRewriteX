@@ -64,11 +64,19 @@ def _run_publish(article_id: str, payload: dict) -> dict:
     art = dao.get_article(article_id)
     if art and ArticleStatus(art["status"]) == ArticleStatus.FINALIZED:
         orchestrator._set_status(article_id, ArticleStatus.PUBLISHING)
-    result = export_variants(article_id, platforms)
-    art = dao.get_article(article_id)
-    if art and ArticleStatus(art["status"]) == ArticleStatus.PUBLISHING:
-        orchestrator._set_status(article_id, ArticleStatus.DONE)
-    events.bus.publish(events.PUBLISH_FINISHED, article_id, platforms=platforms)
+    from ..core import config
+    with config.using_snapshot(payload.get("settings") or config.all_settings()):
+        result = export_variants(article_id, platforms, payload.get("snapshot_id"),
+                                 payload.get("assets"))
+    from ..storage import db
+    with db.transaction():
+        art = dao.get_article(article_id)
+        head = dao.latest_draft(article_id)
+        if art and head and art["status"] == "PUBLISHING" and head["id"] == result["snapshot_id"]:
+            # Export failure does not revoke content approval.
+            dao.set_article_status(article_id, ArticleStatus.DONE if result["ok"] else ArticleStatus.FINALIZED)
+    events.bus.publish(events.PUBLISH_FINISHED, article_id, platforms=platforms,
+                       status=result["status"], failed_platforms=result["failed_platforms"])
     return result
 
 
@@ -99,7 +107,12 @@ def _loop(lane_types: tuple[str, ...]) -> None:
             import json
             payload = json.loads(job.get("payload_json") or "{}")
             result = handler(job["article_id"], payload)
-            dao.finish_job(job["id"], result)
+            if isinstance(result, dict) and result.get("status") in ("FAILED", "PARTIAL_FAILED"):
+                from ..storage import db
+                dao.fail_job(job["id"], "导出失败平台: " + ", ".join(result["failed_platforms"]))
+                db.execute("UPDATE jobs SET result_json=? WHERE id=?", (json.dumps(result, ensure_ascii=False), job["id"]))
+            else:
+                dao.finish_job(job["id"], result)
             logging_setup.log("info", "任务完成 %s (article=%s)", job["type"], job["article_id"])
         except Exception as e:
             requeue = job["attempts"] < MAX_ATTEMPTS

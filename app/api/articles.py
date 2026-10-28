@@ -1,6 +1,8 @@
 """文章与流水线控制路由。"""
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -130,7 +132,15 @@ def reveal_export_dir(aid: str, body: RevealExport) -> dict:
     if not art:
         raise HTTPException(404, "文章不存在")
     from ..storage import library
+    if body.platform not in ("wechat_mp", "xhs", "weibo", "x"):
+        raise HTTPException(400, "未知平台")
+    import json
+    job = next((j for j in dao.list_publish_jobs(aid) if j["platform"] == body.platform), None)
     d = library.exports_dir(aid) / body.platform
+    if job and job["status"] == "done":
+        d = Path(json.loads(job["result_json"]).get("export_dir") or str(d))
+    if not d.resolve().is_relative_to(library.exports_dir(aid).resolve()):
+        raise HTTPException(400, "导出路径无效")
     if not d.is_dir():
         raise HTTPException(404, f"{body.platform} 发布包还没生成——先点「生成发布包」")
     import subprocess

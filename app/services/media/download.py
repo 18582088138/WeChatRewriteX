@@ -72,20 +72,14 @@ def fetch_images(images: list[ImageRef], scope: str, article_id: str | None,
         ok, _reason = media_filter.image_file_ok(m.get("width"), m.get("height"), len(data))
         if not ok:
             # 不入库：删行删文件，保持素材库干净
-            _db.execute("DELETE FROM materials WHERE id=?", (mid,))
-            p = library.material_abs_path(m.get("path"))
-            if p and p.exists():
-                p.unlink()
+            dao.archive_material(mid)
             return None
         # pHash 近似去重（与本项目已入库图比对）
         if m.get("phash"):
             for other in dao.list_materials(scope="article", article_id=article_id, kind="image"):
                 if other["id"] != mid and other.get("phash") and \
                         media_filter.phash_distance(m["phash"], other["phash"]) <= 6:
-                    _db.execute("DELETE FROM materials WHERE id=?", (mid,))
-                    p = library.material_abs_path(m.get("path"))
-                    if p and p.exists():
-                        p.unlink()
+                    dao.archive_material(mid)
                     return None
         wm = check_image_heuristic(mid, ref.url)
         if wm is not None:

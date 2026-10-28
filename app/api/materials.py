@@ -218,21 +218,7 @@ def copy_to_article(mid: str, body: CopyToArticle) -> dict:
         if same_src:
             return {"material_id": same_src["id"], "copied": False,
                     "reason": "本文库已存在同来源链接，已跳过"}
-    new_id = new_id_fn("material")
-    db.execute(
-        """INSERT INTO materials
-        (id,scope,article_id,kind,path,sha256,phash,source_url,source_material_id,
-         watermark,width,height,duration,ref_type,fetch_status,note,title,meta_json)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (new_id, "article", body.article_id, m["kind"], m.get("path"), m.get("sha256"),
-         m.get("phash"), m.get("source_url"), m.get("source_material_id"), m.get("watermark"),
-         m.get("width"), m.get("height"), m.get("duration"), m.get("ref_type"),
-         m.get("fetch_status"), (m.get("note") or "") + "（复制自公共库）", m.get("title"),
-         m.get("meta_json") or "{}"),
-    )
-    if m["kind"] == "text":
-        db.execute("INSERT OR REPLACE INTO material_texts(material_id,content) VALUES(?,?)",
-                   (new_id, dao.get_material_text(mid)))
+    new_id = library._clone_for_scope(m, "article", body.article_id, m.get("note") or "")
     events.bus.publish(events.MATERIAL_INGESTED, body.article_id, material_id=new_id)
     return {"material_id": new_id, "copied": True}
 
@@ -251,21 +237,7 @@ def copy_to_common(mid: str) -> dict:
         if dup:
             return {"material_id": dup["id"], "copied": False,
                     "reason": "公共库已存在同文件，已跳过"}
-    new_id = new_id_fn("material")
-    db.execute(
-        """INSERT INTO materials
-        (id,scope,article_id,kind,path,sha256,phash,source_url,source_material_id,
-         watermark,width,height,duration,ref_type,fetch_status,note,title,meta_json)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (new_id, "common", None, m["kind"], m.get("path"), m.get("sha256"),
-         m.get("phash"), m.get("source_url"), m.get("source_material_id"), m.get("watermark"),
-         m.get("width"), m.get("height"), m.get("duration"), m.get("ref_type"),
-         m.get("fetch_status"), (m.get("note") or "") + "（复制自项目素材）", m.get("title"),
-         m.get("meta_json") or "{}"),
-    )
-    if m["kind"] == "text":
-        db.execute("INSERT OR REPLACE INTO material_texts(material_id,content) VALUES(?,?)",
-                   (new_id, dao.get_material_text(mid)))
+    new_id = library._clone_for_scope(m, "common", None, m.get("note") or "")
     events.bus.publish(events.MATERIAL_INGESTED, None, material_id=new_id)
     return {"material_id": new_id, "copied": True}
 
@@ -325,13 +297,6 @@ def delete_material(mid: str) -> dict:
     m = dao.get_material(mid)
     if not m:
         raise HTTPException(404, "素材不存在")
-    p = library.material_abs_path(m.get("path"))
-    db.execute("DELETE FROM materials WHERE id=?", (mid,))
-    db.execute("DELETE FROM material_texts WHERE material_id=?", (mid,))
-    db.execute("DELETE FROM embeddings WHERE material_id=?", (mid,))
-    if p and p.exists():
-        try:
-            p.unlink()
-        except OSError:
-            pass
-    return {"ok": True}
+    dao.archive_material(mid)
+    events.bus.publish(events.MATERIAL_INGESTED, m.get("article_id"), material_id=mid)
+    return {"ok": True, "archived": True}

@@ -84,7 +84,17 @@ def publish(aid: str, body: Publish) -> dict:
     platforms = [p for p in body.platforms if p in ("wechat_mp", "xhs", "weibo", "x")]
     if not platforms:
         raise HTTPException(400, "platforms 为空或含未知平台")
-    job_id = queue.enqueue("publish", aid, {"platforms": platforms})
+    from ..storage import db
+    from ..services import assets
+    with db.transaction():
+        draft = dao.latest_draft(aid)
+        current = dao.get_article(aid)
+        if not draft or draft["status"] != "finalized" or current["status"] not in ("FINALIZED", "DONE", "PUBLISHING"):
+            raise HTTPException(409, "当前内容尚未定稿")
+        doc = DraftDoc.model_validate_json(draft["doc_json"])
+        job_id = queue.enqueue("publish", aid, {"platforms": list(dict.fromkeys(platforms)),
+                           "snapshot_id": draft["id"], "assets": assets.manifest(doc),
+                           "settings": config.all_settings()})
     return {"job_id": job_id, "platforms": platforms}
 
 
@@ -99,8 +109,18 @@ def list_exports(aid: str) -> dict:
     root = library.exports_dir(aid)
     if not root.exists():
         return {"files": [], "lib_dir": str(library.article_dir(aid))}
-    files = [str(p.relative_to(config.data_dir())) for p in sorted(root.rglob("*"))
-             if p.is_file()]
+    # Only expose the newest successful package for each platform, not failed staging.
+    selected = {}
+    for job in dao.list_publish_jobs(aid):
+        if job["platform"] not in selected:
+            selected[job["platform"]] = job
+    directories = [Path(json.loads(j["result_json"]).get("export_dir", ""))
+                   for j in selected.values() if j["status"] == "done"]
+    legacy_cards = root / "xhs_cards"
+    if legacy_cards.exists():
+        directories.append(legacy_cards)
+    files = [str(p.relative_to(config.data_dir())) for d in directories if d.is_relative_to(root)
+             for p in sorted(d.rglob("*")) if p.is_file() and not p.name.startswith("_")]
     return {"root": str(root), "files": files,
             "lib_dir": str(library.article_dir(aid))}
 

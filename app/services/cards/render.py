@@ -16,7 +16,7 @@ from ...core import blocks as bk
 from ...core import config
 from ...core.models import BlockType, DraftDoc
 from ...storage import dao, library
-from .. import brand
+from .. import brand, assets
 
 THEMES_DIR = Path(__file__).parent / "themes"
 
@@ -26,7 +26,9 @@ class CardRenderError(Exception):
 
 
 def _load_theme(name: str) -> tuple[dict, str]:
-    d = THEMES_DIR / name
+    d = (THEMES_DIR / name).resolve()
+    if not d.is_relative_to(THEMES_DIR.resolve()):
+        raise CardRenderError("卡片主题路径无效")
     if not d.exists():
         raise CardRenderError(f"卡片主题不存在: {name}")
     theme = yaml.safe_load((d / "theme.yaml").read_text(encoding="utf-8"))
@@ -77,7 +79,7 @@ def _foot_title(title: str) -> str:
 def _img_html(asset_id: str, caption: str = "") -> str:
     """正文内嵌插图（段落之间，不单独占页）。"""
     esc = html_mod.escape
-    m = dao.get_material(asset_id)
+    m = assets.get_material(asset_id)
     rel = (m or {}).get("path")
     p = library.material_abs_path(rel) if rel else None
     if not (p and p.exists()):
@@ -138,14 +140,16 @@ def _page_html(page, doc: DraftDoc, idx: int, total: int) -> str:
 
 
 def render_cards(article_id: str, theme_name: str | None = None,
-                 out_dir: Path | None = None) -> list[Path]:
-    draft = dao.latest_draft(article_id)
+                 out_dir: Path | None = None, doc: DraftDoc | None = None) -> list[Path]:
+    draft = dao.latest_draft(article_id) if doc is None else {"doc_json": doc.model_dump_json()}
     if not draft:
         raise CardRenderError("没有草稿，无法生成卡片")
     doc = DraftDoc.model_validate_json(draft["doc_json"])
     if not doc.meta.xhs_pages:
-        from ...agents.creator import CreatorAgent
-        doc.meta.xhs_pages = CreatorAgent._paginate_xhs(doc)
+        from ...core.pagination import paginate_xhs
+        doc.meta.xhs_pages = paginate_xhs(doc, int(config.get("cards.max_chars_per_page", 300)),
+                        int(config.get("cards.image_char_cost", 150)),
+                        int((config.get("variants.xhs.pages") or [3, 9])[1]))
 
     theme_name = theme_name or config.get("cards.theme", "tech-note")
     theme, template = _load_theme(theme_name)
@@ -171,6 +175,10 @@ def render_cards(article_id: str, theme_name: str | None = None,
 
     out_dir = out_dir or (library.exports_dir(article_id) / "xhs_cards")
     out_dir.mkdir(parents=True, exist_ok=True)
+    # Regeneration must not retain pages from a longer previous render.
+    for previous in out_dir.glob("page-*.png"):
+        previous.unlink()
+    (out_dir / "_overflow_warning.txt").unlink(missing_ok=True)
     html_path = out_dir / "_cards.html"
     html_path.write_text(html_text, encoding="utf-8")
 

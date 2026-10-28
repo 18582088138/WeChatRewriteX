@@ -77,17 +77,17 @@ def get_material(mid: str) -> dict | None:
 
 
 def find_material_by_sha(sha256: str) -> dict | None:
-    return db.query_one("SELECT * FROM materials WHERE sha256=?", (sha256,))
+    return db.query_one("SELECT * FROM materials WHERE sha256=? AND deleted_at IS NULL", (sha256,))
 
 
 def find_materials_by_sha(sha256: str) -> list[dict]:
     # 同 sha256 的全部记录（复制会合法产生多行）
-    return db.query("SELECT * FROM materials WHERE sha256=?", (sha256,))
+    return db.query("SELECT * FROM materials WHERE sha256=? AND deleted_at IS NULL", (sha256,))
 
 
 def list_materials(scope: str | None = None, article_id: str | None = None,
                    kind: str | None = None) -> list[dict]:
-    sql, params = "SELECT * FROM materials WHERE 1=1", []
+    sql, params = "SELECT * FROM materials WHERE deleted_at IS NULL", []
     if scope:
         sql += " AND scope=?"; params.append(scope)
     if article_id:
@@ -98,10 +98,12 @@ def list_materials(scope: str | None = None, article_id: str | None = None,
 
 
 def set_material_text(mid: str, content: str) -> None:
-    db.execute("INSERT OR REPLACE INTO material_texts(material_id,content) VALUES(?,?)", (mid, content))
-    if db.fts_available():
-        db.execute("DELETE FROM material_fts WHERE material_id=?", (mid,))
-        db.execute("INSERT INTO material_fts(material_id,content) VALUES(?,?)", (mid, content))
+    with db.transaction():
+        db.execute("INSERT OR REPLACE INTO material_texts(material_id,content) VALUES(?,?)", (mid, content))
+        if db.fts_available():
+            db.execute("DELETE FROM material_fts WHERE material_id=?", (mid,))
+            db.execute("INSERT INTO material_fts(material_id,content) VALUES(?,?)", (mid, content))
+        db.execute("DELETE FROM embeddings WHERE material_id=?", (mid,))
 
 
 def get_material_text(mid: str) -> str:
@@ -141,11 +143,11 @@ def all_material_texts(article_id: str | None = None) -> list[tuple[str, str]]:
     if article_id:
         rows = db.query(
             "SELECT t.material_id, t.content FROM material_texts t "
-            "JOIN materials m ON m.id=t.material_id WHERE m.article_id=? OR m.scope='common'",
+            "JOIN materials m ON m.id=t.material_id WHERE m.deleted_at IS NULL AND (m.article_id=? OR m.scope='common')",
             (article_id,),
         )
     else:
-        rows = db.query("SELECT material_id, content FROM material_texts")
+        rows = db.query("SELECT t.material_id, t.content FROM material_texts t JOIN materials m ON m.id=t.material_id WHERE m.deleted_at IS NULL")
     return [(r["material_id"], r["content"]) for r in rows]
 
 
@@ -469,5 +471,17 @@ def finish_publish_job(pid: str, result: dict, ok: bool = True) -> None:
 
 
 def list_publish_jobs(article_id: str) -> list[dict]:
-    return db.query("SELECT * FROM publish_jobs WHERE article_id=? ORDER BY created_at DESC",
+    return db.query("SELECT * FROM publish_jobs WHERE article_id=? ORDER BY created_at DESC, rowid DESC",
                     (article_id,))
+
+
+def archive_material(mid: str) -> None:
+    """Remove from active libraries, retaining immutable history and shared files.
+
+    Physical reclamation must be an explicit offline GC after checking draft history.
+    """
+    with db.transaction():
+        db.execute("UPDATE materials SET deleted_at=datetime('now','localtime') WHERE id=?", (mid,))
+        db.execute("DELETE FROM embeddings WHERE material_id=?", (mid,))
+        if db.fts_available():
+            db.execute("DELETE FROM material_fts WHERE material_id=?", (mid,))

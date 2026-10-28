@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 import copy
+from contextlib import contextmanager
+from contextvars import ContextVar
 import os
 import shutil
 import sys
@@ -120,6 +122,16 @@ DEFAULTS: dict[str, Any] = {
 
 _db_overlay: Callable[[], dict[str, Any]] | None = None
 _cache: dict[str, Any] | None = None
+_snapshot = ContextVar("settings_snapshot", default=None)
+
+
+@contextmanager
+def using_snapshot(settings: dict):
+    token = _snapshot.set(copy.deepcopy(settings))
+    try:
+        yield
+    finally:
+        _snapshot.reset(token)
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -162,6 +174,8 @@ def _expand_flat(d: dict) -> dict:
 
 def all_settings() -> dict:
     global _cache
+    if _snapshot.get() is not None:
+        return _snapshot.get()
     if _cache is None:
         merged = _deep_merge(DEFAULTS, _load_yaml())
         if _db_overlay:

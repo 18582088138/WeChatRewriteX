@@ -92,7 +92,10 @@ def init_db() -> None:
         # 轻量迁移：老库补 lib_dir 列 + sha256 唯一索引降级为普通索引
         for ddl in ("ALTER TABLE articles ADD COLUMN lib_dir TEXT",
                     "ALTER TABLE articles ADD COLUMN selected_json TEXT DEFAULT '[]'",
-                    "ALTER TABLE drafts ADD COLUMN note TEXT DEFAULT ''"):
+                    "ALTER TABLE drafts ADD COLUMN note TEXT DEFAULT ''",
+                    "ALTER TABLE materials ADD COLUMN deleted_at TEXT",
+                    "ALTER TABLE embeddings ADD COLUMN model_id TEXT",
+                    "ALTER TABLE embeddings ADD COLUMN content_hash TEXT"):
             try:
                 conn.execute(ddl)
             except sqlite3.OperationalError:

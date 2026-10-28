@@ -7,12 +7,17 @@ from __future__ import annotations
 
 import html
 import shutil
+import hashlib
+import json
+import uuid
 from pathlib import Path
 
 from ...core import blocks as bk
 from ...core import config
 from ...core.models import Block, BlockType, DraftDoc, Variant
 from ...storage import dao, library
+from ...core.files import sha256_file
+from .. import assets
 from .base import Capabilities, PushResult
 
 PLATFORMS = ["wechat_mp", "xhs", "weibo", "x"]
@@ -59,7 +64,7 @@ def _doc_media(doc: DraftDoc) -> list[str]:
     out = []
     for b in doc.blocks:
         if b.type in (BlockType.IMAGE, BlockType.VIDEO) and b.asset_id:
-            m = dao.get_material(b.asset_id)
+            m = assets.get_material(b.asset_id)
             if m and m.get("path"):
                 out.append(m["path"])
     return out
@@ -83,7 +88,7 @@ def _x_thread(doc: DraftDoc, max_tweets: int) -> list[str]:
     src = ""
     for b in doc.blocks:
         if b.citations:
-            m = dao.get_material(b.citations[0])
+            m = assets.get_material(b.citations[0])
             if m and m.get("source_url"):
                 src = m["source_url"]
                 break
@@ -113,7 +118,7 @@ def blocks_to_mp_html(doc: DraftDoc) -> str:
                 f'border-left:4px solid #d4d4d8;background:#fafafa;color:#52525b;'
                 f'font-size:14px;line-height:1.8;">{esc(text)}</blockquote>')
         elif b.type == BlockType.IMAGE and b.asset_id:
-            m = dao.get_material(b.asset_id)
+            m = assets.get_material(b.asset_id)
             if m and m.get("path"):
                 src = f"media/{Path(m['path']).name}"
                 cap = f'<p style="text-align:center;color:#a1a1aa;font-size:12px;margin:4px 0 20px;">{esc(b.caption or "")}</p>'
@@ -128,13 +133,20 @@ def blocks_to_mp_html(doc: DraftDoc) -> str:
 
 # ---------------- 导出 ----------------
 
-def export_variants(article_id: str, platforms: list[str]) -> dict:
-    draft = dao.latest_draft(article_id)
+def export_variants(article_id: str, platforms: list[str], snapshot_id: str | None = None,
+                    asset_manifest: dict | None = None) -> dict:
+    draft = dao.get_draft_by_id(snapshot_id) if snapshot_id else dao.latest_draft(article_id)
     if not draft:
         raise ValueError("没有草稿，先完成创作")
     doc = DraftDoc.model_validate_json(draft["doc_json"])
     # 发布包落在文章素材文件夹内：data/library/articles/<标题_短id>/exports/<平台>/
-    root = library.exports_dir(article_id)
+    if draft["article_id"] != article_id:
+        raise ValueError("快照不属于该文章")
+    if any(platform not in PLATFORMS for platform in platforms) or not platforms:
+        raise ValueError("未知或空平台列表")
+    from ..draft_service import content_hash
+    digest = content_hash(doc)
+    root = library.exports_dir(article_id) / "runs" / uuid.uuid4().hex
     root.mkdir(parents=True, exist_ok=True)
 
     results: dict[str, dict] = {}
@@ -145,7 +157,24 @@ def export_variants(article_id: str, platforms: list[str]) -> dict:
                            message=f"导出 {_PLATFORM_LABEL.get(platform, platform)} 发布包…")
         pid = dao.create_publish_job(article_id, draft["id"], platform, {})
         try:
-            res = _export_one(doc, article_id, platform, root)
+            # Build privately, then atomically install the complete platform package.
+            staging = root / (".staging-" + platform)
+            with assets.frozen(doc, staging / platform / "media", asset_manifest):
+                res = _export_one(doc, article_id, platform, staging)
+            output = staging / platform
+            snapshot_file = output / "snapshot.json"
+            snapshot_file.write_text(doc.model_dump_json(indent=2), encoding="utf-8")
+            hashes = {}
+            for file in output.rglob("*"):
+                if file.is_file():
+                    hashes[str(file.relative_to(output))] = sha256_file(file)
+            (output / "manifest.json").write_text(json.dumps({"snapshot_id": doc.id,
+                "content_hash": digest, "platform": platform, "files": hashes},
+                ensure_ascii=False, indent=2), encoding="utf-8")
+            output.rename(root / platform)
+            staging.rmdir()
+            res.export_dir = str(root / platform)
+            res.files += ["snapshot.json", "manifest.json"]
             events.bus.publish(events.STAGE_PROGRESS, article_id, stage="publish",
                                message=f"{_PLATFORM_LABEL.get(platform, platform)} 完成：{res.message[:60]}")
             dao.finish_publish_job(pid, res.__dict__, ok=res.ok)
@@ -153,7 +182,11 @@ def export_variants(article_id: str, platforms: list[str]) -> dict:
             dao.finish_publish_job(pid, {"message": str(e)}, ok=False)
             res = PushResult(ok=False, platform=platform, message=str(e))
         results[platform] = res.__dict__
-    return {"article_id": article_id, "export_root": str(root), "platforms": results}
+    failed = [p for p, result in results.items() if not result["ok"]]
+    status = "SUCCESS" if not failed else "FAILED" if len(failed) == len(results) else "PARTIAL_FAILED"
+    return {"article_id": article_id, "snapshot_id": doc.id, "content_hash": digest,
+            "export_root": str(root), "platforms": results, "ok": not failed,
+            "status": status, "failed_platforms": failed}
 
 
 def _brand_footer_html(badge) -> str:
@@ -179,7 +212,8 @@ def _export_one(doc: DraftDoc, article_id: str, platform: str, root: Path) -> Pu
     for rel in _doc_media(doc):
         src = library.material_abs_path(rel)
         if src and src.exists():
-            shutil.copy2(src, media_dir / src.name)
+            if src.resolve() != (media_dir / src.name).resolve():
+                shutil.copy2(src, media_dir / src.name)
             files.append(f"media/{src.name}")
 
     # 品牌页脚（V1.10）：各平台导出末尾统一 个人 Logo + 固定文案
@@ -202,7 +236,7 @@ def _export_one(doc: DraftDoc, article_id: str, platform: str, root: Path) -> Pu
                 "3. 摘要可填 article.md 开头的一句话总结")
     elif platform == "xhs":
         from ..cards.render import render_cards
-        cards = render_cards(article_id, out_dir=out / "cards")
+        cards = render_cards(article_id, out_dir=out / "cards", doc=doc)
         (out / "caption.txt").write_text(variant.body + "\n\n" + brand.SLOGAN, encoding="utf-8")
         files += [f"cards/{p.name}" for p in cards] + ["caption.txt"]
         note = ("1. cards/ 下 page-01.png 起即为分页卡片（首张为封面），按序上传\n"

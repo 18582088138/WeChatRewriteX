@@ -39,7 +39,7 @@ watch(() => store.workbenchTick, load)
 
 const latestByPlatform = computed(() => {
   const map: Record<string, PublishJob> = {}
-  for (const j of jobs.value) map[j.platform] = j   // 列表按时间倒序，先出现为最新
+  for (const j of jobs.value) if (!map[j.platform]) map[j.platform] = j   // 列表按时间倒序，先出现为最新
   return map
 })
 

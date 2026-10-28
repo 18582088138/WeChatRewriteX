@@ -107,3 +107,52 @@ def test_nested_transaction_does_not_publish_rolled_back_callbacks():
                 raise RuntimeError()
         assert not received
     assert received == ["outer"]
+
+
+def test_shared_assets_survive_archive_and_rename():
+    from app.storage import library
+    aid, _ = seeded()
+    other, _ = seeded()
+    mid, _ = library.ingest_bytes(b"shared bytes", "asset.bin", "article", aid)
+    copied = library._clone_for_scope(dao.get_material(mid), "article", other, "copy")
+    assert library.article_dir(aid) != library.article_dir(other)
+    library.rename_to_created_title(aid, "new title")
+    shared_path = library.material_abs_path(dao.get_material(copied)["path"])
+    assert shared_path.read_bytes() == b"shared bytes"
+    dao.archive_material(mid)
+    assert shared_path.exists()
+    assert not any(m["id"] == mid for m in dao.list_materials(article_id=aid))
+    assert dao.get_material(mid)  # retained for historical blocks/citations
+    reused, created = library.ingest_bytes(b"shared bytes", "asset.bin", "article", other)
+    assert reused == copied and not created
+
+
+def test_export_failure_aggregation_preserves_finalization(monkeypatch):
+    from app.pipeline import queue
+    from app.services.publish import exporter
+    from app.services.publish.base import PushResult
+    aid, doc = seeded()
+    approved = workflow.finalize(aid, force=True)
+    monkeypatch.setattr(exporter, "_export_one", lambda *a: (_ for _ in ()).throw(RuntimeError("disk")))
+    result = queue._run_publish(aid, {"platforms": ["weibo", "x"],
+                                    "snapshot_id": f"{aid}-v{approved['version']}"})
+    assert result["status"] == "FAILED" and not result["ok"]
+    assert dao.get_article(aid)["status"] == "FINALIZED"
+    assert all(j["status"] == "failed" for j in dao.list_publish_jobs(aid))
+
+
+def test_export_uses_approved_snapshot_after_edit():
+    from app.services.publish.exporter import export_variants
+    from pathlib import Path
+    aid, doc = seeded()
+    approved = workflow.finalize(aid, force=True)
+    old_id = f"{aid}-v{approved['version']}"
+    current, _ = draft_service.get_doc(aid)
+    current.meta.one_liner = "unapproved new text"
+    draft_service.save_new_version(current, "human")
+    result = export_variants(aid, ["weibo"], old_id)
+    output = Path(result["platforms"]["weibo"]["export_dir"])
+    assert "unapproved new text" not in (output / "weibo.txt").read_text(encoding="utf-8")
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["snapshot_id"] == old_id
+    assert manifest["files"]["weibo.txt"]
