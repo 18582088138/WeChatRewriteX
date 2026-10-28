@@ -75,8 +75,9 @@ Docker 分阶段构建前端、隔离构建上下文、按依赖 hash 安装、�
 真实浏览器覆盖输入保护、版本冲突、人工定稿及发布包下载。CI 覆盖 Windows/Linux、Python 3.10/3.12、
 Vue 类型检查、浏览器、冷安装 wheel、Docker。只有缺少 Chromium 时卡片测试可以跳过，真实渲染错误必须失败。
 
-依赖更新使用 `uv pip compile pyproject.toml --universal --generate-hashes -o requirements.lock`，
+依赖更新使用 `uv pip compile pyproject.toml --python-version 3.10 --universal --generate-hashes -o requirements.lock`，
 开发锁加 `--extra dev`；更新后须验证冷环境。源码安装按 `requirements-dev.lock` 运行测试，前端要求 Node ≥20.19。
+最低 Python 版本必须显式指定，锁文件用环境标记选择各 Python 版本兼容的 NumPy、Pillow 等依赖。
 
 进程配置与事件总线目前仍是单数据根资源，AppContext 显式持有它们。完整独立数据根、多用户、独立 worker
 或微服务属于下一阶段业务需求：需要独立租约/权限模型和实例隔离后才能取消单进程约束。
