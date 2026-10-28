@@ -28,6 +28,12 @@ Vue 严格类型检查和生产构建通过。Docker 本机未安装，镜像运
 - 数据根 `resource/`（gitignore）；日志 `log/wenshu.log`（gitignore，常驻持久化）
 - 一键打包：`python tools/pack_release.py`（默认全平台，产物进 release/）
 
+## V1.12 补充：卡片目录去重（2026-10-28）
+
+- 单独出卡片（发布页按钮）与「生成发布包」曾各写一套目录（`exports/xhs_cards/` 与
+  `exports/xhs/cards/`），造成重复卡片与预览重复。统一为 `exports/xhs/cards/`，
+  `xhs_cards/` 平行目录废弃（旧目录随重渲清理）。
+
 ## V1.12 爬虫/视频/布局修复（2026-10-28）
 
 1. **扩搜下线**：移除收集的关联搜索补参考步骤与 deepsearch 全部入口（API/队列/按钮），

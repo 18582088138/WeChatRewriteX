@@ -173,7 +173,9 @@ def render_cards(article_id: str, theme_name: str | None = None,
                  .replace("{{PAPER}}", theme.get("paper", "#FBFAF7"))
                  .replace("{{PAGES}}", "\n".join(pages_html)))
 
-    out_dir = out_dir or (library.exports_dir(article_id) / "xhs_cards")
+    # 卡片统一落在发布包目录内（V1.12+）：单独出卡片与「生成发布包」共用
+    # exports/xhs/cards/，不再另开 xhs_cards/ 平行目录（消除重复卡片与预览重复）
+    out_dir = out_dir or (library.exports_dir(article_id) / "xhs" / "cards")
     out_dir.mkdir(parents=True, exist_ok=True)
     # Regeneration must not retain pages from a longer previous render.
     for previous in out_dir.glob("page-*.png"):
