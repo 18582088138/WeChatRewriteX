@@ -95,7 +95,7 @@ def material_thumb(mid: str):
             if p and p.exists():
                 return FileResponse(p)
     from ..core import config as _config
-    thumbs = _config.data_dir() / "thumbs"
+    thumbs = _config.data_dir() / "_cache" / "thumbs"
     thumbs.mkdir(parents=True, exist_ok=True)
     out = thumbs / f"{mid}.jpg"
     if not out.exists():

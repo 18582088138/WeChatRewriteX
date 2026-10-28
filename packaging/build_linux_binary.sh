@@ -17,11 +17,11 @@ MSYS_NO_PATHCONV=1 docker run --rm -v "$SRC:/src" -w /src python:3.12 bash -c '
     set -e
     python -m pip install --require-hashes -r requirements-build.lock
     python scripts/build_assets.py
-    python -m PyInstaller packaging/wenshu.spec --distpath release/linux --workpath build/pyinstaller-linux
-    release/linux/文枢 --version
-    release/linux/文枢 --build-info
+    python -m PyInstaller packaging/wenshu.spec --distpath build/dist-linux --workpath build/pyinstaller-linux
+    build/dist-linux/文枢 --version
+    build/dist-linux/文枢 --build-info
 '
 
 echo "[2/2] 校验产物..."
-test -f release/linux/文枢 && echo "OK → release/linux/文枢" \
-    || { echo "构建失败：未见 release/linux/文枢"; exit 1; }
+test -f build/dist-linux/文枢 && echo "OK → build/dist-linux/文枢" \
+    || { echo "构建失败：未见 build/dist-linux/文枢"; exit 1; }

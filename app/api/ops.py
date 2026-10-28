@@ -163,9 +163,7 @@ def list_exports(aid: str) -> dict:
             selected[job["platform"]] = job
     directories = [Path(json.loads(j["result_json"]).get("export_dir", ""))
                    for j in selected.values() if j["status"] == "done"]
-    legacy_cards = root / "xhs_cards"
-    if legacy_cards.exists():
-        directories.append(legacy_cards)
+    # 只暴露各平台最近一次成功批次；legacy 的 xhs_cards/ 平行目录不再展示
     files = [str(p.relative_to(config.data_dir())) for d in directories if d.is_relative_to(root)
              for p in sorted(d.rglob("*")) if p.is_file() and not p.name.startswith("_")]
     return {"root": str(root), "files": files,
@@ -174,14 +172,18 @@ def list_exports(aid: str) -> dict:
 
 @router.post("/articles/{aid}/cards")
 def gen_cards(aid: str, theme: str | None = None) -> dict:
-    from ..services.cards.render import CardRenderError, render_cards
+    """单独出卡片 = 导出一次小红书包（runs/<批次>/xhs/cards/，批次隔离不覆盖）。"""
+    from ..services.publish.exporter import export_variants
     try:
-        paths = render_cards(aid, theme)
-    except CardRenderError as e:
+        result = export_variants(aid, ["xhs"])
+    except ValueError as e:
         raise HTTPException(409, str(e))
     except Exception as e:
-        raise HTTPException(502, f"卡片渲染失败（Playwright 是否已 install chromium？）: {e}")
-    return {"files": [str(p.relative_to(config.data_dir())) for p in paths]}
+        raise HTTPException(502, f"卡片渲染失败（Playwright/Chromium 缺失？）: {e}")
+    cards_dir = Path(result["export_root"]) / "xhs" / "cards"
+    files = sorted(cards_dir.glob("page-*.png"))
+    return {"files": [str(p.relative_to(config.data_dir())) for p in files],
+            "export_root": result["export_root"]}
 
 
 # ---------- 设置 ----------

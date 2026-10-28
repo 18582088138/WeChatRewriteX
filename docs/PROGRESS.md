@@ -28,6 +28,16 @@ Vue 严格类型检查和生产构建通过。Docker 本机未安装，镜像运
 - 数据根 `resource/`（gitignore）；日志 `log/wenshu.log`（gitignore，常驻持久化）
 - 一键打包：`python tools/pack_release.py`（默认全平台，产物进 release/）
 
+## V1.12 补充 2：输出目录规范化（2026-10-28）
+
+- **exports 批次化**：单独出卡片改走 export_variants 导出小红书包（注册 publish job），
+  产物落 `exports/runs/<批次>/xhs/cards/`；发布页 /exports 只展示各平台最近一次
+  成功批次（legacy xhs_cards/ 不再展示）；连续两次出卡片两个批次并存、互不覆盖。
+- **release 版本化**：产物按 `release/v<版本号>/` 归档（zip/sdist/SHA256SUMS）；
+  构建中间产物（原始 exe/二进制）挪到 `build/dist-windows|dist-linux`，不再污染发布根。
+- **缓存归一**：`resource/_cache/`（brand 徽章 / thumbs 视频首帧 / ui_shots）统一缓存目录，
+  与业务目录分离；缓存均可再生，旧目录已迁移。
+
 ## V1.12 补充：卡片目录去重（2026-10-28）
 
 - 单独出卡片（发布页按钮）与「生成发布包」曾各写一套目录（`exports/xhs_cards/` 与

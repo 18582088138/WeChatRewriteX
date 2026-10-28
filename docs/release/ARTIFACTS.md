@@ -1,15 +1,25 @@
-# 产物清单（文枢 - 自媒体 Studio 1.11.0）
+# 产物清单（文枢 - 自媒体 Studio 1.12.0）
 
 版本单一来源为 `app/__init__.py`。打包脚本更新与实际执行包生成是两个步骤，
 旧 exe 不会自动获得源码更新。升级和回退见 [架构与升级说明](../ARCHITECTURE.md)。
 
 ## 当前交付状态
 
-- `dist/wenshu-1.11.0-py3-none-any.whl`：已构建，冷安装、前端、数据库、提示词和卡片渲染验收通过。
-- `dist/wenshu-1.11.0.tar.gz`：已构建，包含源码、依赖锁、测试、前端源码及内置运行资产。
-- Windows 绿色包 `release/文枢-v1.11.0-windows-x64.zip`：打包工程已同步，独立 exe 尚未重新生成。
-- Linux 独立包 `release/文枢-v1.11.0-linux-x64.tar.gz`：打包工程已同步，尚未实际构建二进制。
-- Docker：镜像构建、非 root 运行、认证和就绪检查已在 GitHub CI 验证；尚未发布镜像到镜像仓库。
+- `dist/wenshu-1.12.0.tar.gz`：源码包（含内置运行资产），支持 pip 本地安装。
+- Windows 绿色包 `release/v1.12.0/文枢-v1.12.0-windows-x64.zip`：含独立 exe、双启动脚本、
+  自带 Chromium 与完整 docs/，已出包。
+- Linux 独立包 `release/v1.12.0/文枢-v1.12.0-linux-x64.tar.gz`：打包工程已同步，尚未实际构建二进制。
+- Docker：本版未预构建镜像；Dockerfile 在仓库内维护，需要时 `docker build -t wenshu-studio .`。
+
+## 输出目录约定（V1.12 规范化）
+
+- **发布根 `release/v<版本号>/`**：zip / sdist / SHA256SUMS 按版本分目录归档，避免互相覆盖。
+- **构建中间产物在 `build/`**：`build/dist-windows/`（原始 exe）、`build/dist-linux/`、
+  `build/pyinstaller*/` 均为中间态，不入发布根、不入 git。
+- **文章导出批次 `exports/runs/<批次>/`**：每次「生成发布包」或「重新生成卡片」产生一个
+  新批次目录，平台包在批次内（`xhs/cards/` 等），批次之间永不覆盖；发布页展示各平台
+  最近一次成功批次，资源管理器可查看全部历史批次。
+- **缓存 `resource/_cache/`**：Logo 徽章、视频首帧、UI 截图统一缓存位置，与业务目录分离。
 
 ## 构建步骤
 

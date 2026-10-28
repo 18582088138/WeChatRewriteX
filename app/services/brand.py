@@ -30,7 +30,7 @@ def badge_path() -> Path | None:
     src = logo_source()
     if not src:
         return None
-    out = config.data_dir() / "brand" / "logo-badge.png"
+    out = config.data_dir() / "_cache" / "brand" / "logo-badge.png"
     if out.exists() and out.stat().st_mtime >= src.stat().st_mtime:
         return out
     out.parent.mkdir(parents=True, exist_ok=True)

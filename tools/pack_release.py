@@ -115,7 +115,9 @@ def main() -> None:
     args = ap.parse_args()
 
     ver = APP_VERSION
-    RELEASE.mkdir(exist_ok=True)
+    # 产物按版本分目录（release/v<ver>/），构建中间产物放 build/，不污染发布根
+    ver_dir = RELEASE / f"v{ver}"
+    ver_dir.mkdir(parents=True, exist_ok=True)
     artifacts: list[Path] = []
 
     # 0. 测试门槛
@@ -136,16 +138,16 @@ def main() -> None:
         run([PY, "-m", "build", "--sdist", "--no-isolation"])
         sdist = ROOT / "dist" / f"wenshu-{ver}.tar.gz"
         if sdist.exists():
-            shutil.copy(sdist, RELEASE / sdist.name)
-            artifacts.append(RELEASE / sdist.name)
+            shutil.copy(sdist, ver_dir / sdist.name)
+            artifacts.append(ver_dir / sdist.name)
 
     # 3. Windows 绿色执行包
     if not args.skip_windows:
-        exe = RELEASE / "windows" / "文枢.exe"
+        exe = ROOT / "build" / "dist-windows" / "文枢.exe"
         if not (args.reuse_exe and exe.exists()):
             print("[3] Windows exe（PyInstaller，约 3~5 分钟）")
             run([PY, "-m", "PyInstaller", "packaging/wenshu.spec",
-                 "--distpath", str(RELEASE / "windows"),
+                 "--distpath", str(ROOT / "build" / "dist-windows"),
                  "--workpath", str(ROOT / "build" / "pyinstaller")])
         else:
             current = json.loads((ROOT / "app" / "_assets" / "build_manifest.json").read_text(encoding="utf-8"))
@@ -157,7 +159,7 @@ def main() -> None:
             if built.get("version") != ver or built.get("source_hash") != current.get("source_hash"):
                 raise SystemExit("exe 与当前版本/源码不匹配，请重新构建")
             print("[3] 复用已核验的 文枢.exe")
-        win_dir = RELEASE / f"文枢-v{ver}-windows-x64"
+        win_dir = ver_dir / f"文枢-v{ver}-windows-x64"
         if win_dir.exists():
             shutil.rmtree(win_dir)
         win_dir.mkdir()
@@ -166,7 +168,7 @@ def main() -> None:
         shutil.copy(ROOT / "scripts" / "start_windows.ps1", win_dir / "启动文枢.ps1")
         copy_docs(win_dir)
         bundle_browsers(win_dir)
-        zip_path = RELEASE / f"文枢-v{ver}-windows-x64.zip"
+        zip_path = ver_dir / f"文枢-v{ver}-windows-x64.zip"
         zip_dir(win_dir, zip_path)
         artifacts.append(zip_path)
 
@@ -179,8 +181,8 @@ def main() -> None:
             print("  [跳过] Docker 不可用——Linux 包未出。需要时启动 Docker 后重跑本脚本。")
         else:
             run(["bash", "packaging/build_linux_binary.sh"])
-            linux_bin = RELEASE / "linux" / "文枢"
-            linux_dir = RELEASE / f"文枢-v{ver}-linux-x64"
+            linux_bin = ROOT / "build" / "dist-linux" / "文枢"
+            linux_dir = ver_dir / f"文枢-v{ver}-linux-x64"
             if linux_dir.exists():
                 shutil.rmtree(linux_dir)
             linux_dir.mkdir()
@@ -189,17 +191,17 @@ def main() -> None:
             shutil.copy(ROOT / "scripts" / "start_linux.sh", linux_dir / "start_linux.sh")
             (linux_dir / "start_linux.sh").chmod(0o755)
             copy_docs(linux_dir)
-            tgz = RELEASE / f"文枢-v{ver}-linux-x64.tar.gz"
+            tgz = ver_dir / f"文枢-v{ver}-linux-x64.tar.gz"
             targz_dir(linux_dir, tgz)
             artifacts.append(tgz)
 
-    # 5. 校验和
+    # 5. 校验和（写在该版本目录内）
     if artifacts:
-        sums = RELEASE / "SHA256SUMS.txt"
+        sums = ver_dir / "SHA256SUMS.txt"
         sums.write_text("".join(f"{sha256(p)}  {p.name}\n" for p in artifacts),
                         encoding="utf-8")
         print("[5] SHA256SUMS.txt 已更新")
-    print("\n== 完成。release/ 产物：")
+    print("\n== 完成。release/v" + ver + "/ 产物：")
     for p in artifacts:
         print("  -", p.name)
 
