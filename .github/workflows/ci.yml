@@ -1,0 +1,67 @@
+name: Architecture contracts
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  backend:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.10', '3.12']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements-dev.lock
+      - run: python -m pip install --require-hashes -r requirements-dev.lock
+      - run: python -m playwright install --with-deps chromium
+      - run: python -m pytest -q
+  browser-and-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: python -m pip install --require-hashes -r requirements-dev.lock
+      - run: python -m playwright install --with-deps chromium
+      - run: npm ci && npm run build && npx playwright install --with-deps chromium && npm run test:e2e
+        working-directory: web
+      - run: python scripts/build_assets.py
+      - run: python -m build --no-isolation
+      - name: Cold wheel install and smoke
+        shell: bash
+        run: |
+          python -m venv --system-site-packages build/smoke-env
+          build/smoke-env/bin/python -m pip install --no-deps dist/*.whl
+          mkdir -p build/smoke-cwd
+          cd build/smoke-cwd
+          ../smoke-env/bin/python ../../scripts/package_smoke.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distribution
+          path: dist/*
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t wenshu:ci .
+      - name: Run as unprivileged user with token
+        run: |
+          docker run -d --name wenshu-ci -e APP_ACCESS_TOKEN=ci-test-token -p 8012:8000 wenshu:ci
+          for n in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8012/api/health && break || sleep 2
+          done
+          curl -fsS -H 'Authorization: Bearer ci-test-token' http://127.0.0.1:8012/api/ready
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer ci-test-token' http://127.0.0.1:8012/files/app.db)" = 404
+          test "$(docker exec wenshu-ci id -u)" = 10001

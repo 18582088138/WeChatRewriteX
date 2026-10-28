@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -37,8 +38,9 @@ def _web_dist_fresh() -> bool:
     dist = ROOT / "web" / "dist" / "index.html"
     if not dist.exists():
         return False
-    newest_src = max((f.stat().st_mtime for f in (ROOT / "web" / "src").rglob("*")
-                      if f.is_file()), default=0)
+    inputs = [f for f in (ROOT / "web" / "src").rglob("*") if f.is_file()]
+    inputs += [ROOT / "web" / name for name in ("package.json", "package-lock.json", "vite.config.ts", "tsconfig.json")]
+    newest_src = max((f.stat().st_mtime for f in inputs if f.exists()), default=0)
     return dist.stat().st_mtime >= newest_src
 
 
@@ -141,7 +143,15 @@ def main() -> None:
                  "--distpath", str(RELEASE / "windows"),
                  "--workpath", str(ROOT / "build" / "pyinstaller")])
         else:
-            print("[3] 复用已有 文枢.exe")
+            current = json.loads((ROOT / "app" / "_assets" / "build_manifest.json").read_text(encoding="utf-8"))
+            try:
+                built = json.loads(subprocess.check_output([str(exe), "--build-info"], text=True,
+                                                           encoding="utf-8", timeout=15))
+            except (OSError, subprocess.SubprocessError, ValueError):
+                raise SystemExit("旧 exe 缺少可验证构建信息，请去掉 --reuse-exe 重新构建")
+            if built.get("version") != ver or built.get("source_hash") != current.get("source_hash"):
+                raise SystemExit("exe 与当前版本/源码不匹配，请重新构建")
+            print("[3] 复用已核验的 文枢.exe")
         win_dir = RELEASE / f"文枢-v{ver}-windows-x64"
         if win_dir.exists():
             shutil.rmtree(win_dir)

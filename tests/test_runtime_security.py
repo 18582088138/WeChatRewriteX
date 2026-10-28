@@ -31,6 +31,49 @@ def test_process_data_root_is_pinned_after_initialization(monkeypatch, tmp_path)
         config.bind_data_dir(tmp_path)
 
 
+def test_legacy_upgrade_and_offline_backup_restore(tmp_path):
+    import hashlib
+    import os
+    import sqlite3
+    import subprocess
+    import sys
+    from app.pipeline.runtime_lock import RuntimeLock
+    root = tmp_path / "legacy"
+    root.mkdir()
+    with sqlite3.connect(root / "app.db") as conn:
+        conn.executescript(db._SCHEMA)  # Pre-migration schema, user_version=0.
+        conn.execute("INSERT INTO articles(id,url,title) VALUES('old','local://old','preserved')")
+    (root / "evidence.txt").write_text("retained source", encoding="utf-8")
+    env = {**os.environ, "WENSHU_DATA_DIR": str(root)}
+    workspace = Path(__file__).resolve().parents[1]
+    upgrade = [sys.executable, "-X", "utf8", "-c", "from app.storage import db; db.init_db()"]
+    subprocess.run(upgrade, cwd=workspace, env=env, check=True, capture_output=True)
+    before = root / "backups" / "before-schema-v2.sqlite3"
+    checksum = hashlib.sha256(before.read_bytes()).hexdigest()
+    with sqlite3.connect(before) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 0
+        assert conn.execute("SELECT title FROM articles WHERE id='old'").fetchone()[0] == "preserved"
+    with sqlite3.connect(root / "app.db") as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert conn.execute("SELECT version FROM schema_migrations").fetchone()[0] == 2
+    subprocess.run(upgrade, cwd=workspace, env=env, check=True, capture_output=True)
+    assert hashlib.sha256(before.read_bytes()).hexdigest() == checksum
+    destination = tmp_path / "backup"
+    command = [sys.executable, "-X", "utf8", "scripts/backup_data.py", str(destination)]
+    guard = RuntimeLock(root).acquire()
+    try:
+        refused = subprocess.run(command, cwd=workspace, env=env, capture_output=True, text=True)
+        assert refused.returncode != 0 and "已有运行实例" in refused.stderr
+        assert not destination.exists()
+    finally:
+        guard.close()
+    subprocess.run(command, cwd=workspace, env=env, check=True, capture_output=True)
+    assert (destination / "evidence.txt").read_text(encoding="utf-8") == "retained source"
+    with sqlite3.connect(destination / "app.db") as conn:
+        assert conn.execute("SELECT title FROM articles WHERE id='old'").fetchone()[0] == "preserved"
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+
 def test_runtime_lock_excludes_second_owner(tmp_path):
     from app.pipeline.runtime_lock import RuntimeLock
     first = RuntimeLock(tmp_path).acquire()

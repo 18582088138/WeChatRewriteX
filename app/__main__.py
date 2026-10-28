@@ -9,6 +9,8 @@ from . import APP_FULL_NAME, APP_ID, APP_VERSION
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog=APP_ID, description=APP_FULL_NAME)
+    parser.add_argument("--version", action="version", version=f"{APP_FULL_NAME} {APP_VERSION}")
+    parser.add_argument("--build-info", action="store_true", help="显示内嵌构建溯源信息后退出")
     parser.add_argument("--host", default="127.0.0.1",
                         help="0.0.0.0 允许局域网/手机访问（建议同时配置 APP_ACCESS_TOKEN）")
     parser.add_argument("--port", type=int, default=8000)
@@ -17,6 +19,14 @@ def main() -> None:
     parser.add_argument("--install-browser", action="store_true",
                         help="安装小红书卡片渲染所需的 Chromium（首次使用卡片功能前执行一次）")
     args = parser.parse_args()
+
+    if args.build_info:
+        import json
+        from pathlib import Path
+        assets = Path(getattr(sys, "_MEIPASS")) / "wenshu_assets" if hasattr(sys, "_MEIPASS") else Path(__file__).parent / "_assets"
+        manifest = assets / "build_manifest.json"
+        print(manifest.read_text(encoding="utf-8") if manifest.exists() else json.dumps({"version": APP_VERSION}))
+        return
 
     if args.install_browser:
         _install_browser()

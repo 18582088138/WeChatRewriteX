@@ -26,3 +26,7 @@ app/_assets/
 /build/
 /dist/
 /release/
+
+# browser test artifacts
+web/test-results/
+web/playwright-report/
