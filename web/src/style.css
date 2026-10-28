@@ -83,6 +83,9 @@ body {
 ::-webkit-scrollbar-thumb { background: #D4D4D8; border-radius: 999px; }
 ::-webkit-scrollbar-track { background: transparent; }
 
+/* V1.12：NaiveUI tab 包裹层的 overflow:hidden 会折断侧栏 sticky 跟随滚动 */
+.n-tabs-pane-wrapper { overflow: visible !important; }
+
 /* —— Naive UI 细节归位 —— */
 .n-tabs .n-tabs-nav { border-bottom: 1px solid var(--border); }
 .n-config-provider { height: 100%; }

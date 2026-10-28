@@ -41,8 +41,9 @@ class WorkerRuntime:
 MAX_ATTEMPTS = 2
 
 # 双泳道（反馈 2：抓取与创作并行互不阻塞）：
-# lane A = 抓取类（collect/ingest/deepsearch），lane B = 创作类（create/review/publish）
-LANE_A = ("collect", "ingest", "deepsearch")
+# lane A = 抓取类（collect/ingest），lane B = 创作类（create/review/publish）
+# V1.12：deepsearch（扩搜/深度搜索）已下线
+LANE_A = ("collect", "ingest")
 LANE_B = ("create", "review", "publish")
 
 
@@ -53,14 +54,7 @@ def register_defaults(llm=None) -> None:
         "review": lambda aid, payload: orchestrator.run_stage("review", aid, llm, payload),
         "publish": _run_publish,
         "ingest": _run_ingest,
-        "deepsearch": _run_deepsearch,
     })
-
-
-def _run_deepsearch(article_id: str, payload: dict) -> dict:
-    """深度搜索：基于已提取主题的新一轮检索，仅增量补充 reference（不改状态）。"""
-    from ..agents.collector import CollectorAgent
-    return CollectorAgent().deep_search(article_id)
 
 
 def _run_ingest(article_id: str | None, payload: dict) -> dict:

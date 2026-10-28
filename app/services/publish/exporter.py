@@ -126,6 +126,16 @@ def blocks_to_mp_html(doc: DraftDoc) -> str:
                 parts.append(
                     f'<p style="text-align:center;margin:20px 0 0;">'
                     f'<img src="{src}" style="max-width:100%;border-radius:8px;"></p>{cap}{src_note}')
+        elif b.type == BlockType.VIDEO and b.asset_id:
+            # 视频块（V1.12）：公众号 HTML 内嵌 <video>，随包 media/ 携带实体文件
+            m = assets.get_material(b.asset_id)
+            if m and m.get("path"):
+                src = f"media/{Path(m['path']).name}"
+                cap = f'<p style="text-align:center;color:#a1a1aa;font-size:12px;margin:4px 0 20px;">{esc(b.caption or "")}</p>'
+                parts.append(
+                    f'<p style="text-align:center;margin:20px 0 0;">'
+                    f'<video src="{src}" controls preload="metadata" '
+                    f'style="max-width:100%;border-radius:8px;background:#000;"></video></p>{cap}')
         elif b.type == BlockType.DIVIDER:
             parts.append('<hr style="border:none;border-top:1px solid #e4e4e7;margin:28px 0;">')
     return ("\n".join(parts))

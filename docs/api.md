@@ -31,7 +31,6 @@ Base URL: `http://127.0.0.1:8000`，所有接口前缀 `/api`。运行时可访�
 | POST | `/api/articles/{aid}/advance` | 推进阶段 `{stage: collect\|create\|review, selected_material_ids?}`；当前状态不允许 → 409。`selected_material_ids` 为 create 阶段的「勾选参与创作素材集」（素材库「导入 & 创作」按钮）；收集 → 后续阶段需手动或 `pipeline.auto` 连跑 |
 | POST | `/api/articles/{aid}/finalize` | `{force=false, expected_version?}` 生成正式 checkpoint。审稿必须匹配当前内容；缺失、过期、AI 失败或未处理 blocker 返回 409，force=true 跳过审稿限制并记录原因，仍不能跳过版本冲突。规则降级审稿允许人工定稿。已定稿幂等，之后实际编辑或回滚转回 EDITING |
 | POST | `/api/articles/{aid}/reopen` | 定稿/完成后回炉编辑（FINALIZED/DONE → EDITING） |
-| POST | `/api/articles/{aid}/deepsearch` | 深度搜索：基于已提取主题的新一轮检索，仅增量补充 reference（须先完成收集；入队 `deepsearch` 任务） |
 | GET | `/api/jobs?article_id=&limit=` | 任务队列状态（type/status/attempts/error/结果） |
 
 ## 素材 Materials
@@ -52,6 +51,7 @@ Base URL: `http://127.0.0.1:8000`，所有接口前缀 `/api`。运行时可访�
 | POST | `/api/materials/{mid}/reveal` | 在系统文件管理器中打开素材所在文件夹 |
 | POST | `/api/articles/{aid}/materials/scan-inbox` · `/api/materials/scan-inbox` | 摄取对应 inbox/ 里手动拷入的文件 |
 | GET | `/api/materials/{mid}/file` | 直接返回素材文件内容（图片/视频预览） |
+| GET | `/api/materials/{mid}/thumb` | 缩略图：图片返回自身；视频海报子图优先，否则 ffmpeg 抽首帧并缓存（data/thumbs/） |
 | GET | `/api/materials/{mid}/text` | 取文本素材正文 |
 | DELETE | `/api/materials/{mid}` | 归档素材并移出活动列表/FTS/向量检索，保留行、文件和历史引用 |
 

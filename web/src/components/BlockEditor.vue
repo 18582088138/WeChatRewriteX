@@ -75,6 +75,7 @@ const aiBusy = ref(false)
 const aiTargets = ref<string[]>([])
 const wholeArticle = ref(false)
 const lightboxUrl = ref('')
+const playUrl = ref('')
 const imgModal = ref(false)
 const imgBlockId = ref('')
 const insertModal = ref(false)
@@ -253,6 +254,7 @@ async function onBlockDrop(e: DragEvent, b: Block) {
   if (!mid || !draftId.value) return
   const m = sessionMaterials.value.find(x => x.id === mid)
   if (!m) return
+  if (alreadyInDoc(m)) { message.info('该素材已在正文中，不重复插入'); return }
   const op = m.kind === 'text'
     ? { op: 'insert_after', block_id: b.id, block_type: 'quote', text: m.title }
     : { op: 'insert_after', block_id: b.id,
@@ -264,8 +266,17 @@ async function onBlockDrop(e: DragEvent, b: Block) {
   } catch (err: any) { message.error(err.message) }
 }
 
+function alreadyInDoc(m: Material): boolean {
+  // 创作素材去重（V1.12）：媒体按 asset_id，文本引用按标题，不重复插入
+  const blocks = doc.value?.blocks || []
+  return m.kind === 'text'
+    ? blocks.some(b => b.type === 'quote' && b.text === m.title)
+    : blocks.some(b => b.asset_id === m.id)
+}
+
 async function insertToDoc(m: Material) {
   if (!doc.value || !draftId.value) return
+  if (alreadyInDoc(m)) { message.info('该素材已在正文中，不重复插入'); return }
   const anchor = selectedId.value || (doc.value.blocks.slice(-1)[0]?.id ?? null)
   const op = m.kind === 'text'
     ? { op: 'insert_after', block_id: anchor, block_type: 'quote', text: m.title }
@@ -516,10 +527,12 @@ async function runInsert() {
           <img v-if="m.kind === 'image' && m.url" :src="api.absUrl(m.url)"
                class="w-full aspect-video object-cover rounded-t-md cursor-zoom-in"
                @click.stop="lightboxUrl = api.absUrl(m.url)" />
-          <div v-else-if="m.kind === 'video' && coverOf[m.id]" class="relative">
-            <img :src="coverOf[m.id]" class="w-full aspect-video object-cover rounded-t-md" />
+          <div v-else-if="m.kind === 'video'" class="relative cursor-pointer"
+               @click.stop="playUrl = api.absUrl(`/api/materials/${m.id}/file`)">
+            <img :src="api.absUrl(`/api/materials/${m.id}/thumb`)"
+                 class="w-full aspect-video object-cover rounded-t-md" />
             <span class="absolute inset-0 grid place-items-center text-white text-xs"
-                  style="background: rgba(0,0,0,.35);">▶ 视频</span>
+                  style="background: rgba(0,0,0,.35);">▶ 点击播放</span>
           </div>
           <div v-else class="px-2 py-3 text-xs" style="color: var(--muted);">
             {{ ({ text: '文章', image: '图片', video: '视频', audio: '音频', doc: '文档', link: '链接' } as Record<string, string>)[m.kind] || m.kind }} ·
@@ -595,8 +608,11 @@ async function runInsert() {
                        @click.stop @keyup.enter="saveCaption(b)" @keyup.esc="editingCaptionId = null"
                        @blur="saveCaption(b)" />
               </div>
-              <div v-else-if="b.type === 'video'" class="my-3 rounded-md h-40 grid place-items-center text-sm"
-                   style="background: var(--raised); color: var(--muted);">视频素材（发布包获取）</div>
+              <div v-else-if="b.type === 'video'" class="my-3">
+                <video v-if="b.asset_id" :src="assetUrl(b.asset_id)" controls preload="metadata"
+                       class="rounded-md max-w-full" style="max-height: 420px; background: #000;"></video>
+                <div v-if="b.caption" class="caption">{{ b.caption }}</div>
+              </div>
               <hr v-else-if="b.type === 'divider'" />
             </template>
             <textarea v-else v-model="editText" @blur="saveEdit" @keyup.esc="editingId = null"
@@ -733,6 +749,13 @@ async function runInsert() {
     <NModal :show="!!lightboxUrl" preset="card" class="!max-w-4xl"
             @update:show="(v: boolean) => { if (!v) lightboxUrl = '' }">
       <img :src="lightboxUrl" class="max-w-full max-h-[78vh] mx-auto rounded-md" />
+    </NModal>
+
+    <!-- 视频播放弹窗（点击外部关闭） -->
+    <NModal :show="!!playUrl" preset="card" class="!max-w-3xl"
+            @update:show="(v: boolean) => { if (!v) playUrl = '' }">
+      <video v-if="playUrl" :src="playUrl" controls autoplay
+             class="w-full max-h-[70vh] rounded-md" style="background:#000;"></video>
     </NModal>
 
     <!-- 融合插入弹窗 -->

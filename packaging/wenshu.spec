@@ -20,7 +20,7 @@ binaries = []
 # curl_cffi（yt-dlp 网络层的原生 DLL）漏收会在冻结态运行时炸：
 # justext 缺 stoplists → WinError 3 找不到 _MEIxxx/justext/stoplists。
 for pkg in ("uvicorn", "playwright", "trafilatura", "yt_dlp",
-            "justext", "certifi", "curl_cffi"):
+            "justext", "certifi", "curl_cffi", "imageio_ffmpeg"):
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b

@@ -28,6 +28,23 @@ Vue 严格类型检查和生产构建通过。Docker 本机未安装，镜像运
 - 数据根 `resource/`（gitignore）；日志 `log/wenshu.log`（gitignore，常驻持久化）
 - 一键打包：`python tools/pack_release.py`（默认全平台，产物进 release/）
 
+## V1.12 爬虫/视频/布局修复（2026-10-28）
+
+1. **扩搜下线**：移除收集的关联搜索补参考步骤与 deepsearch 全部入口（API/队列/按钮），
+   耗时长且结果与主题无关；收集保留 原文+媒体+图库补充，refs 恒空、scarce 恒 False。
+2. **日志栏**：固定置底（position:fixed，修素材分页日志跑中部的 sticky 边界问题）；
+   默认收起、点击展开（不再随运行自动弹开）；主内容底部留白 64px 防遮挡。
+3. **视频首帧缩略图**：新增 `GET /api/materials/{mid}/thumb`（海报子图优先，否则
+   ffmpeg 抽首帧缓存到 data/thumbs/）；素材库视频卡、创作素材列表统一首帧；
+   创作列表点击唤起 <video> 弹窗播放、点外关闭。imageio_ffmpeg 已入 spec 随包。
+4. **创作素材修复**：① 插入去重（媒体按 asset_id、文本引用按标题，重复插入只提示）；
+   ② 视频块：创作/审稿页文档内 <video controls> 可播放，公众号 HTML 导出内嵌
+   <video> 且 media/ 带实体文件（此前 blocks_to_mp_html 无 VIDEO 分支被丢弃）。
+5. **侧栏 sticky 失效实修**：NaiveUI `.n-tabs-pane-wrapper` 的 overflow:hidden 折断
+   sticky——全局覆盖为 visible，创作/审稿侧栏均跟随滚动（已实测 top 恒 96）。
+6. **卡片插图遗留裁切**：内嵌 figure 的 `object-fit:cover + max-height` 会把图裁坏，
+   改 `contain`（完整显示不裁切），A社奇点 page-3/5/7 已重渲目检通过。
+
 ## V1.10 微调与品牌标识（2026-10-28）
 
 ### 网络修复补充（2026-10-28）

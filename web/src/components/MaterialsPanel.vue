@@ -410,7 +410,7 @@ async function currentSelection(): Promise<string[]> {
             <template v-else>
               <div class="aspect-video rounded-md overflow-hidden panel relative cursor-pointer group/v"
                    style="background: #1D1F20;" @click="onVideoClick(m)">
-                <img v-if="coverOf[m.id]" :src="coverOf[m.id]"
+                <img :src="api.absUrl(`/api/materials/${m.id}/thumb`)"
                      class="w-full h-full object-cover opacity-90" loading="lazy" />
                 <div class="absolute inset-0 grid place-items-center">
                   <span class="px-3 py-1.5 rounded-full text-xs font-medium text-white

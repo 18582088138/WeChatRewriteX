@@ -52,8 +52,8 @@ class CollectorAgent(AgentBase):
         extract = self._extract_topic(raw)
         self._progress(article_id, "抓取原文图片 / 视频 / 音频…")
         self._collect_images(raw, article_id, primary_mid)
-        self._progress(article_id, "扩搜检索相关文章…")
-        refs = self._search_and_fetch_refs(article_id, raw, extract)
+        # V1.12：扩搜（关联搜索补参考）已下线——耗时长且返回与主题无关，待更好替代方案
+        refs: list[tuple[str, str, str]] = []
         self._progress(article_id, "补充可商用配图/视频素材…")
         media_stats = self._enrich_media(article_id, extract)
 
@@ -61,11 +61,9 @@ class CollectorAgent(AgentBase):
             topic=extract.topic, keywords=extract.keywords,
             core_points=extract.core_points, entities=extract.entities,
             published_at=raw.published_at,
-            refs=[{"material_id": m, "ref_type": rt, "url": u} for m, rt, u in refs],
-            scarce=len(refs) < int(config.get("collect.ref_count.min", 3)),
+            refs=[],
+            scarce=False,
         )
-        if len(refs) < int(config.get("collect.ref_count.scarce_min", 1)):
-            report.scarce = True
 
         self._progress(article_id, "素材入库与索引…")
         notes = self._render_notes(article, raw, extract, refs, media_stats)
@@ -76,37 +74,8 @@ class CollectorAgent(AgentBase):
         library.save_agent_run(article_id, "collect",
                                report.model_dump() | {"keywords": extract.keywords})
         events.bus.publish(events.COLLECT_FINISHED, article_id,
-                           refs=len(refs), scarce=report.scarce)
+                           refs=0, scarce=report.scarce)
         return report
-
-    def deep_search(self, article_id: str) -> dict:
-        """深度搜索（反馈 3.3）：基于已提取主题再跑一轮检索，仅增量补充 reference。"""
-        article = dao.get_article(article_id)
-        if not article:
-            raise ValueError(f"文章不存在: {article_id}")
-        primary = next((m for m in dao.list_materials(article_id=article_id, kind="text")
-                        if m.get("ref_type") == "primary"), None)
-        if not primary:
-            raise ValueError("缺少原文素材，先完成收集")
-        self._progress(article_id, "深度搜索：重新提取主题…")
-        from ..services.textmine import extract_topic_rules
-        content = dao.get_material_text(primary["id"])
-        g = extract_topic_rules(primary.get("title") or article.get("title") or "",
-                                content[:12000])
-        raw = RawArticle(url=article["url"], title=article.get("title") or "",
-                         markdown=content)
-        extract = TopicExtract(topic=g.topic, keywords=g.keywords,
-                               core_points=g.core_points, entities=g.entities,
-                               foundational_queries=g.foundational_queries)
-        before = len(dao.list_materials(article_id=article_id, kind="text"))
-        self._progress(article_id, "深度搜索：新一轮检索与爬取…")
-        refs = self._search_and_fetch_refs(article_id, raw, extract)
-        after = len(dao.list_materials(article_id=article_id, kind="text"))
-        self._progress(article_id, f"深度搜索完成：新增参考 {len(refs)} 篇")
-        rag_index.index_materials(article_id=article_id)
-        events.bus.publish(events.COLLECT_FINISHED, article_id,
-                           refs=len(refs), deep_search=True)
-        return {"new_refs": len(refs), "text_materials": after - before, "keywords": g.keywords}
 
     # ---- 步骤 ----
 

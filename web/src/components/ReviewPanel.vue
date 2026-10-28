@@ -240,6 +240,13 @@ async function finalize(force = false) {
               <img v-if="b.asset_id" :src="api.absUrl(`/api/materials/${b.asset_id}/file`)"
                    class="rounded-md max-w-full" />
             </div>
+            <div v-else-if="b.type === 'video'" class="my-3">
+              <video v-if="b.asset_id" :src="api.absUrl(`/api/materials/${b.asset_id}/file`)"
+                     controls preload="metadata" class="rounded-md max-w-full"
+                     style="max-height: 420px; background: #000;"></video>
+              <div v-if="b.caption" class="text-xs text-center mt-1"
+                   style="color: var(--faint);">{{ b.caption }}</div>
+            </div>
           </template>
         </div>
         <div class="text-center text-xs mt-6" style="color: var(--faint);">

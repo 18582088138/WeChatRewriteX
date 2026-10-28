@@ -66,7 +66,6 @@ const actions = computed(() => {
   if (s === 'COLLECTED') {
     list.push({ key: 'create', label: '开始创作', stage: 'create', primary: true })
     list.push({ key: 'recollect', label: '补充收集', stage: 'collect' })
-    list.push({ key: 'deepsearch', label: '深度搜索', deep: true })
   }
   if (s === 'DRAFTED') list.push({ key: 'review', label: '开始审稿', stage: 'review', primary: true })
   // 再次创作：已有草稿后重跑创作（读取当前勾选素材集合）
@@ -101,19 +100,6 @@ async function runRecreate() {
   } catch (e: any) { message.error(e.message) } finally { busy.value = false }
 }
 
-async function runDeepSearch() {
-  busy.value = true
-  try {
-    await api.post(`/api/articles/${aid}/deepsearch`)
-    message.success('深度搜索已启动（增量补充参考，不覆盖原素材）')
-    setTimeout(load, 800)
-  } catch (e: any) {
-    message.error(e.message)
-  } finally {
-    busy.value = false
-  }
-}
-
 // 阶段指示：当前步用 accent，其余中性（taste: 色彩只给数据与当前态）
 const STAGES = ['收集资料', '创作与审稿', '定稿发布']
 const stageIndex = computed(() => {
@@ -146,8 +132,7 @@ const lastDoneAt = computed(() => {
   const last = store.progressLog.filter(m => m.article_id === aid).slice(-1)[0]
   return last ? last.message : ''
 })
-const logExpanded = ref(false)
-watch(hasRunning, (v) => { if (v) logExpanded.value = true })
+const logExpanded = ref(false)   // 默认收起；点击才展开（不再随运行自动弹开）
 </script>
 
 <template>
@@ -164,7 +149,7 @@ watch(hasRunning, (v) => { if (v) logExpanded.value = true })
       </div>
     </header>
 
-    <main class="max-w-[1200px] mx-auto px-6 py-5">
+    <main class="max-w-[1200px] mx-auto px-6 py-5" style="padding-bottom: 64px;">
       <!-- 阶段与动作 -->
       <div class="flex items-center gap-5 mb-5 flex-wrap">
         <div class="flex items-center gap-2 text-sm">
@@ -178,7 +163,7 @@ watch(hasRunning, (v) => { if (v) logExpanded.value = true })
         <div class="flex-1"></div>
         <NButton v-for="act in actions" :key="act.key" size="small"
                  :type="act.primary ? 'primary' : 'default'" :loading="busy"
-                 @click="act.deep ? (act.key === 'recreate' ? runRecreate() : runDeepSearch()) : runStage(act.stage!)">{{ act.label }}</NButton>
+                 @click="act.deep ? runRecreate() : runStage(act.stage!)">{{ act.label }}</NButton>
       </div>
 
       <!-- 分阶段进度：等待动画 + 文字日志（反馈 3.4） —— 由底部状态栏承载，此处不再重复 -->
@@ -240,7 +225,7 @@ watch(hasRunning, (v) => { if (v) logExpanded.value = true })
 
 <style scoped>
 .status-bar {
-  position: sticky; bottom: 0; z-index: 20;
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 30;
   background: var(--surface); border-top: 1px solid var(--border);
 }
 </style>
