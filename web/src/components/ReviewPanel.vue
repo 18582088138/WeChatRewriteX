@@ -1,15 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { NButton, NEmpty, useDialog, useMessage } from 'naive-ui'
 import { api } from '../api'
-import { useAppStore } from '../stores/app'
 import type { DraftDoc, ReviewItem } from '../types'
 
 const props = defineProps<{ articleId: string }>()
 const emit = defineEmits<{ (e: 'goto-publish'): void }>()
 const message = useMessage()
 const dialog = useDialog()
-const store = useAppStore()
 
 const review = ref<any>(null)
 const items = ref<ReviewItem[]>([])
@@ -21,6 +19,45 @@ const busyId = ref('')
 const finalizing = ref(false)
 const loading = ref(true)
 const panelOpen = ref(true)
+
+/* 并排布局 + 拖拽停靠（V1.10）：默认右侧并排；按住面板头部拖出为悬浮，
+   松手时贴近左右边缘则吸附停靠到对应侧。 */
+type Dock = 'left' | 'right' | 'float'
+const dock = ref<Dock>('right')
+const floatPos = ref({ x: 120, y: 118 })
+const dragging = ref(false)
+let dragOffset = { x: 0, y: 0 }
+const panelRef = ref<HTMLElement | null>(null)
+
+function onHeaderDown(e: MouseEvent) {
+  if ((e.target as HTMLElement).closest('button')) return   // 按钮不触发拖拽
+  dragging.value = true
+  const rect = panelRef.value?.getBoundingClientRect()
+  if (rect) dragOffset = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+  if (dock.value !== 'float' && rect) {
+    floatPos.value = { x: rect.left, y: rect.top }
+    dock.value = 'float'
+  }
+  e.preventDefault()
+}
+function onMove(e: MouseEvent) {
+  if (!dragging.value) return
+  floatPos.value = {
+    x: Math.min(Math.max(e.clientX - dragOffset.x, 0), window.innerWidth - 120),
+    y: Math.min(Math.max(e.clientY - dragOffset.y, 56), window.innerHeight - 120),
+  }
+}
+function onUp(e: MouseEvent) {
+  if (!dragging.value) return
+  dragging.value = false
+  // 边缘吸附：松手点距左/右边缘 90px 内则停靠
+  if (e.clientX < 90) dock.value = 'left'
+  else if (e.clientX > window.innerWidth - 90) dock.value = 'right'
+}
+onUnmounted(() => {
+  window.removeEventListener('mousemove', onMove)
+  window.removeEventListener('mouseup', onUp)
+})
 
 /* 双击编辑（对齐创作分页交互） */
 const editingId = ref<string | null>(null)
@@ -54,7 +91,11 @@ async function load() {
   } catch { doc.value = null }
   loading.value = false
 }
-onMounted(load)
+onMounted(() => {
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
+  load()
+})
 
 const pendingBlockers = computed(
   () => items.value.filter(i => i.severity === 'blocker' && ['pending', 'accepted'].includes(i.status)))
@@ -117,7 +158,6 @@ async function resolve(item: ReviewItem, action: 'accept' | 'dismiss' | 'fix') {
   try {
     const r = await api.post(`/api/review-items/${item.id}/resolve`, { action })
     if (action === 'fix') {
-      // 采纳即生效：刷新文案并在对应块上高亮闪示（反馈 #6）
       await load()
       flashId.value = item.block_id || null
       if (item.block_id) {
@@ -130,7 +170,7 @@ async function resolve(item: ReviewItem, action: 'accept' | 'dismiss' | 'fix') {
       message.success(`已采纳并修复，生效于 v${r.new_version}`)
     } else {
       await load()
-      if (action === 'accept') locate(item)   // 无法自动修复：定位到对应段落便于手动修改
+      if (action === 'accept') locate(item)
     }
   } catch (e: any) { message.error(e.message) } finally { busyId.value = '' }
 }
@@ -163,7 +203,7 @@ async function finalize(force = false) {
 </script>
 
 <template>
-  <div class="review-root">
+  <div class="review-root" :class="{ 'is-float': dock === 'float' }">
     <!-- 中央阅读区：双击文本块编辑（对齐创作分页） -->
     <main class="reader panel p-7">
       <NEmpty v-if="!doc && !loading" description="暂无文案" class="py-16" />
@@ -188,22 +228,26 @@ async function finalize(force = false) {
           </template>
         </div>
         <div class="text-center text-xs mt-6" style="color: var(--faint);">
-          双击文本块即可编辑 · 点击右侧意见条目定位对应段落
+          双击文本块即可编辑 · 点击意见条目定位对应段落 · 按住意见面板头部可拖动（贴边吸附停靠）
         </div>
       </template>
     </main>
 
-    <!-- 审稿意见：悬浮窗（可收起为角标） -->
+    <!-- 审稿意见面板：并排（左右停靠）或悬浮拖动 -->
     <button v-if="!panelOpen" class="review-fab" @click="panelOpen = true">
       审稿意见 · {{ pendingCount }}<span v-if="pendingBlockers.length" style="color: var(--pill-neg-ink);">
         ⬤ {{ pendingBlockers.length }}</span>
     </button>
 
-    <aside v-else class="review-float panel">
-      <div class="flex items-center justify-between px-3 py-2 shrink-0"
-           style="border-bottom: 1px solid var(--rule);">
+    <aside v-else ref="panelRef" class="review-panel panel" :class="'dock-' + dock"
+           :style="dock === 'float' ? { left: floatPos.x + 'px', top: floatPos.y + 'px' } : {}">
+      <div class="flex items-center justify-between px-3 py-2 shrink-0 panel-head"
+           :class="{ 'cursor-grab': true, 'cursor-grabbing': dragging }"
+           style="border-bottom: 1px solid var(--rule);"
+           title="按住拖动，贴近左右边缘停靠"
+           @mousedown="onHeaderDown">
         <span class="text-xs font-semibold" style="color: var(--muted);">
-          审稿意见 · 待处理 {{ pendingCount }}</span>
+          ⠿ 审稿意见 · 待处理 {{ pendingCount }}</span>
         <div class="flex items-center gap-1">
           <NButton size="tiny" @click="reReview">重新审稿</NButton>
           <button class="text-xs px-1 hover:underline" style="color: var(--faint);"
@@ -276,24 +320,31 @@ export default {
 </script>
 
 <style scoped>
-.review-root { position: relative; }
-.reader {
-  max-width: 760px; margin: 0 auto; min-height: 62vh;
-}
+.review-root { display: flex; gap: 20px; align-items: flex-start; }
+.reader { flex: 1; min-width: 0; min-height: 62vh; }
+.review-root.is-float .reader { max-width: 860px; margin: 0 auto; }
+.review-root.is-float { display: block; }
+
 .reader-block h1 { font-size: 22px; font-weight: 700; margin: 0 0 20px; line-height: 1.35; }
 .reader-block h2 { font-size: 17px; font-weight: 700; margin: 26px 0 10px; }
 .reader-block p { line-height: 1.9; font-size: 15px; color: #2A2926; margin-bottom: 1em; text-align: justify; }
 .reader-block blockquote { border-left: 3px solid var(--accent); background: var(--raised);
   padding: 10px 16px; margin: 0 0 16px; color: #4A463D; font-size: 14px; line-height: 1.8; }
 
-/* 审稿意见悬浮窗：右侧固定悬浮，收起后为角标 */
-.review-float {
-  position: fixed; right: 20px; top: 118px; z-index: 30;
-  width: min(430px, 92vw); max-height: calc(100vh - 150px);
+/* 审稿意见面板：并排停靠（默认右侧，可停左侧）；拖出为悬浮 */
+.review-panel {
+  width: min(430px, 40vw); max-height: calc(100vh - 150px);
   display: flex; flex-direction: column;
-  background: var(--surface);
-  box-shadow: 0 8px 30px rgba(20,20,20,.14);
+  background: var(--surface); flex-shrink: 0;
+  position: sticky; top: 96px;
 }
+.dock-left { order: -1; }
+.review-panel.dock-float {
+  position: fixed; top: 118px; z-index: 30;
+  box-shadow: 0 8px 30px rgba(20,20,20,.14);
+  max-height: calc(100vh - 140px);
+}
+.panel-head { user-select: none; }
 .review-items { overflow-y: auto; flex: 1; }
 .review-item + .review-item { border-top: 1px solid var(--rule); }
 .review-fab {
@@ -303,9 +354,4 @@ export default {
   color: var(--muted); box-shadow: 0 4px 16px rgba(20,20,20,.12); cursor: pointer;
 }
 .review-fab:hover { border-color: var(--accent); color: var(--text); }
-
-/* 宽屏时给悬浮窗让位，避免遮住正文右缘 */
-@media (min-width: 1500px) {
-  .reader { margin-right: max(calc(50% - 380px), 450px); margin-left: auto; }
-}
 </style>

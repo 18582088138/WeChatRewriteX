@@ -271,16 +271,22 @@ class CreatorAgent(AgentBase):
         """规则式分页：按字数贪心打包（≤max_chars/页），视觉分页由 cards 服务最终保证。"""
         from ..core.models import XhsPage
         max_chars = int(config.get("cards.max_chars_per_page", 300))
+        # 插图在卡片上的占位等价字数（46vh 高的图 ≈ 6~7 行正文）
+        img_cost = int(config.get("cards.image_char_cost", 150))
         max_pages = int((config.get("variants.xhs.pages") or [3, 9])[1])
         pages: list[XhsPage] = []
         cur = XhsPage()
         cur_len = 0
         for b in doc.blocks:
             if b.type in (BlockType.IMAGE, BlockType.VIDEO):
-                if cur.block_ids or cur.title:
+                # 插图内嵌正文页（V1.10）：图片按等价字数计入当前页容量，
+                # 嵌在首个段落之后展示；仅当当前页已有插图或容量不足时才开新页
+                cost = img_cost
+                if cur.asset_id is not None or                         (cur_len + cost > max_chars and (cur.block_ids or cur.title)):
                     pages.append(cur)
-                pages.append(XhsPage(title="", block_ids=[], asset_id=b.asset_id))
-                cur, cur_len = XhsPage(), 0
+                    cur, cur_len = XhsPage(), 0
+                cur.asset_id = b.asset_id
+                cur_len += cost
                 continue
             tlen = bk.word_count(b.text or "")
             if cur_len + tlen > max_chars and cur.block_ids:

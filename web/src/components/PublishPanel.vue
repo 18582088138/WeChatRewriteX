@@ -23,6 +23,7 @@ const cardFiles = ref<string[]>([])
 const docMeta = ref<any>(null)
 const busy = ref(false)
 const cardsBusy = ref(false)
+const cardZoom = ref('')          // 卡片大图弹窗（点击外部关闭）
 
 async function load() {
   jobs.value = (await api.get(`/api/articles/${props.articleId}/publish-jobs`)).jobs
@@ -86,8 +87,9 @@ function jobMessage(j: PublishJob): string {
 </script>
 
 <template>
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
-    <div class="space-y-4">
+  <div class="space-y-5">
+    <!-- 行 1：平台选择 + 文案信息（与创作分页同源） -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
       <div class="panel p-5">
         <div class="font-semibold mb-1">选择平台，生成发布包</div>
         <div class="text-xs mb-4" style="color: var(--faint);">
@@ -124,7 +126,7 @@ function jobMessage(j: PublishJob): string {
         </NButton>
       </div>
 
-      <!-- 创作信息同步（与创作分页底部信息窗同源） -->
+      <!-- 文案信息（与创作分页底部信息窗同源） -->
       <div class="panel p-5">
         <div class="font-semibold mb-3">文案信息</div>
         <div class="space-y-3 text-sm">
@@ -151,16 +153,39 @@ function jobMessage(j: PublishJob): string {
           </div>
         </div>
       </div>
+    </div>
 
-      <div class="panel p-5">
-        <div class="flex items-center mb-3">
+    <!-- 行 2：导出文件（左，滚动） | 小红书卡片预览（右，优先展示）—— 同高、底部对齐 -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 pub-row2">
+      <div class="panel p-5 flex flex-col pub-box">
+        <div class="font-semibold mb-3 shrink-0">导出文件（点击查看 / 下载）</div>
+        <div v-if="!exportFiles.length" class="py-12 text-center text-sm"
+             style="color: var(--faint);">还没有导出内容</div>
+        <div v-else class="divide-y overflow-y-auto flex-1 min-h-0" style="--tw-divide-opacity: 1;">
+          <a v-for="f in exportFiles" :key="f" :href="api.fileUrl(f)" target="_blank"
+             class="flex items-center gap-3 py-2 text-sm hover:bg-[var(--raised)] px-2 rounded"
+             style="border-color: var(--rule);">
+            <span class="text-xs px-1.5 py-0.5 rounded shrink-0"
+                  style="background: var(--pill-info-bg); color: var(--pill-info-ink);">{{
+                  f.endsWith('.png') ? '图片' :
+                  f.endsWith('.txt') || f.endsWith('.md') ? '文本' :
+                  f.endsWith('.html') ? '网页' : '文件' }}</span>
+            <span class="truncate" style="color: var(--ink-700);">{{ f.split(/[\\/]/).slice(-2).join('/') }}</span>
+          </a>
+        </div>
+      </div>
+
+      <!-- 小红书卡片预览（点击看大图） -->
+      <div class="panel p-5 flex flex-col pub-box">
+        <div class="flex items-center mb-3 shrink-0">
           <div class="font-semibold">小红书卡片预览</div>
           <div class="flex-1"></div>
           <NButton size="small" :loading="cardsBusy" @click="genCards">重新生成卡片</NButton>
         </div>
-        <div v-if="cardFiles.length" class="grid grid-cols-3 gap-2">
+        <div v-if="cardFiles.length" class="grid grid-cols-3 gap-2 overflow-y-auto flex-1 min-h-0">
           <img v-for="f in cardFiles" :key="f" :src="api.fileUrl(f)"
-               class="rounded-md w-full panel" loading="lazy" />
+               class="rounded-md w-full panel cursor-zoom-in" loading="lazy"
+               @click="cardZoom = api.fileUrl(f)" />
         </div>
         <div v-else class="text-xs" style="color: var(--faint);">
           尚未生成卡片（生成发布包时会自动生成，也可手动生成）。
@@ -168,23 +193,21 @@ function jobMessage(j: PublishJob): string {
       </div>
     </div>
 
-    <!-- 导出文件列表 -->
-    <div class="panel p-5">
-      <div class="font-semibold mb-3">导出文件（点击查看 / 下载）</div>
-      <div v-if="!exportFiles.length" class="py-12 text-center text-sm"
-           style="color: var(--faint);">还没有导出内容</div>
-      <div v-else class="divide-y" style="--tw-divide-opacity: 1;">
-        <a v-for="f in exportFiles" :key="f" :href="api.fileUrl(f)" target="_blank"
-           class="flex items-center gap-3 py-2 text-sm hover:bg-[var(--raised)] px-2 rounded"
-           style="border-color: var(--rule);">
-          <span class="text-xs px-1.5 py-0.5 rounded shrink-0"
-                style="background: var(--pill-info-bg); color: var(--pill-info-ink);">{{
-                  f.endsWith('.png') ? '图片' :
-                  f.endsWith('.txt') || f.endsWith('.md') ? '文本' :
-                  f.endsWith('.html') ? '网页' : '文件' }}</span>
-          <span class="truncate" style="color: var(--ink-700);">{{ f.split(/[\\/]/).slice(-2).join('/') }}</span>
-        </a>
-      </div>
+    <!-- 卡片大图弹窗：点击外部关闭 -->
+    <div v-if="cardZoom" class="zoom-mask" @click="cardZoom = ''">
+      <img :src="cardZoom" class="zoom-img" @click.stop />
     </div>
   </div>
 </template>
+
+<style scoped>
+.pub-row2 { align-items: stretch; }
+.pub-box { height: 560px; }
+.zoom-mask {
+  position: fixed; inset: 0; z-index: 60; background: rgba(20, 20, 20, .62);
+  display: flex; align-items: center; justify-content: center; cursor: zoom-out;
+}
+.zoom-img { max-width: min(92vw, 720px); max-height: 92vh; border-radius: 10px;
+  cursor: default; box-shadow: 0 18px 60px rgba(0,0,0,.35); }
+</style>
+

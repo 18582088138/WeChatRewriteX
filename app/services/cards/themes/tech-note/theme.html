@@ -18,7 +18,7 @@
   .brand { display: flex; align-items: center; gap: 16px; font-size: 28px;
            letter-spacing: 2px; color: #B9B4A9; }
   .brand-mark { width: 22px; height: 22px; background: {{ACCENT}}; }
-  .cover-date { font-size: 26px; color: #8A8577; }
+  .cover-logo { width: 132px; height: 132px; border-radius: 50%; }
   .cover-mid { margin: 60px 0; }
   .cover-kicker { display: inline-block; background: {{ACCENT}}; color: #fff;
                   font-size: 26px; letter-spacing: 4px; padding: 10px 22px;
@@ -50,6 +50,20 @@
           border-top: 1px solid #E5E1D8; padding-top: 24px; margin-top: 24px; }
   .foot .logo { font-size: 24px; color: #8A8577; letter-spacing: 1px; }
   .pageno { font-size: 24px; color: #8A8577; font-variant-numeric: tabular-nums; }
+
+  /* —— 尾页：品牌收口 —— */
+  .closing { background: {{INK}}; color: #F5F2EA; justify-content: center;
+             align-items: center; position: relative; }
+  .closing-slogan { display: flex; align-items: center; gap: 22px;
+                    font-size: 54px; font-weight: 700; letter-spacing: 6px; }
+  .closing-slogan .brand-mark { width: 30px; height: 30px; }
+  .closing-logo { position: absolute; right: {{PAD}}px; bottom: {{PAD}}px;
+                  width: 120px; height: 120px; border-radius: 50%; }
+
+  /* —— 正文内嵌插图（段落之间，不单独占页） —— */
+  .fig { margin: 0.4em 0 1.15em; }
+  .fig img { width: 100%; max-height: 46vh; object-fit: cover; display: block; }
+  .fig-cap { font-size: 24px; color: #8A8577; text-align: center; margin-top: 12px; }
 
   /* —— 图片页 —— */
   .imgpage { padding: 0; }

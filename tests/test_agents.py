@@ -170,3 +170,17 @@ def test_review_grounding_downgrades_hallucinated_quotes():
     assert "已自动降级" in items[1].message
     assert items[2].severity == "warn"                       # 证据引文真实 → 不动
     assert items[3].severity == "warn"                       # markdown 强调符归一化后命中 → 不动
+
+
+def test_pagination_embeds_images():
+    """V1.10：插图按等价字数并入正文页（asset_id + block_ids 同页），不独占整页。"""
+    from app.core.models import DraftMeta
+    doc = DraftDoc(id="", article_id="a", version=1, blocks=[], meta=DraftMeta())
+    doc.blocks.append(Block(id="t1", type=BlockType.PARAGRAPH, text="字" * 120))
+    doc.blocks.append(Block(id="i1", type=BlockType.IMAGE, asset_id="mat_img1"))
+    doc.blocks.append(Block(id="t2", type=BlockType.PARAGRAPH, text="字" * 120))
+    doc.blocks.append(Block(id="i2", type=BlockType.IMAGE, asset_id="mat_img2"))
+    pages = CreatorAgent._paginate_xhs(doc)
+    # 第一页：t1 + i1（120+150=270 ≤380 容量），t2 270+120=390 超出 → 第二页 t2+i2
+    assert not any(p.asset_id and not p.block_ids for p in pages)   # 无纯图页
+    assert pages[0].asset_id == "mat_img1" and "t1" in pages[0].block_ids

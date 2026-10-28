@@ -16,6 +16,7 @@ from ...core import blocks as bk
 from ...core import config
 from ...core.models import BlockType, DraftDoc
 from ...storage import dao, library
+from .. import brand
 
 THEMES_DIR = Path(__file__).parent / "themes"
 
@@ -36,13 +37,14 @@ def _load_theme(name: str) -> tuple[dict, str]:
 def _cover_html(doc: DraftDoc, total: int) -> str:
     esc = html_mod.escape
     title = (doc.meta.title_candidates or ["未命名"])[0]
-    today = datetime.date.today().strftime("%Y-%m-%d")
     chips = "".join(f'<span class="chip">{esc(k)}</span>' for k in doc.meta.keywords[:4])
+    logo = brand.badge_data_uri()
+    logo_html = f'<img class="cover-logo" src="{logo}" alt="logo">' if logo else ""
     return (
         '<div class="page cover">'
         '<div class="cover-top">'
-        '<div class="brand"><span class="brand-mark"></span>技术传火人</div>'
-        f'<div class="cover-date">{today}</div>'
+        f'<div class="brand"><span class="brand-mark"></span>{esc(brand.SLOGAN)}</div>'
+        f"{logo_html}"
         "</div>"
         '<div class="cover-mid">'
         '<div class="cover-kicker">AI 要闻解读</div>'
@@ -55,19 +57,54 @@ def _cover_html(doc: DraftDoc, total: int) -> str:
         "</div></div>")
 
 
+def _closing_html(total: int) -> str:
+    """尾页：墨色域 + 居中口号 + 右下角 Logo。"""
+    logo = brand.badge_data_uri()
+    logo_html = f'<img class="closing-logo" src="{logo}" alt="logo">' if logo else ""
+    return ('<div class="page closing">'
+            f'<div class="closing-slogan"><span class="brand-mark"></span>'
+            f'{brand.SLOGAN}</div>'
+            f"{logo_html}</div>")
+
+
+def _foot_title(title: str) -> str:
+    """页脚标题前缀：按标题长度自适应截取前 5~8 字。"""
+    t = (title or "").strip()
+    n = 8 if len(t) > 12 else (6 if len(t) > 8 else len(t))
+    return t[:n]
+
+
+def _img_html(asset_id: str, caption: str = "") -> str:
+    """正文内嵌插图（段落之间，不单独占页）。"""
+    esc = html_mod.escape
+    m = dao.get_material(asset_id)
+    rel = (m or {}).get("path")
+    p = library.material_abs_path(rel) if rel else None
+    if not (p and p.exists()):
+        return ""
+    uri = "file:///" + str(p).replace("\\", "/")
+    cap = esc(caption or (m or {}).get("title") or "")
+    cap_html = f'<div class="fig-cap">{cap}</div>' if cap else ""
+    return f'<figure class="fig"><img src="{uri}">{cap_html}</figure>'
+
+
 def _page_html(page, doc: DraftDoc, idx: int, total: int) -> str:
     esc = html_mod.escape
     no = f"{idx + 1:02d}"
-    pageno = f'<div class="foot"><span class="logo">技术传火人 · AI 要闻解读</span>' \
-             f'<span class="pageno">{no} / {total:02d}</span></div>'
+    title0 = (doc.meta.title_candidates or [""])[0]
+    pageno = (f'<div class="foot"><span class="logo">{esc(brand.BRAND)} · AI 要闻解读'
+              f' · {esc(_foot_title(title0))}</span>'
+              f'<span class="pageno">{no} / {total:02d}</span></div>')
 
-    if page.asset_id:
+    # 插图独占页（仅当该页没有任何文字块时兜底保留整页排版）
+    if page.asset_id and not page.block_ids:
         m = dao.get_material(page.asset_id)
         rel = (m or {}).get("path")
         p = library.material_abs_path(rel) if rel else None
         if p and p.exists():
             uri = "file:///" + str(p).replace("\\", "/")
-            credit = f'图源：{esc(m.get("note") or m.get("source_url") or "素材库")}'
+            credit_src = (m.get("note") or m.get("source_url") or "素材库")
+            credit = f'图源：{esc(credit_src[:60])}'
             cap = esc(page.title) if page.title else ""
             return (f'<div class="page imgpage"><img src="{uri}">'
                     f'<div class="capband">{cap}<div class="credit">{credit}</div>'
@@ -79,12 +116,22 @@ def _page_html(page, doc: DraftDoc, idx: int, total: int) -> str:
             f'<div class="sec-head"><span class="sec-no">{no}</span>'
             f'<div class="sec-title">{esc(page.title)}</div></div>')
     body = []
-    for bid in page.block_ids:
+    for i, bid in enumerate(page.block_ids):
         b = bk.get_block(doc, bid)
         if not b or not b.text:
             continue
         cls = ' class="quote"' if b.type == BlockType.QUOTE else ""
         body.append(f"<p{cls}>{esc(bk.sanitize_block_text(b.text))}</p>")
+        # 插图内嵌：紧跟首个段落之后（多段页面视觉上居于正文中间）
+        if i == 0 and page.asset_id:
+            img = _img_html(page.asset_id)
+            if img:
+                body.append(img)
+    # 页面无文字块但有插图（理论上分页器不会产生，兜底）
+    if not body and page.asset_id:
+        img = _img_html(page.asset_id)
+        if img:
+            body.append(img)
     parts.append('<div class="body">' + "".join(body) + "</div>")
     parts.append(pageno)
     return '<div class="page content">' + "".join(parts) + "</div>"
@@ -105,10 +152,11 @@ def render_cards(article_id: str, theme_name: str | None = None,
     size = theme["size"]
 
     pages = doc.meta.xhs_pages
-    total = len(pages) + 1  # +封面
+    total = len(pages) + 2  # +封面 +尾页（品牌收口）
     pages_html = [_cover_html(doc, total)]
     for i, pg in enumerate(pages):
         pages_html.append(_page_html(pg, doc, i + 1, total))
+    pages_html.append(_closing_html(total))
 
     html_text = (template
                  .replace("{{WIDTH}}", str(size["width"]))

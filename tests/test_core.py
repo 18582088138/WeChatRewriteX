@@ -161,3 +161,24 @@ def test_dedupe_ref_links():
     assert len(out) == 3
     assert out[0]["title"] == "甲文" and out[1]["url"] == "https://b.com/y"
     assert out[2]["title"] == "只有标题"
+
+
+def test_brand_badge_circle(tmp_path, monkeypatch):
+    """品牌 Logo 圆形透明徽章化：四角透明、中心不透明、缓存复用。"""
+    import io
+    from PIL import Image
+    from app.services import brand
+    from app.core import config
+
+    d = tmp_path / "brand"
+    d.mkdir()
+    src = d / "logo.png"
+    Image.new("RGB", (300, 300), (240, 240, 240)).save(src)
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config, "data_dir", lambda: tmp_path / "data")
+    out = brand.badge_path()
+    assert out and out.exists()
+    im = Image.open(out)
+    assert im.mode == "RGBA"
+    assert im.getpixel((2, 2))[3] == 0                      # 四角透明
+    assert im.getpixel((im.width // 2, im.height // 2))[3] == 255   # 中心不透明

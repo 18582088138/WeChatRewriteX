@@ -84,6 +84,10 @@ def save_named_version(article_id: str, note: str = "") -> DraftDoc:
 def save_new_version(doc: DraftDoc, origin: str, checkpoint: bool = False,
                      note: str = "") -> DraftDoc:
     """保存：默认只记块级变更；checkpoint=True 时写稀疏全量快照（创建/定稿/回滚）。"""
+    # 内容变更后小红书分页必须重算（V1.10：分页缓存随内容保鲜，
+    # 审稿字数检查与卡片渲染读同一份）
+    from ..agents.creator import CreatorAgent
+    doc.meta.xhs_pages = CreatorAgent._paginate_xhs(doc)
     seq = dao.next_version(doc.article_id)
     head = dao.latest_draft(doc.article_id)
     if head and not checkpoint:

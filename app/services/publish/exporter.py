@@ -156,6 +156,18 @@ def export_variants(article_id: str, platforms: list[str]) -> dict:
     return {"article_id": article_id, "export_root": str(root), "platforms": results}
 
 
+def _brand_footer_html(badge) -> str:
+    """公众号 HTML 末尾的品牌页脚（Logo + 固定文案）。"""
+    if not badge:
+        return ""
+    from .. import brand
+    return ("<div style='margin-top:48px;text-align:center;border-top:1px solid #E5E1D8;"
+            "padding-top:28px;'><img src='media/logo-badge.png' alt='logo' "
+            "style='width:88px;height:88px;border-radius:50%;'>"
+            "<p style='color:#8A8577;font-size:14px;letter-spacing:3px;margin-top:12px;'>"
+            + brand.SLOGAN + "</p></div>")
+
+
 def _export_one(doc: DraftDoc, article_id: str, platform: str, root: Path) -> PushResult:
     out = root / platform
     media_dir = out / "media"
@@ -170,12 +182,19 @@ def _export_one(doc: DraftDoc, article_id: str, platform: str, root: Path) -> Pu
             shutil.copy2(src, media_dir / src.name)
             files.append(f"media/{src.name}")
 
+    # 品牌页脚（V1.10）：各平台导出末尾统一 个人 Logo + 固定文案
+    from .. import brand
+    badge = brand.badge_path()
+    if badge:
+        shutil.copy2(badge, media_dir / "logo-badge.png")
+        files.append("media/logo-badge.png")
+
     label = _PLATFORM_LABEL.get(platform, platform)
     if platform == "wechat_mp":
         (out / "article.html").write_text(
             f"<html><head><meta charset='utf-8'><title>{html.escape(variant.title)}</title>"
             "</head><body style='max-width:677px;margin:0 auto;padding:24px;'>"
-            f"{variant.body}</body></html>", encoding="utf-8")
+            f"{variant.body}{_brand_footer_html(badge)}</body></html>", encoding="utf-8")
         (out / "article.md").write_text(bk.to_markdown(doc), encoding="utf-8")
         files += ["article.html", "article.md"]
         note = ("1. 浏览器打开 article.html，全选复制 → 粘贴进公众号编辑器（样式随行）\n"
@@ -184,16 +203,16 @@ def _export_one(doc: DraftDoc, article_id: str, platform: str, root: Path) -> Pu
     elif platform == "xhs":
         from ..cards.render import render_cards
         cards = render_cards(article_id, out_dir=out / "cards")
-        (out / "caption.txt").write_text(variant.body, encoding="utf-8")
+        (out / "caption.txt").write_text(variant.body + "\n\n" + brand.SLOGAN, encoding="utf-8")
         files += [f"cards/{p.name}" for p in cards] + ["caption.txt"]
         note = ("1. cards/ 下 page-01.png 起即为分页卡片（首张为封面），按序上传\n"
                 "2. caption.txt 为标题+正文+话题标签，直接复制")
     elif platform == "weibo":
-        (out / "weibo.txt").write_text(variant.body, encoding="utf-8")
+        (out / "weibo.txt").write_text(variant.body + "\n\n" + brand.SLOGAN, encoding="utf-8")
         files += ["weibo.txt"]
         note = "复制 weibo.txt 文本 + 选择 media/ 图片（≤9 张）发布"
     else:  # x
-        (out / "thread.txt").write_text(variant.body, encoding="utf-8")
+        (out / "thread.txt").write_text(variant.body + "\n\n---\n\n" + brand.SLOGAN, encoding="utf-8")
         files += ["thread.txt"]
         note = "thread.txt 为推文串（--- 分隔逐条），按序发布；配图取 media/（≤4 张/条）"
 
