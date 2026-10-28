@@ -64,7 +64,7 @@ class AgentBase:
                         max_tokens=max_tokens)
 
     def llm_available(self) -> bool:
-        return self._llm_injected or router.available()
+        return self._llm_injected or router.available({"creator": "create", "reviewer": "review", "collector": "summarize"}.get(self.name))
 
     # ---- 进度事件（对齐收集 Agent：前端等待动画 + 文字日志 + 文件日志） ----
 

@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 import copy
+from contextlib import contextmanager
+from contextvars import ContextVar
 import os
 import shutil
 import sys
@@ -120,6 +122,17 @@ DEFAULTS: dict[str, Any] = {
 
 _db_overlay: Callable[[], dict[str, Any]] | None = None
 _cache: dict[str, Any] | None = None
+_snapshot = ContextVar("settings_snapshot", default=None)
+_bound_data_root: Path | None = None
+
+
+@contextmanager
+def using_snapshot(settings: dict):
+    token = _snapshot.set(copy.deepcopy(settings))
+    try:
+        yield
+    finally:
+        _snapshot.reset(token)
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -162,11 +175,23 @@ def _expand_flat(d: dict) -> dict:
 
 def all_settings() -> dict:
     global _cache
+    if _snapshot.get() is not None:
+        return _snapshot.get()
     if _cache is None:
         merged = _deep_merge(DEFAULTS, _load_yaml())
         if _db_overlay:
-            merged = _deep_merge(merged, _expand_flat(_db_overlay()))
-        _cache = merged
+            from .settings_policy import MUTABLE
+            expanded = _expand_flat(_db_overlay())
+            overlay = {}
+            for key in MUTABLE:
+                value = expanded
+                for part in key.split("."):
+                    value = value.get(part) if isinstance(value, dict) else None
+                if value is not None:
+                    overlay[key] = value
+            merged = _deep_merge(merged, _expand_flat(overlay))
+        from .settings_policy import validate
+        _cache = validate(merged)
     return _cache
 
 
@@ -193,13 +218,26 @@ def set_db_overlay(provider: Callable[[], dict[str, Any]]) -> None:
 
 def style_dir(pack_name: str | None = None) -> Path:
     name = pack_name or get("create.style_pack", "tech-evangelist")
-    return CONFIG_DIR / "styles" / name
+    target = (CONFIG_DIR / "styles" / name).resolve()
+    if not target.is_relative_to((CONFIG_DIR / "styles").resolve()):
+        raise ValueError("风格包路径无效")
+    return target
 
 
 def data_dir() -> Path:
+    if _bound_data_root is not None:
+        return _bound_data_root
     # 测试/便携模式可覆盖数据目录；旧名 WRA_DATA_DIR 仅作兼容回退
     env = os.environ.get("WENSHU_DATA_DIR") or os.environ.get("WRA_DATA_DIR")
     if env:
         return Path(env)
     d = Path(get("storage.data_dir", "data"))
     return d if d.is_absolute() else RUNTIME_ROOT / d
+
+
+def bind_data_dir(root: Path) -> None:
+    global _bound_data_root
+    resolved = root.resolve()
+    if _bound_data_root is not None and _bound_data_root != resolved:
+        raise RuntimeError("变更数据目录需要重启进程")
+    _bound_data_root = resolved

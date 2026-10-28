@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NButton, NCheckbox, NInput, NModal, useMessage } from 'naive-ui'
 import { api } from '../api'
 import { useAppStore } from '../stores/app'
@@ -40,16 +40,28 @@ const playModalObj = ref<Material | null>(null)
 const dragOver = ref(false)
 const dragOverCommon = ref(false)
 
+let generation = 0
+let controller: AbortController | null = null
 async function load() {
+  const current = ++generation
+  controller?.abort()
+  controller = new AbortController()
+  const signal = controller.signal
   const url = scope.value === 'article'
     ? `/api/articles/${props.articleId}/materials?scope=article`
     : '/api/materials/common'
-  materials.value = (await api.get(url)).materials
-  selected.value = new Set()
+  try {
+    const result = await api.get(url, signal)
+    if (current !== generation) return
+    materials.value = result.materials
+    const available = new Set(materials.value.map(m => m.id))
+    selected.value = new Set([...selected.value].filter(id => available.has(id)))
+  } catch (error: any) { if (!signal.aborted) message.error(error.message) }
 }
 onMounted(async () => { await load(); await checkDraft() })
-watch(() => store.workbenchTick, load)
-watch(scope, load)
+watch(() => store.articleTicks[props.articleId] || 0, load)
+watch(scope, () => { selected.value = new Set(); load() })
+onUnmounted(() => { generation++; controller?.abort() })
 
 /* ---------- 分组与过滤 ---------- */
 
@@ -439,7 +451,7 @@ async function currentSelection(): Promise<string[]> {
         </span>
         <span class="text-xs px-1.5 py-0.5 rounded shrink-0"
               style="background: var(--pill-info-bg); color: var(--pill-info-ink);">{{
-                { audio: '音频', doc: '文档', link: '链接' }[m.kind] || m.kind }}</span>
+                ({ audio: '音频', doc: '文档', link: '链接' } as Record<string, string>)[m.kind] || m.kind }}</span>
         <div class="flex-1 min-w-0">
           <div class="text-sm truncate">{{ m.title || m.id }}</div>
           <div class="text-xs truncate" style="color: var(--faint);">{{ m.path || m.source_url }}</div>

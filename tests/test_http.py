@@ -15,8 +15,12 @@ def windows_network(monkeypatch):
     monkeypatch.setattr(http.sys, "platform", "win32")
     monkeypatch.setattr(http, "getproxies", lambda: {})
     monkeypatch.setattr(http, "proxy_bypass", lambda host: False)
+    from app.services import network_policy
+    monkeypatch.setattr(network_policy.socket, "getaddrinfo", lambda *a, **k: [(2, 1, 6, "", ("8.8.8.8", 443))])
+    http.close_clients()
     http._cached_windows_proxy.cache_clear()
     yield
+    http.close_clients()
     http._cached_windows_proxy.cache_clear()
 
 
@@ -40,8 +44,8 @@ def test_pac_request_and_crawler_parse(windows_network, monkeypatch):
 
     monkeypatch.setattr(http.httpx, "Client", client)
     article = WechatMpCrawler().fetch(URL)
-    assert seen[0] == {"proxy": "http://proxy.example:914", "timeout": 30,
-                       "follow_redirects": True}
+    assert seen[0]["proxy"] == "http://proxy.example:914"
+    assert seen[0]["timeout"] == 30 and seen[0]["follow_redirects"] is False
     assert article.title == "测试文章" and article.author == "测试作者"
     assert "正文内容" in article.markdown
     assert article.images[0].url == "https://mmbiz.qpic.cn/image.jpg"

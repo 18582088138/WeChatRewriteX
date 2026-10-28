@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from ..core import blocks as bk
 from ..core import config, events
 from ..core.models import Block, BlockType, ChecklistItem, DraftDoc
-from ..storage import dao
+from ..storage import dao, db
 from ..services.dedup.similarity import literal_similarity
 from ..services.rag import index as rag_index
 from .base import AgentBase
@@ -41,12 +41,18 @@ class ReviewLLMOut(BaseModel):
 class ReviewerAgent(AgentBase):
     name = "reviewer"
 
-    def run(self, article_id: str) -> tuple[str, list[ChecklistItem], dict]:
-        draft = dao.latest_draft(article_id)
+    def run(self, article_id: str, draft: dict | None = None) -> tuple[str, list[ChecklistItem], dict]:
+        draft = draft or dao.latest_draft(article_id)
         if not draft:
             raise ValueError("没有可审稿的草稿")
+        from ..core.execution import operation_id
+        import json
+        key = operation_id()
+        previous = dao.latest_review(article_id)
+        if key and previous and json.loads(previous["scores_json"]).get("job_id") == key:
+            return previous["id"], [ChecklistItem.model_validate(i) for i in dao.list_review_items(previous["id"])], json.loads(previous["scores_json"])
         doc = DraftDoc.model_validate_json(draft["doc_json"])
-        style = self.load_style_pack()
+        style = self.load_style_pack((dao.get_article(article_id) or {}).get("style_pack"))
 
         items: list[ChecklistItem] = []
         self.progress(article_id, "规则检查（排版/禁用词）…")
@@ -61,16 +67,26 @@ class ReviewerAgent(AgentBase):
 
         if self.llm_available():
             self.progress(article_id, "LLM 四维审稿（事实/来源/合规/AI味）…")
-            llm_items, ai_score = self._llm_review(doc, article_id, style)
-            items += llm_items
-            scores["ai_flavor"] = ai_score
+            try:
+                llm_items, ai_score = self._llm_review(doc, article_id, style)
+                items += llm_items
+                scores["ai_flavor"] = ai_score
+                scores["coverage"] = "full"
+            except Exception as e:
+                from .. import logging_setup
+                logging_setup.log("error", "AI review failed article=%s draft=%s", article_id,
+                                  doc.id, exc_info=True)
+                scores.update(ai_flavor=None, coverage="failed", error=str(e)[:300])
         else:
-            scores["ai_flavor"] = None
+            scores.update(ai_flavor=None, coverage="rules_only")
 
         self.progress(article_id, f"审稿完成：{len(items)} 条意见"
                                   f"（阻断 {sum(1 for i in items if i.severity == 'blocker')}）")
-        review_id = dao.create_review(article_id, draft["id"], draft["version"],
-                                      items, scores)
+        from ..services.draft_service import content_hash
+        scores["content_hash"] = content_hash(doc)
+        scores["job_id"] = key
+        with db.transaction():
+            review_id = dao.create_review(article_id, draft["id"], draft["version"], items, scores)
         events.bus.publish(events.REVIEW_FINISHED, article_id,
                            review_id=review_id,
                            blockers=sum(1 for i in items if i.severity == "blocker"))
@@ -200,7 +216,7 @@ class ReviewerAgent(AgentBase):
                                    schema=ReviewLLMOut, article_id=article_id,
                                    stage="reviewer.llm", max_tokens=4000)
         except Exception:
-            return [], None
+            raise
         raw = [it for it in result.parsed.items
                if it.category in ("fact", "attribution", "compliance", "ai_flavor")]
         self._ground_llm_items(raw, doc, evidence)

@@ -70,10 +70,11 @@ def test_xhs_cards_render():
     pytest.importorskip("playwright")
     from playwright.sync_api import sync_playwright  # noqa: F401
     art, _ = _article_with_draft()
-    try:
-        from app.services.cards.render import render_cards
-        paths = render_cards(art["id"])
-    except Exception as e:
-        pytest.skip(f"Playwright 浏览器不可用: {e}")
+    from pathlib import Path
+    with sync_playwright() as pw:
+        if not Path(pw.chromium.executable_path).exists():
+            pytest.skip("Playwright Chromium is not installed")
+    from app.services.cards.render import render_cards
+    paths = render_cards(art["id"])
     assert len(paths) >= 2                     # 封面 + 内容页
     assert all(p.exists() and p.stat().st_size > 5000 for p in paths)

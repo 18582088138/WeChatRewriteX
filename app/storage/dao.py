@@ -25,15 +25,38 @@ def get_article(aid: str) -> dict | None:
     return db.query_one("SELECT * FROM articles WHERE id=?", (aid,))
 
 
-def list_articles(status_ui: str | None = None, q: str | None = None) -> list[dict]:
-    rows = db.query("SELECT * FROM articles ORDER BY created_at DESC")
+def _article_where(status_ui=None, q=None):
+    clauses, params = [], []
     if q:
-        ql = q.lower()
-        rows = [r for r in rows if ql in (r["title"] or "").lower() or ql in (r["url"] or "").lower()]
+        clauses.append("(LOWER(title) LIKE ? OR LOWER(url) LIKE ?)")
+        # instr preserves literal substring behavior, including punctuation.
+        clauses[-1] = "(instr(LOWER(title), ?) > 0 OR instr(LOWER(url), ?) > 0)"
+        params.extend((q.lower(), q.lower()))
     if status_ui:
-        from ..core.statemachine import ui_status
-        rows = [r for r in rows if ui_status(ArticleStatus(r["status"])) == status_ui]
-    return rows
+        from ..core.models import UI_STATUS
+        statuses = [s.value for s, ui in UI_STATUS.items() if ui == status_ui]
+        if statuses:
+            clauses.append("status IN (" + ",".join("?" for _ in statuses) + ")")
+            params.extend(statuses)
+    return (" WHERE " + " AND ".join(clauses) if clauses else ""), tuple(params)
+
+
+def list_articles(status_ui: str | None = None, q: str | None = None,
+                  limit: int = 200, offset: int = 0) -> list[dict]:
+    where, params = _article_where(status_ui, q)
+    return db.query("SELECT * FROM articles" + where + " ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?",
+                    (*params, limit, offset))
+
+
+def article_counts(status_ui=None, q=None) -> dict:
+    from ..core.models import UI_STATUS
+    where, params = _article_where(None, q)
+    rows = db.query("SELECT status, COUNT(*) AS n FROM articles" + where + " GROUP BY status", params)
+    counts = {"全部": 0, "New": 0, "Process": 0, "Done": 0, "Failed": 0}
+    for row in rows:
+        counts[UI_STATUS[ArticleStatus(row["status"])]] += row["n"]
+        counts["全部"] += row["n"]
+    return {"total": counts.get(status_ui, counts["全部"]), "counts": counts}
 
 
 def set_article_status(aid: str, status: ArticleStatus, error: str | None = None) -> None:
@@ -77,17 +100,17 @@ def get_material(mid: str) -> dict | None:
 
 
 def find_material_by_sha(sha256: str) -> dict | None:
-    return db.query_one("SELECT * FROM materials WHERE sha256=?", (sha256,))
+    return db.query_one("SELECT * FROM materials WHERE sha256=? AND deleted_at IS NULL", (sha256,))
 
 
 def find_materials_by_sha(sha256: str) -> list[dict]:
     # 同 sha256 的全部记录（复制会合法产生多行）
-    return db.query("SELECT * FROM materials WHERE sha256=?", (sha256,))
+    return db.query("SELECT * FROM materials WHERE sha256=? AND deleted_at IS NULL", (sha256,))
 
 
 def list_materials(scope: str | None = None, article_id: str | None = None,
                    kind: str | None = None) -> list[dict]:
-    sql, params = "SELECT * FROM materials WHERE 1=1", []
+    sql, params = "SELECT * FROM materials WHERE deleted_at IS NULL", []
     if scope:
         sql += " AND scope=?"; params.append(scope)
     if article_id:
@@ -98,10 +121,12 @@ def list_materials(scope: str | None = None, article_id: str | None = None,
 
 
 def set_material_text(mid: str, content: str) -> None:
-    db.execute("INSERT OR REPLACE INTO material_texts(material_id,content) VALUES(?,?)", (mid, content))
-    if db.fts_available():
-        db.execute("DELETE FROM material_fts WHERE material_id=?", (mid,))
-        db.execute("INSERT INTO material_fts(material_id,content) VALUES(?,?)", (mid, content))
+    with db.transaction():
+        db.execute("INSERT OR REPLACE INTO material_texts(material_id,content) VALUES(?,?)", (mid, content))
+        if db.fts_available():
+            db.execute("DELETE FROM material_fts WHERE material_id=?", (mid,))
+            db.execute("INSERT INTO material_fts(material_id,content) VALUES(?,?)", (mid, content))
+        db.execute("DELETE FROM embeddings WHERE material_id=?", (mid,))
 
 
 def get_material_text(mid: str) -> str:
@@ -109,17 +134,20 @@ def get_material_text(mid: str) -> str:
     return row["content"] if row else ""
 
 
-def search_materials_fts(query_str: str, limit: int = 20) -> list[tuple[str, str]]:
+def search_materials_fts(query_str: str, limit: int = 20, article_id: str | None = None) -> list[tuple[str, str]]:
     """返回 (material_id, snippet)。FTS 不可用时降级 LIKE。
 
     MATCH 查询一律转成带引号的短语并转义内部引号，防止标点触发 FTS5 语法错误；
     任何 FTS 错误都回退 LIKE，不让检索失败炸掉审稿。
     """
+    scope = " AND (m.article_id=? OR m.scope='common')" if article_id else ""
+    scope_params = (article_id,) if article_id else ()
     def _like() -> list[tuple[str, str]]:
         rows = db.query(
-            "SELECT material_id, substr(content,1,200) AS snip "
-            "FROM material_texts WHERE content LIKE ? LIMIT ?",
-            (f"%{query_str}%", limit),
+            "SELECT t.material_id, substr(t.content,1,200) AS snip "
+            "FROM material_texts t JOIN materials m ON m.id=t.material_id "
+            "WHERE m.deleted_at IS NULL AND t.content LIKE ?" + scope + " LIMIT ?",
+            (f"%{query_str}%", *scope_params, limit),
         )
         return [(r["material_id"], r["snip"]) for r in rows]
 
@@ -128,9 +156,10 @@ def search_materials_fts(query_str: str, limit: int = 20) -> list[tuple[str, str
     phrase = '"' + query_str.replace('"', '""') + '"'
     try:
         rows = db.query(
-            "SELECT material_id, snippet(material_fts,1,'','','…',8) AS snip "
-            "FROM material_fts WHERE material_fts MATCH ? LIMIT ?",
-            (phrase, limit),
+            "SELECT material_fts.material_id, snippet(material_fts,1,'','','…',8) AS snip "
+            "FROM material_fts JOIN materials m ON m.id=material_fts.material_id "
+            "WHERE m.deleted_at IS NULL AND material_fts MATCH ?" + scope + " LIMIT ?",
+            (phrase, *scope_params, limit),
         )
         return [(r["material_id"], r["snip"]) for r in rows]
     except Exception:
@@ -141,11 +170,11 @@ def all_material_texts(article_id: str | None = None) -> list[tuple[str, str]]:
     if article_id:
         rows = db.query(
             "SELECT t.material_id, t.content FROM material_texts t "
-            "JOIN materials m ON m.id=t.material_id WHERE m.article_id=? OR m.scope='common'",
+            "JOIN materials m ON m.id=t.material_id WHERE m.deleted_at IS NULL AND (m.article_id=? OR m.scope='common')",
             (article_id,),
         )
     else:
-        rows = db.query("SELECT material_id, content FROM material_texts")
+        rows = db.query("SELECT t.material_id, t.content FROM material_texts t JOIN materials m ON m.id=t.material_id WHERE m.deleted_at IS NULL")
     return [(r["material_id"], r["content"]) for r in rows]
 
 
@@ -169,19 +198,25 @@ def save_draft(doc: DraftDoc, origin: str = "agent", status: str = "editing",
     return get_draft(doc.article_id, doc.version)
 
 
+@db.read_snapshot
 def get_draft(article_id: str, version: int) -> dict | None:
+    if version < 1 or version >= next_version(article_id):
+        return None
+    if not db.query_one("SELECT 1 FROM drafts WHERE article_id=? AND version=? UNION ALL SELECT 1 FROM draft_changes WHERE article_id=? AND seq=?", (article_id, version, article_id, version)):
+        return None
     cp = checkpoint_at(article_id, version)
     if not cp:
         return None
     if cp["version"] == version:
         return cp
-    return _reconstruct(aid=article_id, checkpoint=cp, target_seq=version)
+    return _reconstruct(article_id=article_id, checkpoint=cp, target_seq=version)
 
 
 def get_draft_by_id(draft_id: str) -> dict | None:
     return db.query_one("SELECT * FROM drafts WHERE id=?", (draft_id,))
 
 
+@db.read_snapshot
 def latest_draft(article_id: str) -> dict | None:
     """当前 HEAD：最近 checkpoint + 后续变更重放（无变更则直接返回 checkpoint）。"""
     cp = latest_checkpoint(article_id)
@@ -201,6 +236,7 @@ def _reconstruct(article_id: str, checkpoint: dict, target_seq: int) -> dict:
     doc = DraftDoc.model_validate_json(checkpoint["doc_json"])
     changes = [c for c in changes_after(article_id, checkpoint["version"])
                if c["seq"] <= target_seq]
+    recorded_pages = False
     for c in changes:
         op = c["op"]
         if op == "update" or op == "replace_image" or op == "set_caption":
@@ -216,19 +252,40 @@ def _reconstruct(article_id: str, checkpoint: dict, target_seq: int) -> dict:
                 b = Block.model_validate(new)
                 # 插入位置记录在新块 attrs 的 after
                 after = (c["new_json"] and _json.loads(c["new_json"]).get("_after")) or None
-                doc.blocks.append(b) if after is None else None
+                if after is None:
+                    doc.blocks.insert(0, b) if "_after" in new else doc.blocks.append(b)
                 if after is not None:
                     for i, x in enumerate(doc.blocks):
                         if x.id == after:
                             doc.blocks.insert(i + 1, b)
                             break
+                    else:
+                        raise ValueError(f"Invalid draft history: missing anchor {after}")
         elif op == "remove":
             doc.blocks = [b for b in doc.blocks if b.id != c["block_id"]]
+        elif op == "order":
+            ids = _json.loads(c["new_json"])
+            by_id = {b.id: b for b in doc.blocks}
+            if set(ids) != set(by_id) or len(ids) != len(by_id):
+                raise ValueError("Invalid block order in draft history")
+            doc.blocks = [by_id[bid] for bid in ids]
         elif op == "meta":
             new = _json.loads(c["new_json"]) if c["new_json"] else None
             if new:
                 doc.meta = doc.meta.model_validate({**doc.meta.model_dump(), **new})
+                recorded_pages = recorded_pages or "xhs_pages" in new
+    from ..core.blocks import doc_word_count
+    from ..core.pagination import paginate_xhs
+    from ..core import config
+    doc.version, doc.id = target_seq, f"{article_id}-v{target_seq}"
+    doc.meta.word_count = doc_word_count(doc)
+    if not recorded_pages:
+        doc.meta.xhs_pages = paginate_xhs(doc, int(config.get("cards.max_chars_per_page", 300)),
+                                        int(config.get("cards.image_char_cost", 150)),
+                                        int((config.get("variants.xhs.pages") or [3, 9])[1]))
     out = dict(checkpoint)
+    out["word_count"] = doc.meta.word_count
+    out["status"] = "editing"
     out["doc_json"] = doc.model_dump_json()
     out["version"] = target_seq
     out["id"] = f"{article_id}-v{target_seq}"
@@ -242,6 +299,7 @@ def list_drafts(article_id: str) -> list[dict]:
         "FROM drafts WHERE article_id=? ORDER BY version DESC", (article_id,))
 
 
+@db.read_snapshot
 def next_version(article_id: str) -> int:
     row = db.query_one("SELECT MAX(version) AS v FROM drafts WHERE article_id=?", (article_id,))
     chg = db.query_one("SELECT MAX(seq) AS s FROM draft_changes WHERE article_id=?", (article_id,))
@@ -274,6 +332,7 @@ def checkpoint_at(article_id: str, version: int) -> dict | None:
         (article_id, version))
 
 
+@db.read_snapshot
 def list_draft_versions(article_id: str) -> list[dict]:
     """版本时间线：checkpoint + 每次编辑的变更组，供版本下拉。"""
     cps = db.query(
@@ -323,7 +382,7 @@ def create_review(article_id: str, draft_id: str, draft_version: int,
 
 def latest_review(article_id: str) -> dict | None:
     return db.query_one(
-        "SELECT * FROM reviews WHERE article_id=? ORDER BY created_at DESC LIMIT 1", (article_id,))
+        "SELECT * FROM reviews WHERE article_id=? ORDER BY draft_version DESC, created_at DESC, rowid DESC LIMIT 1", (article_id,))
 
 
 def list_review_items(review_id: str) -> list[dict]:
@@ -350,12 +409,17 @@ def pending_blockers(review_id: str) -> int:
 # ---------- jobs ----------
 
 def enqueue_job(job_type: str, article_id: str | None = None, payload: dict | None = None) -> str:
-    jid = new_id("job")
-    db.execute(
-        "INSERT INTO jobs(id,type,article_id,payload_json) VALUES(?,?,?,?)",
-        (jid, job_type, article_id, json.dumps(payload or {}, ensure_ascii=False)),
-    )
-    return jid
+    with db.transaction():
+        encoded = json.dumps(payload or {}, ensure_ascii=False, sort_keys=True)
+        existing = db.query_one("SELECT id FROM jobs WHERE type=? AND article_id IS ? "
+                     "AND payload_json=? AND status IN ('pending','running') LIMIT 1",
+                     (job_type, article_id, encoded))
+        if existing:
+            return existing["id"]
+        jid = new_id("job")
+        db.execute("INSERT INTO jobs(id,type,article_id,payload_json) VALUES(?,?,?,?)",
+                   (jid, job_type, article_id, encoded))
+        return jid
 
 
 def claim_job(types: tuple[str, ...] | None = None) -> dict | None:
@@ -379,30 +443,32 @@ def claim_job(types: tuple[str, ...] | None = None) -> dict | None:
                                AND run_after<=strftime('%s','now')
                                ORDER BY created_at LIMIT 1)
                    RETURNING *""").fetchone()
-        conn.commit()
         return dict(row) if row else None
 
 
 def finish_job(jid: str, result: dict | None = None) -> None:
     db.execute(
-        "UPDATE jobs SET status='done', result_json=?, updated_at=datetime('now','localtime') WHERE id=?",
+        "UPDATE jobs SET status='done', result_json=?, error=NULL, updated_at=datetime('now','localtime') WHERE id=?",
         (json.dumps(result or {}, ensure_ascii=False), jid),
     )
 
 
 def fail_job(jid: str, error: str, requeue: bool = False) -> None:
+    import time
     status = "pending" if requeue else "failed"
+    attempt = db.query_one("SELECT attempts FROM jobs WHERE id=?", (jid,))
+    run_after = time.time() + min(60, 2 ** (attempt["attempts"] if attempt else 1)) if requeue else 0
     db.execute(
-        "UPDATE jobs SET status=?, error=?, updated_at=datetime('now','localtime') WHERE id=?",
-        (status, error, jid),
+        "UPDATE jobs SET status=?, error=?, run_after=?, updated_at=datetime('now','localtime') WHERE id=?",
+        (status, error, run_after, jid),
     )
 
 
 def list_jobs(article_id: str | None = None, limit: int = 50) -> list[dict]:
     if article_id:
-        return db.query("SELECT * FROM jobs WHERE article_id=? ORDER BY created_at DESC LIMIT ?",
+        return db.query("SELECT * FROM jobs WHERE article_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?",
                         (article_id, limit))
-    return db.query("SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (limit,))
+    return db.query("SELECT * FROM jobs ORDER BY created_at DESC, rowid DESC LIMIT ?", (limit,))
 
 
 # ---------- llm_calls / settings / publish ----------
@@ -447,5 +513,17 @@ def finish_publish_job(pid: str, result: dict, ok: bool = True) -> None:
 
 
 def list_publish_jobs(article_id: str) -> list[dict]:
-    return db.query("SELECT * FROM publish_jobs WHERE article_id=? ORDER BY created_at DESC",
+    return db.query("SELECT * FROM publish_jobs WHERE article_id=? ORDER BY created_at DESC, rowid DESC",
                     (article_id,))
+
+
+def archive_material(mid: str) -> None:
+    """Remove from active libraries, retaining immutable history and shared files.
+
+    Physical reclamation must be an explicit offline GC after checking draft history.
+    """
+    with db.transaction():
+        db.execute("UPDATE materials SET deleted_at=datetime('now','localtime') WHERE id=?", (mid,))
+        db.execute("DELETE FROM embeddings WHERE material_id=?", (mid,))
+        if db.fts_available():
+            db.execute("DELETE FROM material_fts WHERE material_id=?", (mid,))

@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
+from contextlib import contextmanager
+from functools import wraps
 from pathlib import Path
 
 from ..core.config import data_dir
@@ -9,41 +12,129 @@ from ..core.config import data_dir
 _SCHEMA = Path(__file__).with_name("schema.sql").read_text(encoding="utf-8")
 _db_path: Path | None = None
 _fts_available: bool | None = None
+_local = threading.local()
 
 
 def db_path() -> Path:
     global _db_path
     if _db_path is None:
-        _db_path = data_dir() / "app.db"
+        _db_path = data_dir().resolve() / "app.db"
+        from ..core.config import bind_data_dir
+        bind_data_dir(_db_path.parent)
     return _db_path
 
 
-def connect() -> sqlite3.Connection:
+@contextmanager
+def connect():
+    """Close every owned connection; DAO calls share the current unit of work."""
+    active = getattr(_local, "connection", None)
+    if active is not None:
+        yield active
+        return
     conn = sqlite3.connect(db_path(), timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
-    return conn
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
+
+
+@contextmanager
+def transaction(write: bool = True):
+    """Serialize short read/modify/write operations, with nested savepoints."""
+    active = getattr(_local, "connection", None)
+    if active is not None:
+        depth = getattr(_local, "depth", 0) + 1
+        _local.depth = depth
+        name = f"uow_{depth}"
+        active.execute(f"SAVEPOINT {name}")
+        callbacks = len(_local.callbacks)
+        try:
+            yield active
+            active.execute(f"RELEASE SAVEPOINT {name}")
+        except BaseException:
+            active.execute(f"ROLLBACK TO SAVEPOINT {name}")
+            active.execute(f"RELEASE SAVEPOINT {name}")
+            del _local.callbacks[callbacks:]
+            raise
+        finally:
+            _local.depth -= 1
+        return
+    callbacks = []
+    with connect() as conn:
+        conn.execute("BEGIN IMMEDIATE" if write else "BEGIN")
+        _local.connection, _local.callbacks, _local.depth = conn, callbacks, 0
+        try:
+            yield conn
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            _local.connection = None
+            _local.callbacks = []
+    for callback in callbacks:
+        callback()
+
+
+def read_snapshot(func):
+    @wraps(func)
+    def wrapped(*args, **kwargs):
+        if getattr(_local, "connection", None) is not None:
+            return func(*args, **kwargs)
+        with transaction(write=False):
+            return func(*args, **kwargs)
+    return wrapped
+
+
+def after_commit(callback) -> None:
+    """Run notifications/file projections only after the authoritative DB commits."""
+    if getattr(_local, "connection", None) is not None:
+        _local.callbacks.append(callback)
+    else:
+        callback()
 
 
 def init_db() -> None:
     data_dir().mkdir(parents=True, exist_ok=True)
     with connect() as conn:
+        previous = conn.execute("PRAGMA user_version").fetchone()[0]
+        if previous < 2 and conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='articles'").fetchone():
+            backups = data_dir() / "backups"
+            backups.mkdir(parents=True, exist_ok=True)
+            backup = backups / "before-schema-v2.sqlite3"
+            if not backup.exists():
+                target = sqlite3.connect(backup)
+                try:
+                    conn.backup(target)
+                finally:
+                    target.close()
         conn.executescript(_SCHEMA)
         # 轻量迁移：老库补 lib_dir 列 + sha256 唯一索引降级为普通索引
         for ddl in ("ALTER TABLE articles ADD COLUMN lib_dir TEXT",
                     "ALTER TABLE articles ADD COLUMN selected_json TEXT DEFAULT '[]'",
-                    "ALTER TABLE drafts ADD COLUMN note TEXT DEFAULT ''"):
+                    "ALTER TABLE drafts ADD COLUMN note TEXT DEFAULT ''",
+                    "ALTER TABLE materials ADD COLUMN deleted_at TEXT",
+                    "ALTER TABLE embeddings ADD COLUMN model_id TEXT",
+                    "ALTER TABLE embeddings ADD COLUMN content_hash TEXT"):
             try:
                 conn.execute(ddl)
-            except sqlite3.OperationalError:
-                pass
+            except sqlite3.OperationalError as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise
         try:
             conn.execute("DROP INDEX IF EXISTS idx_materials_sha")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_materials_sha ON materials(sha256)")
         except sqlite3.OperationalError:
             pass
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_article_created ON jobs(article_id, created_at DESC)")
         _init_fts(conn)
+        conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT DEFAULT CURRENT_TIMESTAMP)")
+        conn.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(2)")
+        conn.execute("PRAGMA user_version=2")
 
 
 def _init_fts(conn: sqlite3.Connection) -> None:
@@ -73,7 +164,6 @@ def query_one(sql: str, params: tuple = ()) -> dict | None:
     return rows[0] if rows else None
 
 
-def execute(sql: str, params: tuple = ()) -> None:
+def execute(sql: str, params: tuple = ()) -> int:
     with connect() as conn:
-        conn.execute(sql, params)
-        conn.commit()
+        return conn.execute(sql, params).rowcount

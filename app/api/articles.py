@@ -1,7 +1,9 @@
 """文章与流水线控制路由。"""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from pathlib import Path
+
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from ..core import config, events
@@ -24,14 +26,15 @@ class CreateArticle(BaseModel):
 
 
 class Finalize(BaseModel):
+    expected_version: int | None = None
     force: bool = False
 
 
-def _shape(row: dict) -> dict:
+def _shape(row: dict, progress: dict | None = None) -> dict:
     out = dict(row)
     st = ArticleStatus(row["status"])
     out["ui_status"] = ui_status(st)
-    out["progress"] = queue.progress(row["id"])
+    out["progress"] = progress if progress is not None else queue.progress(row["id"])
     return out
 
 
@@ -40,6 +43,14 @@ def create_article(body: CreateArticle) -> dict:
     url = body.url.strip()
     if not url and not body.title.strip():
         raise HTTPException(400, "链接模式需填 url；本地文件模式需填 title（主题名）")
+    if url:
+        from ..services.crawl import registry
+        if not (url.startswith("fixture://") and any(isinstance(c, registry.FixtureCrawler) for c in registry._CRAWLERS)):
+            from ..services.network_policy import validate_url
+            try:
+                validate_url(url, resolve=False)
+            except ValueError as exc:
+                raise HTTPException(422, str(exc))
     if not url:
         # 本地文件收集：无 URL 可抓，文章以主题名立档，素材由批量上传进入
         url = f"local://{body.title.strip()[:40]}"
@@ -54,10 +65,13 @@ def create_article(body: CreateArticle) -> dict:
 
 
 @router.get("")
-def list_articles(status: str | None = None, q: str | None = None) -> dict:
-    rows = dao.list_articles(status_ui=status if status in ("New", "Process", "Done") else None,
-                             q=q)
-    return {"articles": [_shape(r) for r in rows]}
+def list_articles(status: str | None = None, q: str | None = None,
+                  limit: int = Query(200, ge=1, le=500), offset: int = Query(0, ge=0)) -> dict:
+    status = status if status in ("New", "Process", "Done", "Failed") else None
+    rows = dao.list_articles(status_ui=status, q=q, limit=limit, offset=offset)
+    snapshots = queue.progress_many([row["id"] for row in rows])
+    return {"articles": [_shape(r, snapshots[r["id"]]) for r in rows],
+            **dao.article_counts(status, q), "limit": limit, "offset": offset}
 
 
 @router.get("/{aid}")
@@ -115,7 +129,8 @@ def advance(aid: str, body: Advance) -> dict:
             raise HTTPException(409, "素材库为空，先完成收集")
     if body.stage == "review" and not dao.latest_draft(aid):
         raise HTTPException(409, "没有草稿，先完成创作")
-    payload = {}
+    head = dao.latest_draft(aid)
+    payload = {"draft_version": head["version"] if head else 0}
     if body.selected_material_ids:
         payload["selected_material_ids"] = body.selected_material_ids
     job_id = queue.enqueue(body.stage, aid, payload)
@@ -129,7 +144,15 @@ def reveal_export_dir(aid: str, body: RevealExport) -> dict:
     if not art:
         raise HTTPException(404, "文章不存在")
     from ..storage import library
+    if body.platform not in ("wechat_mp", "xhs", "weibo", "x"):
+        raise HTTPException(400, "未知平台")
+    import json
+    job = next((j for j in dao.list_publish_jobs(aid) if j["platform"] == body.platform), None)
     d = library.exports_dir(aid) / body.platform
+    if job and job["status"] == "done":
+        d = Path(json.loads(job["result_json"]).get("export_dir") or str(d))
+    if not d.resolve().is_relative_to(library.exports_dir(aid).resolve()):
+        raise HTTPException(400, "导出路径无效")
     if not d.is_dir():
         raise HTTPException(404, f"{body.platform} 发布包还没生成——先点「生成发布包」")
     import subprocess
@@ -152,37 +175,11 @@ class RevealExport(BaseModel):
 
 @router.post("/{aid}/finalize")
 def finalize(aid: str, body: Finalize) -> dict:
-    art = dao.get_article(aid)
-    if not art:
-        raise HTTPException(404, "文章不存在")
-    draft = dao.latest_draft(aid)
-    if not draft:
-        raise HTTPException(409, "没有草稿")
-    cur = ArticleStatus(art["status"])
-    if cur == ArticleStatus.FINALIZED:
-        # 定稿幂等：已定稿且无新编辑（编辑会自动转回 EDITING）时不重复产快照
-        return {"ok": True, "version": draft["version"], "forced_blockers": 0,
-                "already_finalized": True}
-    review = dao.latest_review(aid)
-    blockers = 0
-    if review:
-        blockers = dao.pending_blockers(review["id"])
-    if blockers and not body.force and config.get("review.block_on_blocker", True):
-        raise HTTPException(409, f"存在 {blockers} 个未处理 blocker，禁止定稿")
-    # 定稿 = 版本节点（V1.7）：落正式版本快照，进回滚列表；定稿后仍可编辑
-    from ..services import draft_service
-    cp = draft_service.save_checkpoint(aid, origin="finalized", status="finalized",
-                                       note="定稿快照")
-    from ..core.statemachine import transition
-    if cur == ArticleStatus.REVIEWED:
-        dao.set_article_status(aid, ArticleStatus.EDITING)
-        cur = ArticleStatus.EDITING
-    transition(cur, ArticleStatus.FINALIZED)
-    dao.set_article_status(aid, ArticleStatus.FINALIZED)
-    events.bus.publish(events.DRAFT_FINALIZED, aid, version=(cp.version if cp else draft["version"]),
-                       forced=bool(body.force and blockers))
-    return {"ok": True, "version": (cp.version if cp else draft["version"]),
-            "forced_blockers": blockers if body.force else 0}
+    from ..services import workflow
+    try:
+        return workflow.finalize(aid, body.force, body.expected_version)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
 
 
 @router.post("/{aid}/reopen")

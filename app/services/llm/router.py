@@ -45,7 +45,7 @@ class LLMResult:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     latency_ms: int = 0
-    cost_est: float = 0.0
+    cost_est: float | None = None
     raw: dict = field(default_factory=dict)
 
 
@@ -53,18 +53,22 @@ def _enabled_channels() -> list[dict]:
     channels = config.get("llm.channels", [])
     out = []
     for ch in channels:
-        if config.get_env(ch.get("env_key", "")):
+        if ch.get("enabled", True) and config.get_env(ch.get("env_key", "")):
             out.append(ch)
     return sorted(out, key=lambda c: c.get("priority", 99))
 
 
 def _resolve(model_str: str) -> tuple[str, str]:
     provider, _, model = model_str.partition("/")
+    if not provider or not model:
+        raise LLMError(f"模型名称必须采用 provider/model: {model_str}")
     return provider, model
 
 
-def _estimate_cost(model_str: str, pt: int, ct: int) -> float:
-    pin, pout = PRICING.get(model_str, (0.0, 0.0))
+def _estimate_cost(model_str: str, pt: int, ct: int) -> float | None:
+    if model_str not in PRICING:
+        return None
+    pin, pout = PRICING[model_str]
     return (pt * pin + ct * pout) / 1_000_000
 
 
@@ -104,20 +108,25 @@ def complete(purpose: str, messages: list[dict], schema: Type[BaseModel] | None 
              stage: str = "") -> LLMResult:
     """按用途路由调用。schema 给出时启用 JSON 模式并做 Pydantic 校验（失败重试一次）。"""
     route = config.get(f"llm.routing.{purpose}") or config.get("llm.routing.rewrite")
-    model_str = route["model"]
+    if not route or not route.get("model"):
+        raise LLMError(f"用途 {purpose} 未配置模型")
     temperature = float(route.get("temperature", 0.7))
-    provider, model = _resolve(model_str)
-
-    candidates = [c for c in _enabled_channels() if c["provider"] == provider]
+    specifications = [route["model"]] + list(route.get("fallback_models") or [])
+    candidates = []
+    for model_str in dict.fromkeys(specifications):
+        provider, model = _resolve(model_str)
+        for channel in _enabled_channels():
+            if channel["provider"] == provider and purpose in channel.get("purposes", [purpose]) and (not schema or channel.get("supports_json", True)):
+                candidates.append((channel, model_str, model))
     if not candidates:
-        raise LLMError(
-            f"没有可用的 {provider} 渠道（检查 .env 中 {purpose} → {model_str} 对应的 key）")
+        raise LLMError(f"用途 {purpose} 没有可用渠道：{', '.join(specifications)}")
 
     last_err: Exception | None = None
-    for channel in candidates:
+    for channel, model_str, model in candidates:
         msgs = list(messages)
         for attempt in range(2):  # 第二次为 schema 纠错重试
             t0 = time.time()
+            data = {}
             try:
                 data = _chat(channel, model, msgs, temperature, json_mode=schema is not None,
                              max_tokens=max_tokens)
@@ -173,8 +182,15 @@ def _log(article_id: str | None, stage: str, r: LLMResult, ok: bool) -> None:
         dao.log_llm_call(article_id, stage, r.channel, r.model, r.prompt_tokens,
                          r.completion_tokens, r.latency_ms, r.cost_est, ok)
     except Exception:
-        pass
+        from ... import logging_setup
+        logging_setup.log("error", "LLM cost logging failed", exc_info=True)
 
 
-def available() -> bool:
-    return bool(_enabled_channels())
+def available(purpose: str | None = None) -> bool:
+    if purpose is None:
+        return any(available(key) for key in config.get("llm.routing", {}))
+    route = config.get(f"llm.routing.{purpose}") or {}
+    specifications = [route.get("model", "")] + list(route.get("fallback_models") or [])
+    providers = {model.partition("/")[0] for model in specifications if "/" in model}
+    return any(c["provider"] in providers and purpose in c.get("purposes", [purpose])
+               for c in _enabled_channels())

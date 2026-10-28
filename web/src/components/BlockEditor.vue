@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NButton, NInput, NModal, NSelect, NSpin, useDialog, useMessage } from 'naive-ui'
 import { api } from '../api'
 import { useAppStore } from '../stores/app'
-import type { Block, DraftDoc, Material } from '../types'
+import type { Block, DraftDoc, DraftView, VersionInfo, Material } from '../types'
 
 const props = defineProps<{ articleId: string }>()
 const emit = defineEmits<{ (e: 'goto-review'): void }>()
@@ -14,7 +14,7 @@ const store = useAppStore()
 /* ================= 数据 ================= */
 const draftId = ref('')
 const doc = ref<DraftDoc | null>(null)
-const versions = ref<any[]>([])
+const versions = ref<VersionInfo[]>([])
 const loading = ref(false)
 const article = ref<any>(null)
 const sessionMaterials = ref<Material[]>([])
@@ -83,6 +83,7 @@ const insertInstruction = ref('')
 const dropTargetId = ref<string | null>(null)   // 拖拽插入位置指示
 const editingCaptionId = ref<string | null>(null)
 const captionText = ref('')
+const saveBusy = ref(false)
 
 function startCaptionEdit(b: Block) {
   if (!isLatest.value) return
@@ -90,15 +91,16 @@ function startCaptionEdit(b: Block) {
   captionText.value = b.caption || ''
 }
 async function saveCaption(b: Block) {
-  if (editingCaptionId.value !== b.id) return
-  editingCaptionId.value = null
-  if (captionText.value === (b.caption || '')) return
+  if (editingCaptionId.value !== b.id || saveBusy.value) return
+  if (captionText.value === (b.caption || '')) { editingCaptionId.value = null; return }
+  saveBusy.value = true
   try {
     const r = await api.put(`/api/drafts/${draftId.value}/edit`,
       { ops: [{ op: 'set_caption', block_id: b.id, caption: captionText.value }] })
+    editingCaptionId.value = null
     message.success(`图注已保存（v${r.version}）`)
     await load()
-  } catch (e: any) { message.error(e.message) }
+  } catch (e: any) { message.error(e.message) } finally { saveBusy.value = false }
 }
 
 /* 标题&副标题（置顶块） + 底部信息窗（总结/关键词/参考链接） */
@@ -143,16 +145,27 @@ const visibleBlocks = computed(() => {
 function assetUrl(assetId: string) { return api.absUrl(`/api/materials/${assetId}/file`) }
 
 /* ================= 加载 ================= */
-async function load(version?: number) {
+let loadController: AbortController | null = null
+let loadGeneration = 0
+const hasLocalEdit = () => !!(editingId.value || editingCaptionId.value || metaEditing.value ||
+  saveBusy.value || aiBusy.value || aiModal.value || insertModal.value || imgModal.value)
+async function load(version?: number, preserveEdits = false) {
+  if (preserveEdits && (hasLocalEdit() || !isLatest.value)) return
+  const generation = ++loadGeneration
+  loadController?.abort()
+  loadController = new AbortController()
   loading.value = true
   try {
-    const r = await api.get(`/api/articles/${props.articleId}/draft` +
-                            (version ? `?version=${version}` : ''))
+    const r = await api.get<DraftView>(`/api/articles/${props.articleId}/draft` +
+                            (version ? `?version=${version}` : ''), loadController.signal)
+    if (generation !== loadGeneration || (preserveEdits && hasLocalEdit())) return
     doc.value = r.draft.doc
     draftId.value = r.draft.id
     versions.value = r.versions
     syncMetaForm()
-  } catch (e) { console.error('draft load failed', e) } finally { loading.value = false }
+  } catch (e: any) {
+    if (e.name !== 'AbortError') console.error('draft load failed', e)
+  } finally { if (generation === loadGeneration) loading.value = false }
 }
 
 async function loadArticle() {
@@ -201,8 +214,11 @@ onMounted(async () => {
 onUnmounted(() => {
   mq?.removeEventListener('change', onMq)
   document.removeEventListener('selectstart', onSelectText)
+  loadController?.abort()
+  if (openTimer) clearTimeout(openTimer)
+  if (closeTimer) clearTimeout(closeTimer)
 })
-watch(() => store.workbenchTick, () => { load(); loadArticle() })
+watch(() => store.articleTicks[props.articleId] || 0, () => { load(undefined, true); loadArticle() })
 
 /* ================= 会话素材（左窗「创作素材」） ================= */
 async function removeFromSession(m: Material) {
@@ -250,7 +266,7 @@ async function onBlockDrop(e: DragEvent, b: Block) {
 
 async function insertToDoc(m: Material) {
   if (!doc.value || !draftId.value) return
-  const anchor = selectedId.value || (doc.value.blocks.at(-1)?.id ?? null)
+  const anchor = selectedId.value || (doc.value.blocks.slice(-1)[0]?.id ?? null)
   const op = m.kind === 'text'
     ? { op: 'insert_after', block_id: anchor, block_type: 'quote', text: m.title }
     : { op: 'insert_after', block_id: anchor,
@@ -278,17 +294,17 @@ function onClickOutside() {
   if (editingId.value) saveEdit()
 }
 async function saveEdit() {
-  if (!editingId.value || !doc.value) return
+  if (!editingId.value || !doc.value || saveBusy.value) return
   const b = doc.value.blocks.find(x => x.id === editingId.value)
-  if (b && b.text !== editText.value) {
-    try {
-      const r = await api.put(`/api/drafts/${draftId.value}/edit`,
-        { ops: [{ op: 'update', block_id: b.id, text: editText.value }] })
-      message.success(`已保存为 v${r.version}` + (r.recheck_enqueued ? '（已触发复审）' : ''))
-      await load()
-    } catch (e: any) { message.error(e.message) }
-  }
-  editingId.value = null
+  if (!b || b.text === editText.value) { editingId.value = null; return }
+  saveBusy.value = true
+  try {
+    const r = await api.put(`/api/drafts/${draftId.value}/edit`,
+      { ops: [{ op: 'update', block_id: b.id, text: editText.value }] })
+    editingId.value = null
+    message.success(`已保存为 v${r.version}` + (r.recheck_enqueued ? '（已触发复审）' : ''))
+    await load()
+  } catch (e: any) { message.error(e.message) } finally { saveBusy.value = false }
 }
 
 async function addBlock(afterId: string | null) {
@@ -298,7 +314,7 @@ async function addBlock(afterId: string | null) {
       { ops: [{ op: 'insert_after', block_id: afterId, block_type: 'paragraph', text: '' }] })
     await load()
     const d = doc.value!
-    const idx = afterId ? d.blocks.findIndex(x => x.id === afterId) + 1 : d.blocks.length - 1
+    const idx = afterId ? d.blocks.findIndex(x => x.id === afterId) + 1 : 0
     const nb = d.blocks[idx]
     if (nb) { editingId.value = nb.id; editText.value = '' }
   } catch (e: any) { message.error(e.message) }
@@ -352,7 +368,7 @@ function doRollback(v: number) {
     positiveText: '回滚', negativeText: '取消',
     onPositiveClick: async () => {
       try {
-        const r = await api.post(`/api/articles/${props.articleId}/rollback`, { version: v })
+        const r = await api.post(`/api/articles/${props.articleId}/rollback`, { version: v, expected_version: headVersion.value })
         message.success(`已回滚到 v${r.rolled_back_to}（存为 v${r.version}）`)
         await load()
       } catch (e: any) { message.error(e.message) }
@@ -506,7 +522,7 @@ async function runInsert() {
                   style="background: rgba(0,0,0,.35);">▶ 视频</span>
           </div>
           <div v-else class="px-2 py-3 text-xs" style="color: var(--muted);">
-            {{ { text: '文章', video: '视频', audio: '音频', doc: '文档', link: '链接' }[m.kind] || m.kind }} ·
+            {{ ({ text: '文章', image: '图片', video: '视频', audio: '音频', doc: '文档', link: '链接' } as Record<string, string>)[m.kind] || m.kind }} ·
             {{ m.title || m.id }}
           </div>
           <div class="flex items-center justify-between px-1.5 py-1">

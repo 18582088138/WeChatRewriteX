@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NButton, NCheckbox, NEmpty, useMessage } from 'naive-ui'
 import { api } from '../api'
 import { useAppStore } from '../stores/app'
@@ -23,23 +23,41 @@ const cardFiles = ref<string[]>([])
 const docMeta = ref<any>(null)
 const busy = ref(false)
 const cardsBusy = ref(false)
+const retrying = ref<string[]>([])
 const cardZoom = ref('')          // 卡片大图弹窗（点击外部关闭）
 
+let controller: AbortController | null = null
+let generation = 0
+let refreshTimer: ReturnType<typeof setTimeout> | null = null
 async function load() {
-  jobs.value = (await api.get(`/api/articles/${props.articleId}/publish-jobs`)).jobs
-  const ex = await api.get(`/api/articles/${props.articleId}/exports`)
-  exportFiles.value = ex.files
-  cardFiles.value = exportFiles.value.filter(f => f.includes('cards') && f.endsWith('.png'))
+  const current = ++generation
+  controller?.abort()
+  controller = new AbortController()
+  const signal = controller.signal
+  const base = `/api/articles/${props.articleId}`
   try {
-    docMeta.value = (await api.get(`/api/articles/${props.articleId}/draft`)).draft.doc.meta
-  } catch { docMeta.value = null }
+    const [published, ex, draft] = await Promise.all([
+      api.get(`${base}/publish-jobs`, signal), api.get(`${base}/exports`, signal),
+      api.get(`${base}/draft`, signal).catch(() => null),
+    ])
+    if (current !== generation) return
+    jobs.value = published.jobs
+    exportFiles.value = ex.files
+    cardFiles.value = exportFiles.value.filter(f => f.includes('cards') && f.endsWith('.png'))
+    docMeta.value = draft?.draft.doc.meta || null
+  } catch (error: any) { if (!signal.aborted) message.error(error.message) }
 }
 onMounted(load)
-watch(() => store.workbenchTick, load)
+watch(() => store.articleTicks[props.articleId] || 0, load)
+onUnmounted(() => {
+  generation++
+  controller?.abort()
+  if (refreshTimer) clearTimeout(refreshTimer)
+})
 
 const latestByPlatform = computed(() => {
   const map: Record<string, PublishJob> = {}
-  for (const j of jobs.value) map[j.platform] = j   // 列表按时间倒序，先出现为最新
+  for (const j of jobs.value) if (!map[j.platform]) map[j.platform] = j   // 列表按时间倒序，先出现为最新
   return map
 })
 
@@ -61,8 +79,19 @@ async function publish() {
   try {
     await api.post(`/api/articles/${props.articleId}/publish`, { platforms: selected.value })
     message.success('导出任务已提交')
-    setTimeout(load, 1500)
+    if (refreshTimer) clearTimeout(refreshTimer)
+    refreshTimer = setTimeout(load, 1500)
   } catch (e: any) { message.error(e.message) } finally { busy.value = false }
+}
+
+async function retryPlatform(platform: string) {
+  if (retrying.value.includes(platform)) return
+  retrying.value.push(platform)
+  try {
+    await api.post(`/api/articles/${props.articleId}/publish/retry`, { platform })
+    message.success('已按原定稿快照重试失败平台')
+  } catch (error: any) { message.error(error.message) }
+  finally { retrying.value = retrying.value.filter(p => p !== platform) }
 }
 
 async function genCards() {
@@ -114,6 +143,9 @@ function jobMessage(j: PublishJob): string {
                 <span class="num"> · {{ latestByPlatform[p.key].created_at.slice(5, 16) }}</span>
               </div>
             </div>
+            <NButton v-if="latestByPlatform[p.key]?.status === 'failed'" size="tiny"
+                     :loading="retrying.includes(p.key)"
+                     @click="retryPlatform(p.key)">重试</NButton>
             <button v-if="latestByPlatform[p.key]?.status === 'done'"
                     class="text-xs shrink-0 px-2 py-1 rounded hover:bg-[var(--surface)]"
                     style="color: var(--accent-ink); border: 1px solid var(--border);"

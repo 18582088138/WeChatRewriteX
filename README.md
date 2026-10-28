@@ -5,6 +5,8 @@
 
 短名「文枢」，全称「文枢 - 自媒体 Studio」；pip 包名与进程标识为 `wenshu`。
 
+架构优化及升级注意事项见 [架构与升级说明](docs/ARCHITECTURE.md)。
+
 ## 快速开始
 
 **方式一：绿色执行包（无需 Python 环境，推荐）**
@@ -18,9 +20,9 @@
 Windows PowerShell（注意 PS 5.1 不支持 `&&`，请逐行执行或用 `;` 分隔）：
 
 ```powershell
-pip install -r requirements.txt
+pip install --require-hashes -r requirements.lock
 python -m playwright install chromium
-cd web; npm install; npm run build; cd ..
+cd web; npm ci; npm run build; cd ..
 Copy-Item .env.example .env   # 填入 DEEPSEEK_API_KEY 等
 python -m app                 # → http://127.0.0.1:8000
 ```
@@ -28,9 +30,9 @@ python -m app                 # → http://127.0.0.1:8000
 Linux / macOS（bash）：
 
 ```bash
-pip install -r requirements.txt
+pip install --require-hashes -r requirements.lock
 python -m playwright install chromium
-cd web && npm install && npm run build && cd ..
+cd web && npm ci && npm run build && cd ..
 cp .env.example .env          # 填入 DEEPSEEK_API_KEY 等
 python -m app                 # → http://127.0.0.1:8000
 ```
@@ -38,9 +40,9 @@ python -m app                 # → http://127.0.0.1:8000
 **方式三：pip 本地安装 / Docker**
 
 ```powershell
-pip install dist/wenshu-1.6.0.tar.gz; wenshu            # 源码包安装（交付 sdist）
-docker build -t wenshu-studio:1.6.0 .                   # 容器化（服务器批量部署，本版未预构建）
-docker run -d --env-file .env -p 8000:8000 wenshu-studio:1.6.0
+pip install dist/wenshu-1.11.0.tar.gz; wenshu            # 源码包安装（交付 sdist）
+docker build -t wenshu-studio:1.11.0 .                   # 容器化（服务器批量部署，本版未预构建）
+docker run -d --env-file .env -p 8000:8000 wenshu-studio:1.11.0
 ```
 
 发布包产物与部署细节见 [docs/release/ARTIFACTS.md](docs/release/ARTIFACTS.md) 与
@@ -78,7 +80,10 @@ docker run -d --env-file .env -p 8000:8000 wenshu-studio:1.6.0
 ## 测试
 
 ```bash
-python -m pytest tests/        # 30 项（含块级增量版本 + fixture 离线端到端 + 日志标准化）
+pip install --require-hashes -r requirements-dev.lock
+python -m playwright install chromium
+python -m pytest tests/        # 版本并发、故障注入、离线端到端、权限与网络边界
+cd web && npm ci && npm run build && npx playwright install chromium && npm run test:e2e
 ```
 
 ## 合规说明

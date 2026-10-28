@@ -7,7 +7,8 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from ..core import events
+from ..core import events, config
+from starlette.concurrency import run_in_threadpool
 from ..core.ids import new_id as new_id_fn
 from ..storage import dao, db, library
 from ..services.crawl import registry as crawl_registry
@@ -52,7 +53,8 @@ def material_file(mid: str) -> FileResponse:
     p = library.material_abs_path(m.get("path"))
     if not p or not p.exists():
         raise HTTPException(404, "文件不存在")
-    return FileResponse(p)
+    from ..services.file_access import response
+    return response(p)
 
 
 @router.get("/materials/{mid}/text")
@@ -60,12 +62,20 @@ def material_text(mid: str) -> dict:
     return {"material_id": mid, "content": dao.get_material_text(mid)}
 
 
+async def _read_upload(file: UploadFile) -> bytes:
+    limit = int(config.get("storage.material_size_limit_mb", 500)) * 1024 * 1024
+    data = await file.read(limit + 1)
+    if len(data) > limit:
+        raise HTTPException(413, "上传文件超过大小限制")
+    return data
+
+
 @router.post("/articles/{aid}/materials/upload")
 async def upload_article_material(aid: str, file: UploadFile = File(...)) -> dict:
     if not dao.get_article(aid):
         raise HTTPException(404, "文章不存在")
-    data = await file.read()
-    mid, created = library.ingest_bytes(data, file.filename or "upload.bin",
+    data = await _read_upload(file)
+    mid, created = await run_in_threadpool(library.ingest_bytes, data, file.filename or "upload.bin",
                                         "article", aid, note="GUI 上传")
     events.bus.publish(events.MATERIAL_INGESTED, aid, material_id=mid)
     return {"material_id": mid, "created": created}
@@ -114,12 +124,14 @@ async def upload_article_materials_batch(aid: str,
     """批量上传（本地文件/文件夹）：逐文件自动识别类型、分流入库，逐条记录成败。"""
     if not dao.get_article(aid):
         raise HTTPException(404, "文章不存在")
+    if len(files) > 50:
+        raise HTTPException(413, "一次最多上传 50 个文件")
     ok, failed = [], []
     for f in files:
         name = f.filename or "upload.bin"
         try:
-            data = await f.read()
-            mid, _created = _ingest_upload(aid, name, data)
+            data = await _read_upload(f)
+            mid, _created = await run_in_threadpool(_ingest_upload, aid, name, data)
             ok.append({"filename": name, "material_id": mid})
             events.bus.publish(events.MATERIAL_INGESTED, aid, material_id=mid)
         except Exception as e:
@@ -134,8 +146,8 @@ async def upload_article_materials_batch(aid: str,
 
 @router.post("/materials/upload")
 async def upload_common_material(file: UploadFile = File(...)) -> dict:
-    data = await file.read()
-    mid, created = library.ingest_bytes(data, file.filename or "upload.bin",
+    data = await _read_upload(file)
+    mid, created = await run_in_threadpool(library.ingest_bytes, data, file.filename or "upload.bin",
                                         "common", note="GUI 上传(公共库)")
     events.bus.publish(events.MATERIAL_INGESTED, None, material_id=mid)
     return {"material_id": mid, "created": created}
@@ -218,21 +230,7 @@ def copy_to_article(mid: str, body: CopyToArticle) -> dict:
         if same_src:
             return {"material_id": same_src["id"], "copied": False,
                     "reason": "本文库已存在同来源链接，已跳过"}
-    new_id = new_id_fn("material")
-    db.execute(
-        """INSERT INTO materials
-        (id,scope,article_id,kind,path,sha256,phash,source_url,source_material_id,
-         watermark,width,height,duration,ref_type,fetch_status,note,title,meta_json)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (new_id, "article", body.article_id, m["kind"], m.get("path"), m.get("sha256"),
-         m.get("phash"), m.get("source_url"), m.get("source_material_id"), m.get("watermark"),
-         m.get("width"), m.get("height"), m.get("duration"), m.get("ref_type"),
-         m.get("fetch_status"), (m.get("note") or "") + "（复制自公共库）", m.get("title"),
-         m.get("meta_json") or "{}"),
-    )
-    if m["kind"] == "text":
-        db.execute("INSERT OR REPLACE INTO material_texts(material_id,content) VALUES(?,?)",
-                   (new_id, dao.get_material_text(mid)))
+    new_id = library._clone_for_scope(m, "article", body.article_id, m.get("note") or "")
     events.bus.publish(events.MATERIAL_INGESTED, body.article_id, material_id=new_id)
     return {"material_id": new_id, "copied": True}
 
@@ -251,21 +249,7 @@ def copy_to_common(mid: str) -> dict:
         if dup:
             return {"material_id": dup["id"], "copied": False,
                     "reason": "公共库已存在同文件，已跳过"}
-    new_id = new_id_fn("material")
-    db.execute(
-        """INSERT INTO materials
-        (id,scope,article_id,kind,path,sha256,phash,source_url,source_material_id,
-         watermark,width,height,duration,ref_type,fetch_status,note,title,meta_json)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (new_id, "common", None, m["kind"], m.get("path"), m.get("sha256"),
-         m.get("phash"), m.get("source_url"), m.get("source_material_id"), m.get("watermark"),
-         m.get("width"), m.get("height"), m.get("duration"), m.get("ref_type"),
-         m.get("fetch_status"), (m.get("note") or "") + "（复制自项目素材）", m.get("title"),
-         m.get("meta_json") or "{}"),
-    )
-    if m["kind"] == "text":
-        db.execute("INSERT OR REPLACE INTO material_texts(material_id,content) VALUES(?,?)",
-                   (new_id, dao.get_material_text(mid)))
+    new_id = library._clone_for_scope(m, "common", None, m.get("note") or "")
     events.bus.publish(events.MATERIAL_INGESTED, None, material_id=new_id)
     return {"material_id": new_id, "copied": True}
 
@@ -325,13 +309,6 @@ def delete_material(mid: str) -> dict:
     m = dao.get_material(mid)
     if not m:
         raise HTTPException(404, "素材不存在")
-    p = library.material_abs_path(m.get("path"))
-    db.execute("DELETE FROM materials WHERE id=?", (mid,))
-    db.execute("DELETE FROM material_texts WHERE material_id=?", (mid,))
-    db.execute("DELETE FROM embeddings WHERE material_id=?", (mid,))
-    if p and p.exists():
-        try:
-            p.unlink()
-        except OSError:
-            pass
-    return {"ok": True}
+    dao.archive_material(mid)
+    events.bus.publish(events.MATERIAL_INGESTED, m.get("article_id"), material_id=mid)
+    return {"ok": True, "archived": True}

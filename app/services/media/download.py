@@ -8,7 +8,7 @@ from ...core import config
 from ...storage import library
 from ..crawl.base import ImageRef
 from . import filter as media_filter
-from ..http import client_for
+from .. import http
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
@@ -34,10 +34,11 @@ def referer_for(url: str, fallback: str | None = None) -> str:
 
 def download_file(url: str, referer: str | None = None, timeout: float = 30) -> bytes:
     headers = {"User-Agent": UA, "Referer": referer_for(url, referer)}
-    with client_for(url, timeout=timeout, follow_redirects=True) as client:
-        resp = client.get(url, headers=headers)
-        resp.raise_for_status()
-        return resp.content
+    limit = int(config.get("storage.material_size_limit_mb", 500)) * 1024 * 1024
+    resp = http.get(url, headers=headers, timeout=timeout, follow_redirects=True,
+                    untrusted=True, max_bytes=limit)
+    resp.raise_for_status()
+    return resp.content
 
 
 def fetch_images(images: list[ImageRef], scope: str, article_id: str | None,
@@ -72,20 +73,14 @@ def fetch_images(images: list[ImageRef], scope: str, article_id: str | None,
         ok, _reason = media_filter.image_file_ok(m.get("width"), m.get("height"), len(data))
         if not ok:
             # 不入库：删行删文件，保持素材库干净
-            _db.execute("DELETE FROM materials WHERE id=?", (mid,))
-            p = library.material_abs_path(m.get("path"))
-            if p and p.exists():
-                p.unlink()
+            dao.archive_material(mid)
             return None
         # pHash 近似去重（与本项目已入库图比对）
         if m.get("phash"):
             for other in dao.list_materials(scope="article", article_id=article_id, kind="image"):
                 if other["id"] != mid and other.get("phash") and \
                         media_filter.phash_distance(m["phash"], other["phash"]) <= 6:
-                    _db.execute("DELETE FROM materials WHERE id=?", (mid,))
-                    p = library.material_abs_path(m.get("path"))
-                    if p and p.exists():
-                        p.unlink()
+                    dao.archive_material(mid)
                     return None
         wm = check_image_heuristic(mid, ref.url)
         if wm is not None:

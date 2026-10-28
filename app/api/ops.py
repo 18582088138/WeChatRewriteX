@@ -5,7 +5,7 @@ import json
 import queue as queue_mod
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -30,7 +30,11 @@ def latest_review(aid: str) -> dict:
     review = dao.latest_review(aid)
     if not review:
         raise HTTPException(404, "尚无审稿记录")
-    return {"review": review, "items": dao.list_review_items(review["id"])}
+    from ..services.workflow import review_matches
+    draft = dao.latest_draft(aid)
+    current = bool(draft and review_matches(review, DraftDoc.model_validate_json(draft["doc_json"])))
+    return {"review": review, "items": dao.list_review_items(review["id"]), "current": current,
+            "coverage": json.loads(review["scores_json"]).get("coverage", "unknown")}
 
 
 @router.post("/review-items/{item_id}/resolve")
@@ -51,6 +55,9 @@ def resolve_item(item_id: str, body: ResolveItem) -> dict:
         review = db.query_one("SELECT * FROM reviews WHERE id=?", (item["review_id"],))
         article_id = review["article_id"]
         doc, row = draft_service.get_doc(article_id)
+        from ..services.workflow import review_matches
+        if not review_matches(review, doc):
+            raise HTTPException(409, "审稿意见已过期，请重新审稿")
         from ..agents.creator import CreatorAgent
         agent = CreatorAgent()
         if not agent.llm_available():
@@ -73,6 +80,46 @@ class Publish(BaseModel):
     platforms: list[str]
 
 
+class RetryPublish(BaseModel):
+    platform: str | None = None
+
+
+@router.post("/articles/{aid}/publish/retry")
+def retry_publish(aid: str, body: RetryPublish) -> dict:
+    """Retry failed platforms against their original approved/configured snapshot."""
+    from ..storage import db
+    with db.transaction():
+        failed = None
+        seen = set()
+        for job in dao.list_jobs(aid, limit=200):
+            if job["type"] != "publish":
+                continue
+            payload = json.loads(job["payload_json"])
+            requested = payload.get("platforms") or []
+            # A later successful or in-flight attempt supersedes older failures.
+            available = [p for p in requested if p not in seen]
+            seen.update(requested)
+            if body.platform in available and job["status"] in ("pending", "running"):
+                return {"job_id": job["id"], "platforms": requested,
+                        "snapshot_id": payload.get("snapshot_id")}
+            if job["status"] == "failed":
+                result = json.loads(job.get("result_json") or "{}")
+                platforms = [p for p in result.get("failed_platforms", []) if p in available]
+                if platforms and (not body.platform or body.platform in platforms):
+                    failed = job, payload, platforms
+                    break
+        if not failed:
+            raise HTTPException(404, "没有可重试的失败平台")
+        job, payload, platforms = failed
+        snapshot = dao.get_draft_by_id(payload.get("snapshot_id", ""))
+        if not snapshot or snapshot["article_id"] != aid or snapshot["status"] != "finalized":
+            raise HTTPException(409, "原定稿快照不存在")
+        payload["platforms"] = [body.platform] if body.platform else platforms
+        payload["retry_of"] = job["id"]
+        job_id = queue.enqueue("publish", aid, payload)
+        return {"job_id": job_id, "platforms": payload["platforms"], "snapshot_id": snapshot["id"]}
+
+
 @router.post("/articles/{aid}/publish")
 def publish(aid: str, body: Publish) -> dict:
     art = dao.get_article(aid)
@@ -84,7 +131,17 @@ def publish(aid: str, body: Publish) -> dict:
     platforms = [p for p in body.platforms if p in ("wechat_mp", "xhs", "weibo", "x")]
     if not platforms:
         raise HTTPException(400, "platforms 为空或含未知平台")
-    job_id = queue.enqueue("publish", aid, {"platforms": platforms})
+    from ..storage import db
+    from ..services import assets
+    with db.transaction():
+        draft = dao.latest_draft(aid)
+        current = dao.get_article(aid)
+        if not draft or draft["status"] != "finalized" or current["status"] not in ("FINALIZED", "DONE", "PUBLISHING"):
+            raise HTTPException(409, "当前内容尚未定稿")
+        doc = DraftDoc.model_validate_json(draft["doc_json"])
+        job_id = queue.enqueue("publish", aid, {"platforms": list(dict.fromkeys(platforms)),
+                           "snapshot_id": draft["id"], "assets": assets.manifest(doc),
+                           "settings": config.all_settings()})
     return {"job_id": job_id, "platforms": platforms}
 
 
@@ -99,8 +156,18 @@ def list_exports(aid: str) -> dict:
     root = library.exports_dir(aid)
     if not root.exists():
         return {"files": [], "lib_dir": str(library.article_dir(aid))}
-    files = [str(p.relative_to(config.data_dir())) for p in sorted(root.rglob("*"))
-             if p.is_file()]
+    # Only expose the newest successful package for each platform, not failed staging.
+    selected = {}
+    for job in dao.list_publish_jobs(aid):
+        if job["platform"] not in selected:
+            selected[job["platform"]] = job
+    directories = [Path(json.loads(j["result_json"]).get("export_dir", ""))
+                   for j in selected.values() if j["status"] == "done"]
+    legacy_cards = root / "xhs_cards"
+    if legacy_cards.exists():
+        directories.append(legacy_cards)
+    files = [str(p.relative_to(config.data_dir())) for d in directories if d.is_relative_to(root)
+             for p in sorted(d.rglob("*")) if p.is_file() and not p.name.startswith("_")]
     return {"root": str(root), "files": files,
             "lib_dir": str(library.article_dir(aid))}
 
@@ -134,16 +201,26 @@ def get_settings() -> dict:
                 for c in config.get("llm.channels", [])]
     return {"settings": config.all_settings(), "channels": channels,
             "llm_available": llm_router.available(),
+            "llm_purposes": {p: llm_router.available(p) for p in config.get("llm.routing", {})},
             "searcher": get_searcher().name,
             "embedding_available": get_embedder().available}
 
 
 @router.put("/settings")
 def put_setting(body: SettingPut) -> dict:
-    if body.key.startswith(("llm.channels",)):   # 渠道含密钥引用，走 yaml 不走 UI
-        raise HTTPException(400, "llm.channels 请直接编辑 config/settings.yaml")
-    dao.set_setting(body.key, body.value)
+    from ..core import settings_policy
+    from ..storage import db
+    try:
+        value = settings_policy.value_for(body.key, body.value)
+        with db.transaction():
+            proposed = config._deep_merge(config.all_settings(), config._expand_flat({body.key: value}))
+            settings_policy.validate(proposed)
+            dao.set_setting(body.key, value)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
     config.reload()
+    from .. import logging_setup
+    logging_setup.configure()
     # 日志持久化常驻（log.* 配置），dev.mode 仅控制设置页日志面板可见性，即时生效
     return {"ok": True}
 
@@ -172,6 +249,26 @@ def sse():
 @router.get("/health")
 def health() -> dict:
     return {"ok": True}
+
+
+@router.get("/ready")
+def ready(request: Request) -> dict:
+    from ..storage import db
+    runtime = getattr(request.app.state, "runtime", None)
+    import sqlite3
+    import shutil
+    try:
+        db.query_one("SELECT 1")
+        queue_counts = db.query("SELECT status, COUNT(*) AS count FROM jobs GROUP BY status")
+    except sqlite3.Error:
+        raise HTTPException(503, "数据库暂不可用")
+    workers_ok = not request.app.state.worker_enabled or bool(runtime and runtime.healthy())
+    if not request.app.state.ready or not workers_ok:
+        raise HTTPException(503, "服务未就绪")
+    return {"ok": True, "workers": len(runtime.threads) if runtime else 0,
+            "queue": {r["status"]: r["count"] for r in queue_counts},
+            "disk_free_mb": shutil.disk_usage(config.data_dir()).free // (1024 * 1024),
+            "event_sequence": events.bus.sequence, "event_dropped": events.bus.dropped}
 
 
 # ---------- 开发者模式：日志可视化 + 成本监控 ----------
@@ -203,11 +300,13 @@ def article_costs(aid: str) -> dict:
         g["calls"] += 1
         g["prompt_tokens"] += r["prompt_tokens"]
         g["completion_tokens"] += r["completion_tokens"]
-        g["cost_est"] += r["cost_est"]
+        g["cost_est"] += r["cost_est"] or 0.0
+        g["unknown_cost_calls"] = g.get("unknown_cost_calls", 0) + int(r["cost_est"] is None)
     for g in by_stage.values():
         g["cost_est"] = round(g["cost_est"], 6)
     total = {"calls": len(rows),
              "prompt_tokens": sum(r["prompt_tokens"] for r in rows),
              "completion_tokens": sum(r["completion_tokens"] for r in rows),
-             "cost_est": round(sum(r["cost_est"] for r in rows), 6)}
+             "cost_est": round(sum(r["cost_est"] or 0.0 for r in rows), 6)}
+    total["unknown_cost_calls"] = sum(r["cost_est"] is None for r in rows)
     return {"by_stage": by_stage, "total": total}

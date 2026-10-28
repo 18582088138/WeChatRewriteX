@@ -28,6 +28,9 @@ import hashlib
 import json
 import re
 import shutil
+import threading
+import uuid
+from functools import wraps
 from pathlib import Path
 
 from ..core.config import data_dir
@@ -39,6 +42,17 @@ _KIND_LABEL = {"image": "图片", "video": "视频", "audio": "音频", "doc": "
 _IMG_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 _VID_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".avi"}
 _AUD_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}
+
+_file_lock = threading.RLock()
+
+
+def serialized(func):
+    @wraps(func)
+    def call(*args, **kwargs):
+        with _file_lock:
+            return func(*args, **kwargs)
+    return call
+
 
 _DT_SUFFIX = re.compile(r"-(\d{8}-\d{4})$")
 
@@ -68,6 +82,7 @@ def _dt_of(article_row: dict | None = None) -> str:
     return datetime.datetime.now().strftime("%Y%m%d-%H%M")
 
 
+@serialized
 def article_dir(article_id: str) -> Path:
     """项目文件夹：<输入文章标题-日期时间>；标题后到时迁移；创作定题后由 rename_to_created_title 改名。"""
     row = db.query_one("SELECT id, title, lib_dir, created_at FROM articles WHERE id=?",
@@ -80,26 +95,41 @@ def article_dir(article_id: str) -> Path:
     if lib_dir and _DT_SUFFIX.search(lib_dir):
         return library_root() / lib_dir
     # 旧命名（标题_短id 或 art_ 兜底）或无命名 → 迁移/定名
-    name = f"{_safe_name(title, article_id)}-{_dt_of(row)}"
+    name = f"{_safe_name(title, article_id)}-{article_id[-8:]}-{_dt_of(row)}"
     if lib_dir and lib_dir != name:
-        _migrate_dir_name(article_id, lib_dir, name)
+        name = _migrate_dir_name(article_id, lib_dir, name)
     db.execute("UPDATE articles SET lib_dir=? WHERE id=?", (name, article_id))
     return library_root() / name
 
 
-def _migrate_dir_name(article_id: str, old: str, new: str) -> None:
+def _migrate_dir_name(article_id: str, old: str, new: str) -> str:
     """物理改名 + 素材 path 前缀重写。目标已存在则保持原名。"""
+    if db.query_one("SELECT id FROM articles WHERE lib_dir=? AND id<>?", (old, article_id)):
+        return old  # Legacy ambiguous shared folders require an explicit migration plan.
     old_p, new_p = library_root() / old, library_root() / new
-    if not old_p.exists():
-        return
     if new_p.exists():
-        return
-    old_p.rename(new_p)
-    for sep in ("/", "\\"):
-        db.execute("UPDATE materials SET path=REPLACE(path, ?, ?) WHERE article_id=?",
-                   (f"{old}{sep}", f"{new}{sep}", article_id))
+        return old
+    if old_p.exists():
+        old_p.rename(new_p)
+    try:
+        with db.transaction():
+            # Shared rows can belong to another article or the common library.
+            for row in db.query("SELECT id, path FROM materials WHERE path IS NOT NULL"):
+                path = row["path"]
+                for sep in ("/", "\\"):
+                    if path.startswith(old + sep):
+                        db.execute("UPDATE materials SET path=? WHERE id=?",
+                                   (new + path[len(old):], row["id"]))
+                        break
+            db.execute("UPDATE articles SET lib_dir=? WHERE id=?", (new, article_id))
+    except BaseException:
+        if new_p.exists() and not old_p.exists():
+            new_p.rename(old_p)
+        raise
+    return new
 
 
+@serialized
 def rename_to_created_title(article_id: str, new_title: str) -> Path:
     """创作 Agent 定题后：把文件夹从「输入标题-日期」改名为「拟定标题-日期」（日期保留）。"""
     row = db.query_one("SELECT lib_dir, created_at FROM articles WHERE id=?", (article_id,))
@@ -111,9 +141,9 @@ def rename_to_created_title(article_id: str, new_title: str) -> Path:
     slug = _safe_name(new_title, "")
     if not slug:
         return library_root() / old
-    name = f"{slug}-{dt}"
+    name = f"{slug}-{article_id[-8:]}-{dt}"
     if name != old:
-        _migrate_dir_name(article_id, old, name)
+        name = _migrate_dir_name(article_id, old, name)
         db.execute("UPDATE articles SET lib_dir=? WHERE id=?", (name, article_id))
     return library_root() / name
 
@@ -166,26 +196,28 @@ def guess_kind(filename: str) -> str:
     return "doc"
 
 
+@serialized
 def _clone_for_scope(dup: dict, scope: str, article_id: str | None, note: str) -> str:
     """sha256 命中但归属不同（别的文章/公共库）时：同文件克隆一行给新归属，不重复占盘。
 
     防止「两篇文章引用同一原文时，后收的文章拿不到素材行」——去重只省文件，不省行。
     """
-    mid = dao.insert_material(
-        scope=scope, article_id=article_id if scope == "article" else None,
-        kind=dup["kind"], path=dup.get("path"), sha256=dup.get("sha256"),
-        phash=dup.get("phash"), source_url=dup.get("source_url"),
-        source_material_id=dup.get("source_material_id"), watermark=dup.get("watermark"),
-        width=dup.get("width"), height=dup.get("height"), duration=dup.get("duration"),
-        ref_type=dup.get("ref_type"), fetch_status=dup.get("fetch_status", "ok"),
-        note=note or dup.get("note", ""), title=dup.get("title", ""),
-        meta=json.loads(dup.get("meta_json") or "{}"),
-    )
-    if dup["kind"] == "text":
-        txt = dao.get_material_text(dup["id"])
-        if txt:
-            dao.set_material_text(mid, txt)
-    return mid
+    with db.transaction():
+        mid = dao.insert_material(
+            scope=scope, article_id=article_id if scope == "article" else None,
+            kind=dup["kind"], path=dup.get("path"), sha256=dup.get("sha256"),
+            phash=dup.get("phash"), source_url=dup.get("source_url"),
+            source_material_id=dup.get("source_material_id") or dup["id"], watermark=dup.get("watermark"),
+            width=dup.get("width"), height=dup.get("height"), duration=dup.get("duration"),
+            ref_type=dup.get("ref_type"), fetch_status=dup.get("fetch_status", "ok"),
+            note=note or dup.get("note", ""), title=dup.get("title", ""),
+            meta=json.loads(dup.get("meta_json") or "{}"),
+        )
+        if dup["kind"] == "text":
+            txt = dao.get_material_text(dup["id"])
+            if txt:
+                dao.set_material_text(mid, txt)
+        return mid
 
 
 def _same_owner(dup: dict, scope: str, article_id: str | None) -> bool:
@@ -221,7 +253,7 @@ def _dest_dir(scope: str, article_id: str | None, kind: str,
 
 def _unique_dir(parent: Path, name: str) -> Path:
     """reference/<标题> 重名时追加 -2/-3。"""
-    cand = parent / name
+    cand = parent / f"{name}-{uuid.uuid4().hex[:8]}"
     n = 2
     while cand.exists():
         cand = parent / f"{name}-{n}"
@@ -233,17 +265,21 @@ def _next_idx(dest_dir: Path, kind_label: str) -> int:
     """组内同类素材的下一个序号（按命名规则 `NNN-类型-` 计数）。"""
     if not dest_dir.exists():
         return 1
-    pat = re.compile(rf"^\d{{3}}-{re.escape(kind_label)}-")
-    return sum(1 for f in dest_dir.iterdir() if f.is_file() and pat.match(f.name)) + 1
+    pat = re.compile(rf"^(\d+)-{re.escape(kind_label)}-")
+    indices = [int(m.group(1)) for f in dest_dir.iterdir() if f.is_file()
+               if (m := pat.match(f.name))]
+    return max(indices, default=0) + 1
 
 
+@serialized
 def ingest_bytes(data: bytes, filename: str, scope: str, article_id: str | None = None,
                  source_url: str | None = None, source_material_id: str | None = None,
                  kind: str | None = None, ref_type: str | None = None,
                  note: str = "", title: str = "") -> tuple[str, bool]:
     """存二进制素材。返回 (material_id, 是否新建)；sha256 命中时返回已有 id 不复制。"""
     digest = _sha256(data)
-    dup = dao.find_material_by_sha(digest)
+    matches = dao.find_materials_by_sha(digest)
+    dup = next((m for m in matches if _same_owner(m, scope, article_id)), None) or (matches[0] if matches else None)
     if dup:
         if _same_owner(dup, scope, article_id):
             return dup["id"], False
@@ -258,7 +294,7 @@ def ingest_bytes(data: bytes, filename: str, scope: str, article_id: str | None 
     label = _KIND_LABEL.get(kind, "其他")
     src_title = _safe_name(title or "素材", "素材", limit=8)
     idx = _next_idx(dest_dir, label)
-    dest = dest_dir / f"{idx:03d}-{label}-{src_title}{ext}"
+    dest = dest_dir / f"{idx:03d}-{label}-{src_title}-{digest[:8]}{ext}"
     dest.write_bytes(data)
     # 公众号等渠道的图片 URL 常无扩展名：按内容嗅探真实格式并改名
     if kind == "image" and ext not in _IMG_EXTS:
@@ -293,6 +329,7 @@ def ingest_bytes(data: bytes, filename: str, scope: str, article_id: str | None 
     return mid, True
 
 
+@serialized
 def ingest_text(content: str, title: str, scope: str, article_id: str | None = None,
                 source_url: str | None = None, ref_type: str | None = None,
                 meta: dict | None = None, folder: Path | None = None) -> str:
@@ -300,7 +337,8 @@ def ingest_text(content: str, title: str, scope: str, article_id: str | None = N
 
     folder 给定时直接写入该目录（与 page.html/meta.json 快照同夹），否则按标题自建。"""
     digest = _sha256(content.encode("utf-8"))
-    dup = dao.find_material_by_sha(digest)
+    matches = dao.find_materials_by_sha(digest)
+    dup = next((m for m in matches if _same_owner(m, scope, article_id)), None) or (matches[0] if matches else None)
     if dup:
         if _same_owner(dup, scope, article_id):
             return dup["id"]
@@ -313,7 +351,7 @@ def ingest_text(content: str, title: str, scope: str, article_id: str | None = N
             d.mkdir(parents=True, exist_ok=True)
             idx = _next_idx(d, "其他")
             folder_file = d / f"{idx:03d}-其他-{_safe_name(title, '文档', 8)}.md"
-            folder_file.write_text(content, encoding="utf-8")
+            folder_file.write_text(content, encoding="utf-8", newline="")
             mid = dao.insert_material(
                 scope=scope, kind="text", path=str(folder_file.relative_to(library_root())),
                 sha256=digest, source_url=source_url, ref_type=ref_type,
@@ -326,7 +364,7 @@ def ingest_text(content: str, title: str, scope: str, article_id: str | None = N
         folder = _unique_dir(article_dir(article_id or "") / "reference",
                              _safe_name(title, digest[:8]))
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / "content.md").write_text(content, encoding="utf-8")
+    (folder / "content.md").write_text(content, encoding="utf-8", newline="")
     if meta and not (folder / "meta.json").exists():
         (folder / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2),
                                           encoding="utf-8")
@@ -346,27 +384,33 @@ def ingest_text(content: str, title: str, scope: str, article_id: str | None = N
 def material_abs_path(rel_path: str | None) -> Path | None:
     if not rel_path:
         return None
-    return library_root() / rel_path
+    root = library_root().resolve()
+    target = (root / rel_path).resolve()
+    if not target.is_relative_to(root):
+        raise ValueError("素材路径超出存储目录")
+    return target
 
 
+@serialized
 def save_article_snapshot(article_id: str, html: str, markdown: str, meta: dict) -> Path:
     base = article_dir(article_id) / "reference"
     folder = _unique_dir(base, _safe_name(meta.get("title") or "", "原文"))
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "page.html").write_text(html, encoding="utf-8")
-    (folder / "content.md").write_text(markdown, encoding="utf-8")
+    (folder / "content.md").write_text(markdown, encoding="utf-8", newline="")
     (folder / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2),
                                       encoding="utf-8")
     return folder
 
 
+@serialized
 def save_ref_snapshot(article_id: str, material_id: str, html: str, markdown: str,
                       meta: dict) -> Path:
     base = article_dir(article_id) / "reference"
     folder = _unique_dir(base, _safe_name(meta.get("title") or "", material_id))
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "page.html").write_text(html, encoding="utf-8")
-    (folder / "content.md").write_text(markdown, encoding="utf-8")
+    (folder / "content.md").write_text(markdown, encoding="utf-8", newline="")
     (folder / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2),
                                       encoding="utf-8")
     return folder
@@ -407,7 +451,7 @@ def drafts_dir(article_id: str) -> Path:
 def save_draft_files(doc, markdown: str) -> Path:
     d = drafts_dir(doc.article_id)
     d.mkdir(parents=True, exist_ok=True)
-    (d / f"v{doc.version:03d}.md").write_text(markdown, encoding="utf-8")
+    (d / f"v{doc.version:03d}.md").write_text(markdown, encoding="utf-8", newline="")
     (d / f"v{doc.version:03d}.json").write_text(doc.model_dump_json(indent=2), encoding="utf-8")
     return d
 

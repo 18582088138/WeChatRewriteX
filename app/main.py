@@ -2,11 +2,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+from contextlib import asynccontextmanager
+import uuid
+import hashlib
+import hmac
+import time
+import ipaddress
+import os
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 
 from . import APP_FULL_NAME, APP_VERSION
 from .api import articles, drafts, materials, ops
@@ -19,28 +25,91 @@ WEB_DIST = RUNTIME_ROOT / "web" / "dist"
 
 
 def create_app(start_worker: bool = True, llm=None) -> FastAPI:
-    db.init_db()
-    data_dir().mkdir(parents=True, exist_ok=True)
-    config.set_db_overlay(dao.db_settings)
-    hooks.register_hooks()
-    from . import logging_setup
-    logging_setup.configure()       # 常驻持久化：级别/路径走 log.* 配置
+    @asynccontextmanager
+    async def lifespan(app):
+        app.state.runtime = None
+        try:
+            app.state.runtime = queue.start(llm) if start_worker else None
+            if not start_worker:
+                db.init_db()
+                config.set_db_overlay(dao.db_settings)
+            hooks.register_hooks()
+            from . import logging_setup
+            logging_setup.configure()
+            from .context import AppContext
+            from .core import events
+            import copy
+            app.state.context = AppContext(data_dir(), copy.deepcopy(config.all_settings()),
+                                            dao, events.bus, app.state.runtime)
+            app.state.ready = True
+            yield
+        finally:
+            app.state.ready = False
+            if app.state.runtime is not None:
+                queue.stop()
+            from .services.http import close_clients
+            close_clients()
 
-    app = FastAPI(title=APP_FULL_NAME, version=APP_VERSION)
+    app = FastAPI(title=APP_FULL_NAME, version=APP_VERSION, lifespan=lifespan)
+    app.state.ready = False
+    app.state.worker_enabled = start_worker
+
+    from .services.draft_service import VersionConflict
+    @app.exception_handler(VersionConflict)
+    async def version_conflict(request: Request, exc: VersionConflict):
+        return JSONResponse({"detail": str(exc), "code": "version_conflict"}, status_code=409)
+
+    @app.exception_handler(ValueError)
+    async def invalid_input(request: Request, exc: ValueError):
+        return JSONResponse({"detail": str(exc)}, status_code=422)
 
     # 本地工具默认可跨域（开发期 Vite 端口不同）
-    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
-                       allow_headers=["*"])
+    app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in os.environ.get("WENSHU_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if origin.strip() != "*"], allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+                       allow_headers=["Authorization", "Content-Type"], allow_credentials=True)
 
     @app.middleware("http")
     async def token_guard(request: Request, call_next):
+        from .core.execution import context
+        request_id = uuid.uuid4().hex
+        ctx = context.set({"request_id": request_id})
         token = config.get_env("APP_ACCESS_TOKEN")
-        if token and not request.url.path.startswith("/api/health"):
-            given = request.query_params.get("token") or \
-                request.headers.get("Authorization", "").removeprefix("Bearer ")
-            if given != token:
-                return JSONResponse({"detail": "未授权"}, status_code=401)
-        return await call_next(request)
+        path = request.url.path
+        protected = path.startswith(("/api/", "/files/")) or path in ("/docs", "/redoc", "/openapi.json")
+        bearer = request.headers.get("Authorization", "").removeprefix("Bearer ")
+        cookie = request.cookies.get("wenshu_session", "")
+        authenticated = False
+        if token:
+            authenticated = bool(bearer and hmac.compare_digest(bearer, token))
+            if not authenticated and "." in cookie:
+                expires, signature = cookie.split(".", 1)
+                expected = hmac.new(token.encode(), expires.encode(), hashlib.sha256).hexdigest()
+                authenticated = expires.isdigit() and int(expires) > time.time() and hmac.compare_digest(signature, expected)
+        try:
+            if protected and path != "/api/health" and request.method != "OPTIONS":
+                if token and not authenticated:
+                    return JSONResponse({"detail": "未授权"}, status_code=401)
+                if not token:
+                    host = request.client.host if request.client else ""
+                    try:
+                        local = ipaddress.ip_address(host).is_loopback
+                    except ValueError:
+                        local = host == "testclient"
+                    if not local:
+                        return JSONResponse({"detail": "远程访问必须配置 APP_ACCESS_TOKEN"}, status_code=403)
+            result = await call_next(request)
+            result.headers["X-Request-ID"] = request_id
+            if token and bearer and authenticated:
+                expires = str(int(time.time()) + 8 * 3600)
+                signature = hmac.new(token.encode(), expires.encode(), hashlib.sha256).hexdigest()
+                result.set_cookie("wenshu_session", expires + "." + signature, httponly=True,
+                                  secure=request.url.scheme == "https", samesite="strict", max_age=8 * 3600)
+            return result
+        finally:
+            context.reset(ctx)
+
+    @app.get("/api/session")
+    def session():
+        return {"ok": True}
 
     app.include_router(articles.router)
     app.include_router(articles.jobs_router)
@@ -49,14 +118,18 @@ def create_app(start_worker: bool = True, llm=None) -> FastAPI:
     app.include_router(ops.router)
 
     # 素材与导出文件（图片预览 / 下载）
-    (data_dir() / "library").mkdir(parents=True, exist_ok=True)
-    app.mount("/files", StaticFiles(directory=data_dir()), name="files")
+    @app.get("/files/{relative:path}", include_in_schema=False)
+    def file(relative: str):
+        from .services.file_access import recorded_file, response
+        return response(recorded_file(relative))
 
     # SPA 静态托管 + 前端路由回退
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa(full_path: str):
         if WEB_DIST.exists():
-            target = WEB_DIST / full_path
+            target = (WEB_DIST / full_path).resolve()
+            if not target.is_relative_to(WEB_DIST.resolve()):
+                return JSONResponse({"detail": "文件不存在"}, status_code=404)
             if full_path and target.exists() and target.is_file():
                 return FileResponse(target)
             return FileResponse(WEB_DIST / "index.html")
@@ -64,8 +137,6 @@ def create_app(start_worker: bool = True, llm=None) -> FastAPI:
                              "hint": "前端未构建：cd web && npm install && npm run build",
                              "api": "/docs"})
 
-    if start_worker:
-        queue.start(llm)
     return app
 
 

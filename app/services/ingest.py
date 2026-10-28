@@ -47,10 +47,16 @@ def recrawl(material_id: str) -> dict:
         raise CrawlError("该素材没有来源链接，无法重抓")
     url = m["source_url"]
     raw = crawl_registry.fetch(url)
-    dao.set_material_text(material_id, raw.markdown)
-    db.execute("UPDATE materials SET title=?, fetch_status='ok' WHERE id=?",
-               (raw.title or m.get("title") or url, material_id))
-    saved = media_download.fetch_images(raw.images[:5], scope="article",
+    # A recrawl creates a new immutable source; existing citations keep the old row.
+    new_id = library.ingest_text(raw.markdown, title=raw.title or m.get("title") or url,
+              scope=m["scope"], article_id=m.get("article_id"), source_url=url,
+              ref_type=m.get("ref_type"), meta={"site": raw.site, "recrawled_from": material_id})
+    if new_id != material_id:
+        with db.transaction():
+            db.execute("UPDATE materials SET source_material_id=? WHERE id=?", (material_id, new_id))
+            dao.archive_material(material_id)
+    material_id = new_id
+    saved = media_download.fetch_images(raw.images[:5], scope=m["scope"],
                                         article_id=m["article_id"],
                                         source_material_id=material_id, page_url=url)
     if getattr(raw, "videos", None):

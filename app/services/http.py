@@ -10,6 +10,9 @@ import os
 import sys
 import time
 from functools import lru_cache
+from collections import OrderedDict
+from contextlib import contextmanager
+import threading
 from urllib.parse import urlsplit
 from urllib.request import getproxies, proxy_bypass
 
@@ -119,11 +122,54 @@ def proxy_for(url: str) -> str | None:
     return _cached_windows_proxy(url, int(time.monotonic() // 60))
 
 
-def client_for(url: str, **kwargs) -> httpx.Client:
+_clients = OrderedDict()
+_clients_lock = threading.RLock()
+
+
+@contextmanager
+def client_for(url: str, **kwargs):
+    """Borrow a bounded, thread-safe client while preserving per-URL PAC selection."""
     proxy = proxy_for(url)
     if proxy:
         kwargs["proxy"] = proxy
-    return httpx.Client(**kwargs)
+    kwargs.setdefault("limits", httpx.Limits(max_connections=8, max_keepalive_connections=4))
+    origin = urlsplit(url)
+    environment = tuple((name, os.environ.get(name)) for name in
+                        ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"))
+    key = (id(httpx.Client), origin.scheme, origin.netloc, proxy, repr(kwargs), environment)
+    transient = False
+    with _clients_lock:
+        entry = _clients.get(key)
+        if entry is None:
+            while len(_clients) >= 16:
+                idle = next((k for k, value in _clients.items() if value[1] == 0), None)
+                if idle is None:
+                    transient = True
+                    break
+                _clients.pop(idle)[0].close()
+            entry = [httpx.Client(**kwargs), 0]
+            if not transient:
+                _clients[key] = entry
+        entry[1] += 1
+        if key in _clients:
+            _clients.move_to_end(key)
+    try:
+        yield entry[0]
+    finally:
+        with _clients_lock:
+            entry[1] -= 1
+            if transient or _clients.get(key) is not entry:
+                if entry[1] == 0:
+                    entry[0].close()
+
+
+def close_clients():
+    with _clients_lock:
+        entries = list(_clients.values())
+        _clients.clear()
+        for client, users in entries:
+            if users == 0:
+                client.close()
 
 
 def get(url: str, **kwargs) -> httpx.Response:
@@ -135,6 +181,34 @@ def post(url: str, **kwargs) -> httpx.Response:
 
 
 def _request(method: str, url: str, **kwargs) -> httpx.Response:
+    untrusted = kwargs.pop("untrusted", False)
     options = {key: kwargs.pop(key) for key in ("timeout", "follow_redirects") if key in kwargs}
-    with client_for(url, **options) as client:
-        return client.request(method, url, **kwargs)
+    if not untrusted:
+        with client_for(url, **options) as client:
+            return client.request(method, url, **kwargs)
+    from .network_policy import validate_url
+    from ..core import config
+    from urllib.parse import urljoin
+    follow = options.pop("follow_redirects", False)
+    limit = int(kwargs.pop("max_bytes", min(8, int(config.get("storage.material_size_limit_mb", 500))) * 1024 * 1024))
+    current = url
+    for attempt in range(11):
+        validate_url(current)
+        # Re-select PAC/proxy and revalidate DNS for every redirect destination.
+        with client_for(current, follow_redirects=False, **options) as client:
+            with client.stream(method, current, **kwargs) as response:
+                if follow and response.is_redirect and response.headers.get("location"):
+                    current = urljoin(str(response.url), response.headers["location"])
+                    kwargs.pop("params", None)
+                    continue
+                if response.headers.get("content-length", "").isdigit() and int(response.headers["content-length"]) > limit:
+                    raise ValueError("下载文件超过大小限制")
+                content = bytearray()
+                for chunk in response.iter_bytes():
+                    if len(content) + len(chunk) > limit:
+                        raise ValueError("下载文件超过大小限制")
+                    content.extend(chunk)
+                headers = {k: v for k, v in response.headers.items() if k.lower() not in ("content-encoding", "content-length")}
+                return httpx.Response(response.status_code, headers=headers,
+                                      content=bytes(content), request=response.request)
+    raise ValueError("重定向次数超过限制")

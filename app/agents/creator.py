@@ -39,6 +39,12 @@ class CreatorAgent(AgentBase):
         article = dao.get_article(article_id)
         if not article:
             raise ValueError(f"文章不存在: {article_id}")
+        base = dao.latest_draft(article_id)
+        from ..core.execution import operation_id
+        key = operation_id()
+        if key and base and not base.get("reconstructed") and base.get("note") == f"job:{key}":
+            return DraftDoc.model_validate_json(base["doc_json"])
+        expected_version = base["version"] if base else 0
         style = self.load_style_pack(article.get("style_pack"))
         self.progress(article_id, "汇总证据包与可用素材…")
         evidence = self._evidence_pack(article_id, selected_material_ids)
@@ -75,11 +81,13 @@ class CreatorAgent(AgentBase):
 
         # 创作定题 → 项目文件夹从「输入标题-日期」改名为「拟定标题-日期」（先于落盘）
         new_title = (doc.meta.title_candidates or [""])[0]
-        if new_title:
-            library.rename_to_created_title(article_id, new_title)
 
         from ..services import draft_service
-        doc = draft_service.save_new_version(doc, origin="agent", checkpoint=True)
+        doc = draft_service.save_new_version(doc, origin="agent", checkpoint=True,
+                                             expected_version=expected_version,
+                                             note=f"job:{key}" if key else "")
+        if new_title:
+            library.rename_to_created_title(article_id, new_title)
         events.bus.publish(events.CREATE_FINISHED, article_id, version=doc.version,
                            word_count=bk.doc_word_count(doc))
         return doc
@@ -88,7 +96,7 @@ class CreatorAgent(AgentBase):
 
     def regenerate_blocks(self, article_id: str, doc: DraftDoc, block_ids: list[str],
                           instruction: str = "") -> DraftDoc:
-        style = self.load_style_pack()
+        style = self.load_style_pack((dao.get_article(article_id) or {}).get("style_pack"))
         targets = [b for b in doc.blocks if b.id in set(block_ids)]
         if not targets:
             raise ValueError("未找到目标块")
@@ -115,7 +123,7 @@ class CreatorAgent(AgentBase):
 
     def insert_references(self, article_id: str, doc: DraftDoc, material_ids: list[str],
                           after_block_id: str | None, instruction: str = "") -> DraftDoc:
-        style = self.load_style_pack()
+        style = self.load_style_pack((dao.get_article(article_id) or {}).get("style_pack"))
         refs = [{"id": mid, "content": dao.get_material_text(mid)[:2500]}
                 for mid in material_ids]
         refs = [r for r in refs if r["content"].strip()]
@@ -268,40 +276,10 @@ class CreatorAgent(AgentBase):
 
     @staticmethod
     def _paginate_xhs(doc: DraftDoc):
-        """规则式分页：按字数贪心打包（≤max_chars/页），视觉分页由 cards 服务最终保证。"""
-        from ..core.models import XhsPage
-        max_chars = int(config.get("cards.max_chars_per_page", 300))
-        # 插图在卡片上的占位等价字数（46vh 高的图 ≈ 6~7 行正文）
-        img_cost = int(config.get("cards.image_char_cost", 150))
-        max_pages = int((config.get("variants.xhs.pages") or [3, 9])[1])
-        pages: list[XhsPage] = []
-        cur = XhsPage()
-        cur_len = 0
-        for b in doc.blocks:
-            if b.type in (BlockType.IMAGE, BlockType.VIDEO):
-                # 插图内嵌正文页（V1.10）：图片按等价字数计入当前页容量，
-                # 嵌在首个段落之后展示；仅当当前页已有插图或容量不足时才开新页
-                cost = img_cost
-                if cur.asset_id is not None or                         (cur_len + cost > max_chars and (cur.block_ids or cur.title)):
-                    pages.append(cur)
-                    cur, cur_len = XhsPage(), 0
-                cur.asset_id = b.asset_id
-                cur_len += cost
-                continue
-            tlen = bk.word_count(b.text or "")
-            if cur_len + tlen > max_chars and cur.block_ids:
-                pages.append(cur)
-                cur, cur_len = XhsPage(), 0
-            if b.type == BlockType.HEADING and b.level <= 2 and not cur.title:
-                cur.title = b.text
-                continue
-            cur.block_ids.append(b.id)
-            cur_len += tlen
-            if len(pages) >= max_pages:
-                break
-        if cur.block_ids or cur.title:
-            pages.append(cur)
-        return pages[:max_pages]
+        from ..core.pagination import paginate_xhs
+        return paginate_xhs(doc, int(config.get("cards.max_chars_per_page", 300)),
+                            int(config.get("cards.image_char_cost", 150)),
+                            int((config.get("variants.xhs.pages") or [3, 9])[1]))
 
     @staticmethod
     def _degraded_doc(article_id: str, evidence: list[dict]) -> DraftDoc:
