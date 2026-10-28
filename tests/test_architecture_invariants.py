@@ -156,3 +156,144 @@ def test_export_uses_approved_snapshot_after_edit():
     manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["snapshot_id"] == old_id
     assert manifest["files"]["weibo.txt"]
+
+
+def test_late_review_cannot_reopen_finalized_content(monkeypatch):
+    from app.pipeline import orchestrator
+    aid, original = seeded()
+    started, release = threading.Event(), threading.Event()
+    class SlowReview:
+        def run(self, article_id, draft):
+            started.set()
+            assert release.wait(5)
+            doc = DraftDoc.model_validate_json(draft["doc_json"])
+            scores = {"coverage": "full", "content_hash": draft_service.content_hash(doc)}
+            rid = dao.create_review(article_id, doc.id, doc.version, [], scores)
+            return rid, [], scores
+    monkeypatch.setattr(orchestrator, "_get_agents", lambda llm=None: {"review": SlowReview()})
+    with ThreadPoolExecutor(1) as pool:
+        future = pool.submit(orchestrator.run_stage, "review", aid)
+        assert started.wait(5)
+        try:
+            original.blocks[0].text = "edited while review was running"
+            draft_service.save_new_version(original, "human")
+            workflow.finalize(aid, force=True)
+        finally:
+            release.set()
+        assert future.result()["stale"]
+    assert dao.get_article(aid)["status"] == "FINALIZED"
+
+
+def test_export_crash_recovery_reuses_verified_files():
+    from pathlib import Path
+    from app.core.execution import context
+    from app.services.publish.exporter import export_variants
+    aid, _ = seeded()
+    token = context.set({"job_id": "export-recovery"})
+    try:
+        first = export_variants(aid, ["weibo"])
+        output = Path(first["platforms"]["weibo"]["export_dir"])
+        mtime = (output / "weibo.txt").stat().st_mtime_ns
+        second = export_variants(aid, ["weibo"])
+        assert first["export_root"] == second["export_root"]
+        assert (output / "weibo.txt").stat().st_mtime_ns == mtime
+        assert second["ok"]
+    finally:
+        context.reset(token)
+
+
+def test_historical_pages_do_not_change_after_settings_update():
+    import copy
+    from app.core import config
+    aid, doc = seeded()
+    settings = copy.deepcopy(config.all_settings())
+    settings["cards"]["max_chars_per_page"] = 50
+    doc.blocks[0].text = "long text " * 20
+    with config.using_snapshot(settings):
+        saved = draft_service.save_new_version(doc, "human")
+    restored = DraftDoc.model_validate_json(dao.get_draft(aid, saved.version)["doc_json"])
+    assert restored == saved
+
+
+def test_publish_retry_keeps_snapshot_and_skips_successful_platforms(monkeypatch):
+    from pathlib import Path
+    from fastapi.testclient import TestClient
+    from app.main import create_app
+    from app.core import config
+    from app.core.execution import context
+    from app.pipeline import queue
+    from app.services import assets
+    from app.services.publish import exporter
+    aid, _ = seeded()
+    approved = workflow.finalize(aid, force=True)
+    doc, row = draft_service.get_doc(aid)
+    payload = {"platforms": ["weibo", "x"], "snapshot_id": row["id"],
+               "assets": assets.manifest(doc), "settings": config.all_settings()}
+    original = exporter._export_one
+    def fail_x(doc, article_id, platform, root):
+        if platform == "x":
+            raise RuntimeError("injected export failure")
+        return original(doc, article_id, platform, root)
+    monkeypatch.setattr(exporter, "_export_one", fail_x)
+    jid = dao.enqueue_job("publish", aid, payload)
+    token = context.set({"job_id": jid})
+    try:
+        result = queue._run_publish(aid, payload)
+    finally:
+        context.reset(token)
+    assert result["status"] == "PARTIAL_FAILED"
+    with db.transaction():
+        dao.fail_job(jid, "x failed")
+        db.execute("UPDATE jobs SET result_json=? WHERE id=?", (json.dumps(result), jid))
+    successful = Path(result["platforms"]["weibo"]["export_dir"]) / "weibo.txt"
+    timestamp = successful.stat().st_mtime_ns
+    doc.blocks[0].text = "unapproved edit after the failed export"
+    draft_service.save_new_version(doc, "human")
+    dao.set_setting("variants.x.max_tweets", 1)
+    config.reload()
+    try:
+        with TestClient(create_app(start_worker=False)) as client:
+            retry = client.post(f"/api/articles/{aid}/publish/retry", json={"platform": "x"})
+            assert retry.status_code == 200, retry.text
+            selected = retry.json()
+            assert selected["platforms"] == ["x"]
+            assert selected["snapshot_id"] == f"{aid}-v{approved['version']}"
+            duplicate = client.post(f"/api/articles/{aid}/publish/retry", json={"platform": "x"})
+            assert duplicate.json()["job_id"] == selected["job_id"]
+            queued = db.query_one("SELECT * FROM jobs WHERE id=?", (selected["job_id"],))
+            saved_payload = json.loads(queued["payload_json"])
+            assert saved_payload["settings"] == payload["settings"]
+            assert saved_payload["assets"] == payload["assets"]
+            monkeypatch.setattr(exporter, "_export_one", original)
+            token = context.set({"job_id": queued["id"]})
+            try:
+                retried = queue._run_publish(aid, saved_payload)
+            finally:
+                context.reset(token)
+            dao.finish_job(queued["id"], retried)
+            assert retried["ok"]
+            assert list(retried["platforms"]) == ["x"]
+            assert successful.stat().st_mtime_ns == timestamp
+            snapshot = Path(retried["platforms"]["x"]["export_dir"]) / "snapshot.json"
+            assert "unapproved edit" not in snapshot.read_text(encoding="utf-8")
+            assert dao.get_article(aid)["status"] == "EDITING"
+            assert client.post(f"/api/articles/{aid}/publish/retry", json={"platform": "x"}).status_code == 404
+    finally:
+        db.execute("DELETE FROM settings WHERE key='variants.x.max_tweets'")
+        config.reload()
+
+
+def test_rolled_back_enqueue_has_no_visible_job_or_event():
+    from app.core import events
+    from app.pipeline import queue
+    messages = events.bus.subscribe()
+    try:
+        with pytest.raises(RuntimeError):
+            with db.transaction():
+                jid = queue.enqueue("ingest", payload={"urls": ["https://example.com/rollback"]})
+                assert messages.empty()
+                raise RuntimeError("abort enqueue")
+        assert not db.query_one("SELECT id FROM jobs WHERE id=?", (jid,))
+        assert messages.empty()
+    finally:
+        events.bus.unsubscribe(messages)

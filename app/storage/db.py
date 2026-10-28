@@ -4,6 +4,7 @@ from __future__ import annotations
 import sqlite3
 import threading
 from contextlib import contextmanager
+from functools import wraps
 from pathlib import Path
 
 from ..core.config import data_dir
@@ -17,7 +18,9 @@ _local = threading.local()
 def db_path() -> Path:
     global _db_path
     if _db_path is None:
-        _db_path = data_dir() / "app.db"
+        _db_path = data_dir().resolve() / "app.db"
+        from ..core.config import bind_data_dir
+        bind_data_dir(_db_path.parent)
     return _db_path
 
 
@@ -40,7 +43,7 @@ def connect():
 
 
 @contextmanager
-def transaction():
+def transaction(write: bool = True):
     """Serialize short read/modify/write operations, with nested savepoints."""
     active = getattr(_local, "connection", None)
     if active is not None:
@@ -62,7 +65,7 @@ def transaction():
         return
     callbacks = []
     with connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("BEGIN IMMEDIATE" if write else "BEGIN")
         _local.connection, _local.callbacks, _local.depth = conn, callbacks, 0
         try:
             yield conn
@@ -75,6 +78,16 @@ def transaction():
             _local.callbacks = []
     for callback in callbacks:
         callback()
+
+
+def read_snapshot(func):
+    @wraps(func)
+    def wrapped(*args, **kwargs):
+        if getattr(_local, "connection", None) is not None:
+            return func(*args, **kwargs)
+        with transaction(write=False):
+            return func(*args, **kwargs)
+    return wrapped
 
 
 def after_commit(callback) -> None:
@@ -117,6 +130,7 @@ def init_db() -> None:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_materials_sha ON materials(sha256)")
         except sqlite3.OperationalError:
             pass
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_article_created ON jobs(article_id, created_at DESC)")
         _init_fts(conn)
         conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT DEFAULT CURRENT_TIMESTAMP)")
         conn.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(2)")

@@ -77,3 +77,16 @@ def test_recovery_does_not_repeat_committed_creation(monkeypatch):
         assert second.id == first.id and dao.next_version(aid) == 2
     finally:
         context.reset(token)
+
+
+def test_failed_ai_review_does_not_approve_content():
+    from app.agents.reviewer import ReviewerAgent
+    from app.services import workflow
+    from tests.test_architecture_invariants import seeded
+    aid, _ = seeded()
+    def failing_llm(**kwargs):
+        raise router.LLMError("injected model failure")
+    rid, items, scores = ReviewerAgent(failing_llm).run(aid)
+    assert scores["coverage"] == "failed" and scores["ai_flavor"] is None
+    with pytest.raises(ValueError, match="AI 审稿未完成"):
+        workflow.finalize(aid)

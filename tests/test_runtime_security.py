@@ -19,6 +19,18 @@ def test_factory_does_not_recover_live_job():
     db.execute("DELETE FROM jobs WHERE id=?", (jid,))
 
 
+def test_process_data_root_is_pinned_after_initialization(monkeypatch, tmp_path):
+    from app.core import config
+    original = config.data_dir()
+    assert db.db_path().is_absolute()
+    monkeypatch.setenv("WENSHU_DATA_DIR", str(tmp_path))
+    config.reload()
+    assert config.data_dir() == original
+    assert db.db_path().parent == original
+    with pytest.raises(RuntimeError, match="重启"):
+        config.bind_data_dir(tmp_path)
+
+
 def test_runtime_lock_excludes_second_owner(tmp_path):
     from app.pipeline.runtime_lock import RuntimeLock
     first = RuntimeLock(tmp_path).acquire()

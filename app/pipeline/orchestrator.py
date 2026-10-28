@@ -44,6 +44,13 @@ def run_stage(stage: str, article_id: str, llm=None, payload: dict | None = None
     # 迟到/失效任务保护：当前状态不允许该阶段时静默跳过（不定罪文章）
     if stage in STAGE_ENTRY and ArticleStatus(art["status"]) not in STAGE_ENTRY[stage]:
         return {"skipped": True, "stage": stage, "status": art["status"]}
+    if stage == "create" and (payload or {}).get("draft_version") is not None:
+        head = dao.latest_draft(article_id)
+        version = head["version"] if head else 0
+        key = (payload or {}).get("_job_id")
+        replay = key and head and not head.get("reconstructed") and head.get("note") == f"job:{key}"
+        if version != payload["draft_version"] and not replay:
+            return {"skipped": True, "reason": "stale_create", "version": version}
     agents = _get_agents(llm)
     if stage == "collect":
         _set_status(article_id, ArticleStatus.COLLECTING)

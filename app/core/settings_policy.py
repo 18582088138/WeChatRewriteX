@@ -59,4 +59,7 @@ def validate(settings: dict):
         bounds = settings["variants"]["xhs"][key]
         if not isinstance(bounds, list) or len(bounds) != 2 or not 1 <= bounds[0] <= bounds[1] <= 30:
             raise ValueError("小红书分页范围必须满足 1 ≤ min ≤ max ≤ 30")
+    TypeAdapter(integer(1, 2048)).validate_python(settings["storage"]["material_size_limit_mb"])
+    if not isinstance(settings["storage"]["data_dir"], str):
+        raise ValueError("存储目录必须是字符串")
     return settings

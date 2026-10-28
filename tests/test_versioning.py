@@ -33,7 +33,8 @@ def test_incremental_versions_and_rollback():
     assert len(dao.list_drafts(aid)) == 1
     # 变更日志记了一条 update
     changes = dao.changes_after(aid, 1)
-    assert len(changes) == 1 and changes[0]["op"] == "update" and changes[0]["block_id"] == "b2"
+    block_changes = [c for c in changes if c["block_id"] != "__meta__"]
+    assert len(block_changes) == 1 and block_changes[0]["op"] == "update" and block_changes[0]["block_id"] == "b2"
 
     # HEAD 已是新文本；v1 重建仍是原文
     head = DraftDoc.model_validate_json(dao.latest_draft(aid)["doc_json"])

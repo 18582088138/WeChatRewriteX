@@ -198,6 +198,7 @@ def save_draft(doc: DraftDoc, origin: str = "agent", status: str = "editing",
     return get_draft(doc.article_id, doc.version)
 
 
+@db.read_snapshot
 def get_draft(article_id: str, version: int) -> dict | None:
     if version < 1 or version >= next_version(article_id):
         return None
@@ -215,6 +216,7 @@ def get_draft_by_id(draft_id: str) -> dict | None:
     return db.query_one("SELECT * FROM drafts WHERE id=?", (draft_id,))
 
 
+@db.read_snapshot
 def latest_draft(article_id: str) -> dict | None:
     """当前 HEAD：最近 checkpoint + 后续变更重放（无变更则直接返回 checkpoint）。"""
     cp = latest_checkpoint(article_id)
@@ -234,6 +236,7 @@ def _reconstruct(article_id: str, checkpoint: dict, target_seq: int) -> dict:
     doc = DraftDoc.model_validate_json(checkpoint["doc_json"])
     changes = [c for c in changes_after(article_id, checkpoint["version"])
                if c["seq"] <= target_seq]
+    recorded_pages = False
     for c in changes:
         op = c["op"]
         if op == "update" or op == "replace_image" or op == "set_caption":
@@ -270,14 +273,16 @@ def _reconstruct(article_id: str, checkpoint: dict, target_seq: int) -> dict:
             new = _json.loads(c["new_json"]) if c["new_json"] else None
             if new:
                 doc.meta = doc.meta.model_validate({**doc.meta.model_dump(), **new})
+                recorded_pages = recorded_pages or "xhs_pages" in new
     from ..core.blocks import doc_word_count
     from ..core.pagination import paginate_xhs
     from ..core import config
     doc.version, doc.id = target_seq, f"{article_id}-v{target_seq}"
     doc.meta.word_count = doc_word_count(doc)
-    doc.meta.xhs_pages = paginate_xhs(doc, int(config.get("cards.max_chars_per_page", 300)),
-                                    int(config.get("cards.image_char_cost", 150)),
-                                    int((config.get("variants.xhs.pages") or [3, 9])[1]))
+    if not recorded_pages:
+        doc.meta.xhs_pages = paginate_xhs(doc, int(config.get("cards.max_chars_per_page", 300)),
+                                        int(config.get("cards.image_char_cost", 150)),
+                                        int((config.get("variants.xhs.pages") or [3, 9])[1]))
     out = dict(checkpoint)
     out["word_count"] = doc.meta.word_count
     out["status"] = "editing"
@@ -294,6 +299,7 @@ def list_drafts(article_id: str) -> list[dict]:
         "FROM drafts WHERE article_id=? ORDER BY version DESC", (article_id,))
 
 
+@db.read_snapshot
 def next_version(article_id: str) -> int:
     row = db.query_one("SELECT MAX(version) AS v FROM drafts WHERE article_id=?", (article_id,))
     chg = db.query_one("SELECT MAX(seq) AS s FROM draft_changes WHERE article_id=?", (article_id,))
@@ -326,6 +332,7 @@ def checkpoint_at(article_id: str, version: int) -> dict | None:
         (article_id, version))
 
 
+@db.read_snapshot
 def list_draft_versions(article_id: str) -> list[dict]:
     """版本时间线：checkpoint + 每次编辑的变更组，供版本下拉。"""
     cps = db.query(
@@ -441,7 +448,7 @@ def claim_job(types: tuple[str, ...] | None = None) -> dict | None:
 
 def finish_job(jid: str, result: dict | None = None) -> None:
     db.execute(
-        "UPDATE jobs SET status='done', result_json=?, updated_at=datetime('now','localtime') WHERE id=?",
+        "UPDATE jobs SET status='done', result_json=?, error=NULL, updated_at=datetime('now','localtime') WHERE id=?",
         (json.dumps(result or {}, ensure_ascii=False), jid),
     )
 

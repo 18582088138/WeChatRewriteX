@@ -23,7 +23,7 @@ _logger = logging.getLogger("wenshu")
 
 def log_dir() -> Path:
     from .core import config
-    p = Path(str(config.get("log.path", "log")))
+    p = Path(config.get_env("WENSHU_LOG_DIR") or str(config.get("log.path", "log")))
     return p if p.is_absolute() else RUNTIME_ROOT / p
 
 

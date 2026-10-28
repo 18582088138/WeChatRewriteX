@@ -117,7 +117,8 @@ def _run_publish(article_id: str, payload: dict) -> dict:
 
 def enqueue(job_type: str, article_id: str | None = None, payload: dict | None = None) -> str:
     jid = dao.enqueue_job(job_type, article_id, payload)
-    events.bus.publish("job.enqueued", article_id, job_id=jid, job_type=job_type)
+    from ..storage import db
+    db.after_commit(lambda: events.bus.publish("job.enqueued", article_id, job_id=jid, job_type=job_type))
     return jid
 
 
@@ -150,11 +151,14 @@ def _loop(runtime: WorkerRuntime, lane_types: tuple[str, ...]) -> None:
             result = handler(job["article_id"], payload)
             if isinstance(result, dict) and result.get("status") in ("FAILED", "PARTIAL_FAILED"):
                 from ..storage import db
-                dao.fail_job(job["id"], "导出失败平台: " + ", ".join(result["failed_platforms"]))
-                db.execute("UPDATE jobs SET result_json=? WHERE id=?", (json.dumps(result, ensure_ascii=False), job["id"]))
+                with db.transaction():
+                    dao.fail_job(job["id"], "导出失败平台: " + ", ".join(result["failed_platforms"]))
+                    db.execute("UPDATE jobs SET result_json=? WHERE id=?", (json.dumps(result, ensure_ascii=False), job["id"]))
             else:
                 dao.finish_job(job["id"], result)
-            logging_setup.log("info", "任务完成 %s (article=%s)", job["type"], job["article_id"])
+            logging_setup.log("error" if isinstance(result, dict) and result.get("ok") is False else "info",
+                              "任务执行结束 %s (article=%s, result=%s)", job["type"], job["article_id"],
+                              result.get("status", "done") if isinstance(result, dict) else "done")
         except Exception as e:
             from ..services.draft_service import VersionConflict
             from ..core.statemachine import InvalidTransition

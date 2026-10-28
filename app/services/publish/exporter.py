@@ -146,7 +146,11 @@ def export_variants(article_id: str, platforms: list[str], snapshot_id: str | No
         raise ValueError("未知或空平台列表")
     from ..draft_service import content_hash
     digest = content_hash(doc)
-    root = library.exports_dir(article_id) / "runs" / uuid.uuid4().hex
+    from ...core.execution import operation_id
+    attempt = operation_id() or uuid.uuid4().hex
+    if not attempt.replace("_", "").replace("-", "").isalnum():
+        raise ValueError("导出任务编号无效")
+    root = library.exports_dir(article_id) / "runs" / attempt
     root.mkdir(parents=True, exist_ok=True)
 
     results: dict[str, dict] = {}
@@ -158,7 +162,21 @@ def export_variants(article_id: str, platforms: list[str], snapshot_id: str | No
         pid = dao.create_publish_job(article_id, draft["id"], platform, {})
         try:
             # Build privately, then atomically install the complete platform package.
-            staging = root / (".staging-" + platform)
+            installed = root / platform
+            if installed.exists():
+                saved = json.loads((installed / "manifest.json").read_text(encoding="utf-8"))
+                if saved.get("snapshot_id") != doc.id or saved.get("content_hash") != digest:
+                    raise ValueError("已存在的导出快照不匹配")
+                for relative, checksum in saved["files"].items():
+                    path = (installed / relative).resolve()
+                    if not path.is_relative_to(installed.resolve()) or sha256_file(path) != checksum:
+                        raise ValueError("已存在的发布包校验失败")
+                res = PushResult(ok=True, platform=platform, export_dir=str(installed),
+                                 files=list(saved["files"]) + ["manifest.json"], message="复用已完成的同任务发布包")
+                dao.finish_publish_job(pid, res.__dict__, ok=True)
+                results[platform] = res.__dict__
+                continue
+            staging = root / (".staging-" + platform + "-" + uuid.uuid4().hex)
             with assets.frozen(doc, staging / platform / "media", asset_manifest):
                 res = _export_one(doc, article_id, platform, staging)
             output = staging / platform

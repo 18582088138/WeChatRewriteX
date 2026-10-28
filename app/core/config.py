@@ -123,6 +123,7 @@ DEFAULTS: dict[str, Any] = {
 _db_overlay: Callable[[], dict[str, Any]] | None = None
 _cache: dict[str, Any] | None = None
 _snapshot = ContextVar("settings_snapshot", default=None)
+_bound_data_root: Path | None = None
 
 
 @contextmanager
@@ -224,9 +225,19 @@ def style_dir(pack_name: str | None = None) -> Path:
 
 
 def data_dir() -> Path:
+    if _bound_data_root is not None:
+        return _bound_data_root
     # 测试/便携模式可覆盖数据目录；旧名 WRA_DATA_DIR 仅作兼容回退
     env = os.environ.get("WENSHU_DATA_DIR") or os.environ.get("WRA_DATA_DIR")
     if env:
         return Path(env)
     d = Path(get("storage.data_dir", "data"))
     return d if d.is_absolute() else RUNTIME_ROOT / d
+
+
+def bind_data_dir(root: Path) -> None:
+    global _bound_data_root
+    resolved = root.resolve()
+    if _bound_data_root is not None and _bound_data_root != resolved:
+        raise RuntimeError("变更数据目录需要重启进程")
+    _bound_data_root = resolved

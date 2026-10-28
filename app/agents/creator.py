@@ -42,7 +42,7 @@ class CreatorAgent(AgentBase):
         base = dao.latest_draft(article_id)
         from ..core.execution import operation_id
         key = operation_id()
-        if key and base and base.get("note") == f"job:{key}":
+        if key and base and not base.get("reconstructed") and base.get("note") == f"job:{key}":
             return DraftDoc.model_validate_json(base["doc_json"])
         expected_version = base["version"] if base else 0
         style = self.load_style_pack(article.get("style_pack"))

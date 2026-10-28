@@ -69,8 +69,8 @@ def _diff_blocks(old: DraftDoc, new: DraftDoc) -> list[dict]:
             changes.append({"block_id": b.id, "op": "update",
                             "old": old_map[b.id].model_dump_json(),
                             "new": b.model_dump_json()})
-    old_meta = old.meta.model_dump(exclude={"xhs_pages", "word_count"})
-    new_meta = new.meta.model_dump(exclude={"xhs_pages", "word_count"})
+    old_meta = old.meta.model_dump()
+    new_meta = new.meta.model_dump()
     if old_meta != new_meta:
         changes.append({"block_id": "__meta__", "op": "meta",
                         "old": json.dumps(old_meta, ensure_ascii=False),

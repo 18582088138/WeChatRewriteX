@@ -20,7 +20,11 @@ def manifest(doc) -> dict:
     ids = {mid for block in doc.blocks for mid in
            ([block.asset_id] if block.asset_id else []) + block.citations}
     ids.update(p.asset_id for p in doc.meta.xhs_pages if p.asset_id)
-    return {mid: dao.get_material(mid) for mid in ids if dao.get_material(mid)}
+    view = {mid: dao.get_material(mid) for mid in ids}
+    missing = [mid for mid, material in view.items() if material is None]
+    if missing:
+        raise ValueError("草稿引用的素材不存在: " + ", ".join(missing))
+    return view
 
 
 @contextmanager

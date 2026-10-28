@@ -30,7 +30,11 @@ def latest_review(aid: str) -> dict:
     review = dao.latest_review(aid)
     if not review:
         raise HTTPException(404, "尚无审稿记录")
-    return {"review": review, "items": dao.list_review_items(review["id"])}
+    from ..services.workflow import review_matches
+    draft = dao.latest_draft(aid)
+    current = bool(draft and review_matches(review, DraftDoc.model_validate_json(draft["doc_json"])))
+    return {"review": review, "items": dao.list_review_items(review["id"]), "current": current,
+            "coverage": json.loads(review["scores_json"]).get("coverage", "unknown")}
 
 
 @router.post("/review-items/{item_id}/resolve")
@@ -74,6 +78,46 @@ def resolve_item(item_id: str, body: ResolveItem) -> dict:
 
 class Publish(BaseModel):
     platforms: list[str]
+
+
+class RetryPublish(BaseModel):
+    platform: str | None = None
+
+
+@router.post("/articles/{aid}/publish/retry")
+def retry_publish(aid: str, body: RetryPublish) -> dict:
+    """Retry failed platforms against their original approved/configured snapshot."""
+    from ..storage import db
+    with db.transaction():
+        failed = None
+        seen = set()
+        for job in dao.list_jobs(aid, limit=200):
+            if job["type"] != "publish":
+                continue
+            payload = json.loads(job["payload_json"])
+            requested = payload.get("platforms") or []
+            # A later successful or in-flight attempt supersedes older failures.
+            available = [p for p in requested if p not in seen]
+            seen.update(requested)
+            if body.platform in available and job["status"] in ("pending", "running"):
+                return {"job_id": job["id"], "platforms": requested,
+                        "snapshot_id": payload.get("snapshot_id")}
+            if job["status"] == "failed":
+                result = json.loads(job.get("result_json") or "{}")
+                platforms = [p for p in result.get("failed_platforms", []) if p in available]
+                if platforms and (not body.platform or body.platform in platforms):
+                    failed = job, payload, platforms
+                    break
+        if not failed:
+            raise HTTPException(404, "没有可重试的失败平台")
+        job, payload, platforms = failed
+        snapshot = dao.get_draft_by_id(payload.get("snapshot_id", ""))
+        if not snapshot or snapshot["article_id"] != aid or snapshot["status"] != "finalized":
+            raise HTTPException(409, "原定稿快照不存在")
+        payload["platforms"] = [body.platform] if body.platform else platforms
+        payload["retry_of"] = job["id"]
+        job_id = queue.enqueue("publish", aid, payload)
+        return {"job_id": job_id, "platforms": payload["platforms"], "snapshot_id": snapshot["id"]}
 
 
 @router.post("/articles/{aid}/publish")
@@ -211,11 +255,20 @@ def health() -> dict:
 def ready(request: Request) -> dict:
     from ..storage import db
     runtime = getattr(request.app.state, "runtime", None)
-    db.query_one("SELECT 1")
+    import sqlite3
+    import shutil
+    try:
+        db.query_one("SELECT 1")
+        queue_counts = db.query("SELECT status, COUNT(*) AS count FROM jobs GROUP BY status")
+    except sqlite3.Error:
+        raise HTTPException(503, "数据库暂不可用")
     workers_ok = not request.app.state.worker_enabled or bool(runtime and runtime.healthy())
     if not request.app.state.ready or not workers_ok:
         raise HTTPException(503, "服务未就绪")
-    return {"ok": True, "workers": len(runtime.threads) if runtime else 0}
+    return {"ok": True, "workers": len(runtime.threads) if runtime else 0,
+            "queue": {r["status"]: r["count"] for r in queue_counts},
+            "disk_free_mb": shutil.disk_usage(config.data_dir()).free // (1024 * 1024),
+            "event_sequence": events.bus.sequence, "event_dropped": events.bus.dropped}
 
 
 # ---------- 开发者模式：日志可视化 + 成本监控 ----------

@@ -104,6 +104,8 @@ def article_dir(article_id: str) -> Path:
 
 def _migrate_dir_name(article_id: str, old: str, new: str) -> str:
     """物理改名 + 素材 path 前缀重写。目标已存在则保持原名。"""
+    if db.query_one("SELECT id FROM articles WHERE lib_dir=? AND id<>?", (old, article_id)):
+        return old  # Legacy ambiguous shared folders require an explicit migration plan.
     old_p, new_p = library_root() / old, library_root() / new
     if new_p.exists():
         return old

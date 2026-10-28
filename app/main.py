@@ -36,6 +36,11 @@ def create_app(start_worker: bool = True, llm=None) -> FastAPI:
             hooks.register_hooks()
             from . import logging_setup
             logging_setup.configure()
+            from .context import AppContext
+            from .core import events
+            import copy
+            app.state.context = AppContext(data_dir(), copy.deepcopy(config.all_settings()),
+                                            dao, events.bus, app.state.runtime)
             app.state.ready = True
             yield
         finally:

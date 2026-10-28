@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from ..core.models import BlockType, DraftDoc
 from ..services import draft_service
-from ..storage import dao, library
+from ..storage import dao, db, library
 
 router = APIRouter(prefix="/api", tags=["drafts"])
 
@@ -39,6 +39,7 @@ class Rollback(BaseModel):
     version: int
 
 
+@db.read_snapshot
 def _doc_view(article_id: str, version: int | None = None) -> dict:
     doc, row = draft_service.get_doc(article_id, version)
     return {"draft": {**{k: row[k] for k in
