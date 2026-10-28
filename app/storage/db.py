@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 from ..core.config import data_dir
@@ -9,6 +11,7 @@ from ..core.config import data_dir
 _SCHEMA = Path(__file__).with_name("schema.sql").read_text(encoding="utf-8")
 _db_path: Path | None = None
 _fts_available: bool | None = None
+_local = threading.local()
 
 
 def db_path() -> Path:
@@ -18,12 +21,68 @@ def db_path() -> Path:
     return _db_path
 
 
-def connect() -> sqlite3.Connection:
+@contextmanager
+def connect():
+    """Close every owned connection; DAO calls share the current unit of work."""
+    active = getattr(_local, "connection", None)
+    if active is not None:
+        yield active
+        return
     conn = sqlite3.connect(db_path(), timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
-    return conn
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
+
+
+@contextmanager
+def transaction():
+    """Serialize short read/modify/write operations, with nested savepoints."""
+    active = getattr(_local, "connection", None)
+    if active is not None:
+        depth = getattr(_local, "depth", 0) + 1
+        _local.depth = depth
+        name = f"uow_{depth}"
+        active.execute(f"SAVEPOINT {name}")
+        callbacks = len(_local.callbacks)
+        try:
+            yield active
+            active.execute(f"RELEASE SAVEPOINT {name}")
+        except BaseException:
+            active.execute(f"ROLLBACK TO SAVEPOINT {name}")
+            active.execute(f"RELEASE SAVEPOINT {name}")
+            del _local.callbacks[callbacks:]
+            raise
+        finally:
+            _local.depth -= 1
+        return
+    callbacks = []
+    with connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        _local.connection, _local.callbacks, _local.depth = conn, callbacks, 0
+        try:
+            yield conn
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            _local.connection = None
+            _local.callbacks = []
+    for callback in callbacks:
+        callback()
+
+
+def after_commit(callback) -> None:
+    """Run notifications/file projections only after the authoritative DB commits."""
+    if getattr(_local, "connection", None) is not None:
+        _local.callbacks.append(callback)
+    else:
+        callback()
 
 
 def init_db() -> None:
@@ -73,7 +132,6 @@ def query_one(sql: str, params: tuple = ()) -> dict | None:
     return rows[0] if rows else None
 
 
-def execute(sql: str, params: tuple = ()) -> None:
+def execute(sql: str, params: tuple = ()) -> int:
     with connect() as conn:
-        conn.execute(sql, params)
-        conn.commit()
+        return conn.execute(sql, params).rowcount

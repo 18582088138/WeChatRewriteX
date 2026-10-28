@@ -28,6 +28,11 @@ def create_app(start_worker: bool = True, llm=None) -> FastAPI:
 
     app = FastAPI(title=APP_FULL_NAME, version=APP_VERSION)
 
+    from .services.draft_service import VersionConflict
+    @app.exception_handler(VersionConflict)
+    async def version_conflict(request: Request, exc: VersionConflict):
+        return JSONResponse({"detail": str(exc), "code": "version_conflict"}, status_code=409)
+
     # 本地工具默认可跨域（开发期 Vite 端口不同）
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
                        allow_headers=["*"])

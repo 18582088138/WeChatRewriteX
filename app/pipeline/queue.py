@@ -25,7 +25,7 @@ def register_defaults(llm=None) -> None:
     _handlers.update({
         "collect": lambda aid, payload: orchestrator.run_stage("collect", aid, llm),
         "create": lambda aid, payload: orchestrator.run_stage("create", aid, llm, payload),
-        "review": lambda aid, payload: orchestrator.run_stage("review", aid, llm),
+        "review": lambda aid, payload: orchestrator.run_stage("review", aid, llm, payload),
         "publish": _run_publish,
         "ingest": _run_ingest,
         "deepsearch": _run_deepsearch,

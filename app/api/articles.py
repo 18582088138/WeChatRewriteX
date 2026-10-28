@@ -24,6 +24,7 @@ class CreateArticle(BaseModel):
 
 
 class Finalize(BaseModel):
+    expected_version: int | None = None
     force: bool = False
 
 
@@ -152,37 +153,11 @@ class RevealExport(BaseModel):
 
 @router.post("/{aid}/finalize")
 def finalize(aid: str, body: Finalize) -> dict:
-    art = dao.get_article(aid)
-    if not art:
-        raise HTTPException(404, "文章不存在")
-    draft = dao.latest_draft(aid)
-    if not draft:
-        raise HTTPException(409, "没有草稿")
-    cur = ArticleStatus(art["status"])
-    if cur == ArticleStatus.FINALIZED:
-        # 定稿幂等：已定稿且无新编辑（编辑会自动转回 EDITING）时不重复产快照
-        return {"ok": True, "version": draft["version"], "forced_blockers": 0,
-                "already_finalized": True}
-    review = dao.latest_review(aid)
-    blockers = 0
-    if review:
-        blockers = dao.pending_blockers(review["id"])
-    if blockers and not body.force and config.get("review.block_on_blocker", True):
-        raise HTTPException(409, f"存在 {blockers} 个未处理 blocker，禁止定稿")
-    # 定稿 = 版本节点（V1.7）：落正式版本快照，进回滚列表；定稿后仍可编辑
-    from ..services import draft_service
-    cp = draft_service.save_checkpoint(aid, origin="finalized", status="finalized",
-                                       note="定稿快照")
-    from ..core.statemachine import transition
-    if cur == ArticleStatus.REVIEWED:
-        dao.set_article_status(aid, ArticleStatus.EDITING)
-        cur = ArticleStatus.EDITING
-    transition(cur, ArticleStatus.FINALIZED)
-    dao.set_article_status(aid, ArticleStatus.FINALIZED)
-    events.bus.publish(events.DRAFT_FINALIZED, aid, version=(cp.version if cp else draft["version"]),
-                       forced=bool(body.force and blockers))
-    return {"ok": True, "version": (cp.version if cp else draft["version"]),
-            "forced_blockers": blockers if body.force else 0}
+    from ..services import workflow
+    try:
+        return workflow.finalize(aid, body.force, body.expected_version)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
 
 
 @router.post("/{aid}/reopen")

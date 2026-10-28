@@ -16,7 +16,8 @@ def _isolated_data_dir(tmp_path_factory):
               "TAVILY_API_KEY", "BING_SEARCH_KEY", "PEXELS_API_KEY", "PIXABAY_API_KEY",
               "COVERR_API_KEY", "MINIMAX_API_KEY", "MINIMAX_TTS_API_KEY"):
         if k in os.environ:
-            saved[k] = os.environ.pop(k)
+            saved[k] = os.environ[k]
+        os.environ[k] = ""
     yield d
     os.environ.pop("WENSHU_DATA_DIR", None)
     os.environ.update(saved)

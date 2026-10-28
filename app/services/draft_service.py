@@ -12,23 +12,35 @@ import json
 from ..core import blocks as bk
 from ..core import config, events
 from ..core.models import Block, BlockType, DraftDoc
-from ..storage import dao, library
+from ..storage import dao, db, library
+
+
+class VersionConflict(ValueError):
+    """The caller's snapshot is no longer HEAD; reload before retrying."""
+
+
+def content_hash(doc: DraftDoc) -> str:
+    import hashlib
+    payload = doc.model_dump(exclude={"id", "version", "created_at"})
+    # Pagination/word count are derived and may change with display configuration.
+    payload["meta"].pop("word_count", None)
+    payload["meta"].pop("xhs_pages", None)
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False,
+                                     default=str).encode("utf-8")).hexdigest()
 
 
 def resolve_head_row(draft_id: str) -> dict | None:
-    """把前端持有的 draft id 解析为当前 HEAD 行。
-
-    增量版本下，编辑后的 HEAD 不一定是 drafts 实体行（v2+ 只记在变更日志），
-    所以先按 id 精确查，查不到则按 `<article_id>-vN` 形态回退到该文章 HEAD
-    （修复「编辑后提示草稿不存在」——前端拿到的是上一版编号而非实体 id）。
-    """
-    row = dao.get_draft_by_id(draft_id)
-    if row:
-        return row
-    if "-v" in draft_id:
-        aid = draft_id.rsplit("-v", 1)[0]
-        return dao.latest_draft(aid)
-    return None
+    if "-v" not in draft_id:
+        return None
+    aid, version = draft_id.rsplit("-v", 1)
+    if not version.isdigit():
+        return None
+    head = dao.latest_draft(aid)
+    if not head or not dao.get_draft(aid, int(version)):
+        return None
+    if head["version"] != int(version):
+        raise VersionConflict(f"草稿已更新至 v{head['version']}，请刷新后重试")
+    return head
 
 
 def get_doc(article_id: str, version: int | None = None) -> tuple[DraftDoc, dict]:
@@ -57,85 +69,102 @@ def _diff_blocks(old: DraftDoc, new: DraftDoc) -> list[dict]:
             changes.append({"block_id": b.id, "op": "update",
                             "old": old_map[b.id].model_dump_json(),
                             "new": b.model_dump_json()})
-    old_meta = old.meta.model_dump(exclude={"xhs_pages"})
-    new_meta = new.meta.model_dump(exclude={"xhs_pages"})
+    old_meta = old.meta.model_dump(exclude={"xhs_pages", "word_count"})
+    new_meta = new.meta.model_dump(exclude={"xhs_pages", "word_count"})
     if old_meta != new_meta:
         changes.append({"block_id": "__meta__", "op": "meta",
                         "old": json.dumps(old_meta, ensure_ascii=False),
                         "new": json.dumps(new_meta, ensure_ascii=False)})
+    old_order = [b.id for b in old.blocks if b.id in new_map]
+    new_order = [b.id for b in new.blocks if b.id in old_map]
+    if old_order != new_order:
+        changes.append({"block_id": "__order__", "op": "order", "old": None,
+                        "new": json.dumps([b.id for b in new.blocks])})
     return changes
 
 
-def save_named_version(article_id: str, note: str = "") -> DraftDoc:
-    """【保存版本】（V1.4 主动保存模式）：当前 HEAD 落为命名版本，进可回滚列表。"""
-    head = dao.latest_draft(article_id)
-    if not head:
-        raise ValueError("没有草稿")
-    doc = DraftDoc.model_validate_json(head["doc_json"])
-    doc.version = dao.next_version(article_id)
-    doc.id = f"{article_id}-v{doc.version}"
-    row = dao.save_draft(doc, origin="manual", note=note.strip())
-    library.save_draft_files(doc, bk.to_markdown(doc))
-    events.bus.publish(events.DRAFT_SAVED, article_id, version=doc.version,
-                       origin="manual", checkpoint=True)
-    return DraftDoc.model_validate_json(row["doc_json"])
+def _project_checkpoint(doc: DraftDoc) -> None:
+    # DB is authoritative; files can be rebuilt after an interrupted projection.
+    try:
+        library.save_draft_files(doc, bk.to_markdown(doc))
+    except OSError:
+        from .. import logging_setup
+        logging_setup.log("error", "Checkpoint projection failed %s", doc.id, exc_info=True)
+
+
+def save_named_version(article_id: str, note: str = "", expected_version: int | None = None) -> DraftDoc:
+    with db.transaction():
+        doc, _ = get_doc(article_id)
+        return save_new_version(doc, "manual", checkpoint=True, note=note.strip(),
+                                expected_version=expected_version)
 
 
 def save_new_version(doc: DraftDoc, origin: str, checkpoint: bool = False,
-                     note: str = "") -> DraftDoc:
-    """保存：默认只记块级变更；checkpoint=True 时写稀疏全量快照（创建/定稿/回滚）。"""
-    # 内容变更后小红书分页必须重算（V1.10：分页缓存随内容保鲜，
-    # 审稿字数检查与卡片渲染读同一份）
-    from ..agents.creator import CreatorAgent
-    doc.meta.xhs_pages = CreatorAgent._paginate_xhs(doc)
-    seq = dao.next_version(doc.article_id)
-    head = dao.latest_draft(doc.article_id)
-    if head and not checkpoint:
-        old = DraftDoc.model_validate_json(head["doc_json"])
-        changes = _diff_blocks(old, doc)
-        for c in changes:
-            dao.record_change(doc.article_id, seq, c["block_id"], c["op"],
-                              c["old"], c["new"], origin)
-    doc.version = seq
-    doc.id = f"{doc.article_id}-v{seq}"
+                     note: str = "", expected_version: int | None = None) -> DraftDoc:
+    """Commit a complete version group with compare-and-swap semantics.
+
+    AI/network work must finish before entering this short unit of work.
+    """
+    from ..core.pagination import paginate_xhs
+    doc = doc.model_copy(deep=True)
+    expected = doc.version if expected_version is None else expected_version
     doc.meta.word_count = bk.doc_word_count(doc)
-    if checkpoint or not head:
-        dao.save_draft(doc, origin=origin, note=note)
-        library.save_draft_files(doc, bk.to_markdown(doc))   # 文件只随 checkpoint 落盘
-    events.bus.publish(events.DRAFT_SAVED, doc.article_id, version=doc.version,
-                       origin=origin, checkpoint=checkpoint)
+    doc.meta.xhs_pages = paginate_xhs(doc, int(config.get("cards.max_chars_per_page", 300)),
+                                     int(config.get("cards.image_char_cost", 150)),
+                                     int((config.get("variants.xhs.pages") or [3, 9])[1]))
+    with db.transaction():
+        head = dao.latest_draft(doc.article_id)
+        current = head["version"] if head else 0
+        if expected != current:
+            raise VersionConflict(f"草稿已更新至 v{current}，请刷新后重试")
+        old = DraftDoc.model_validate_json(head["doc_json"]) if head else None
+        changes = _diff_blocks(old, doc) if old else []
+        if head and not checkpoint and not changes:
+            return old
+        doc.version = dao.next_version(doc.article_id)
+        doc.id = f"{doc.article_id}-v{doc.version}"
+        if checkpoint or not head:
+            dao.save_draft(doc, origin=origin, note=note)
+            db.after_commit(lambda: _project_checkpoint(doc))
+        else:
+            for c in changes:
+                dao.record_change(doc.article_id, doc.version, c["block_id"], c["op"],
+                                  c["old"], c["new"], origin)
+        if old and content_hash(old) != content_hash(doc):
+            # Every mutation path shares this rule, including AI repair and rollback.
+            art = dao.get_article(doc.article_id)
+            if art and art["status"] in ("FINALIZED", "DONE", "PUBLISHING", "REVIEWING", "REVIEWED"):
+                from ..core.models import ArticleStatus
+                dao.set_article_status(doc.article_id, ArticleStatus.EDITING)
+                db.after_commit(lambda: events.bus.publish(events.STATUS_CHANGED, doc.article_id,
+                                                          status="EDITING"))
+        db.after_commit(lambda: events.bus.publish(events.DRAFT_SAVED, doc.article_id,
+                        version=doc.version, origin=origin, checkpoint=checkpoint))
     return doc
 
 
 def save_checkpoint(article_id: str, origin: str, status: str = "editing",
                     note: str = "") -> DraftDoc | None:
-    """把当前 HEAD 落为一个稀疏 checkpoint（定稿/手动存档用）。"""
-    head = dao.latest_draft(article_id)
-    if not head:
-        return None
-    doc = DraftDoc.model_validate_json(head["doc_json"])
-    row = save_new_version(doc, origin=origin, checkpoint=True, note=note)
-    dao.set_draft_status(row.id, status)
-    return row
+    with db.transaction():
+        head = dao.latest_draft(article_id)
+        if not head:
+            return None
+        doc = DraftDoc.model_validate_json(head["doc_json"])
+        saved = save_new_version(doc, origin=origin, checkpoint=True, note=note)
+        dao.set_draft_status(saved.id, status)
+        return saved
 
 
-def rollback(article_id: str, target_version: int) -> DraftDoc:
-    """一键回滚：重建目标版本状态并存为新 checkpoint（HEAD 立即指向它）。"""
-    row = dao.get_draft(article_id, target_version)
-    if not row:
-        raise ValueError(f"版本 v{target_version} 不存在")
-    doc = DraftDoc.model_validate_json(row["doc_json"])
-    seq = dao.next_version(article_id)
-    dao.record_change(article_id, seq, "__doc__", "rollback",
-                      None, json.dumps({"target": target_version}), "human")
-    doc.version = seq                      # checkpoint 用新序号，内容为目标态（防 UNIQUE 冲突）
-    doc.id = f"{article_id}-v{seq}"
-    out = dao.save_draft(doc, origin="rollback")
-    out_doc = DraftDoc.model_validate_json(out["doc_json"])
-    library.save_draft_files(out_doc, bk.to_markdown(out_doc))
-    events.bus.publish(events.DRAFT_SAVED, article_id, version=out["version"],
-                       origin="rollback", checkpoint=True)
-    return out_doc
+def rollback(article_id: str, target_version: int, expected_version: int | None = None) -> DraftDoc:
+    with db.transaction():
+        head = dao.latest_draft(article_id)
+        row = dao.get_draft(article_id, target_version)
+        if not row or not head:
+            raise ValueError(f"版本 v{target_version} 不存在")
+        doc = DraftDoc.model_validate_json(row["doc_json"])
+        doc.version = head["version"]
+        return save_new_version(doc, "rollback", checkpoint=True,
+                                note=f"回滚到 v{target_version}", expected_version=expected_version)
 
 
 def apply_ops(doc: DraftDoc, ops: list[dict]) -> int:
@@ -164,6 +193,10 @@ def apply_ops(doc: DraftDoc, ops: list[dict]) -> int:
             nb = Block(id=bk.new_block_id(), type=BlockType(op.get("block_type", "paragraph")),
                        text=str(op.get("text", "")),
                        asset_id=op.get("asset_id"), caption=op.get("caption"))
+            if bid and not bk.get_block(doc, bid):
+                raise ValueError("插入位置不存在")
+            if nb.type in (BlockType.IMAGE, BlockType.VIDEO) and not dao.get_material(nb.asset_id or ""):
+                raise ValueError("素材不存在")
             bk.insert_block(doc, bid or None, nb)
             changed += 1
         elif kind == "update_meta":
@@ -203,6 +236,6 @@ def maybe_recheck(article_id: str, old: DraftDoc, new: DraftDoc) -> bool:
     if changed >= int(cfg.get("min_changed_blocks", 3)) or \
             delta_pct >= float(cfg.get("min_word_delta_pct", 20)):
         from ..pipeline import queue
-        queue.enqueue("review", article_id)
+        queue.enqueue("review", article_id, {"draft_version": new.version})
         return True
     return False

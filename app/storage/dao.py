@@ -170,12 +170,16 @@ def save_draft(doc: DraftDoc, origin: str = "agent", status: str = "editing",
 
 
 def get_draft(article_id: str, version: int) -> dict | None:
+    if version < 1 or version >= next_version(article_id):
+        return None
+    if not db.query_one("SELECT 1 FROM drafts WHERE article_id=? AND version=? UNION ALL SELECT 1 FROM draft_changes WHERE article_id=? AND seq=?", (article_id, version, article_id, version)):
+        return None
     cp = checkpoint_at(article_id, version)
     if not cp:
         return None
     if cp["version"] == version:
         return cp
-    return _reconstruct(aid=article_id, checkpoint=cp, target_seq=version)
+    return _reconstruct(article_id=article_id, checkpoint=cp, target_seq=version)
 
 
 def get_draft_by_id(draft_id: str) -> dict | None:
@@ -216,19 +220,38 @@ def _reconstruct(article_id: str, checkpoint: dict, target_seq: int) -> dict:
                 b = Block.model_validate(new)
                 # 插入位置记录在新块 attrs 的 after
                 after = (c["new_json"] and _json.loads(c["new_json"]).get("_after")) or None
-                doc.blocks.append(b) if after is None else None
+                if after is None:
+                    doc.blocks.insert(0, b) if "_after" in new else doc.blocks.append(b)
                 if after is not None:
                     for i, x in enumerate(doc.blocks):
                         if x.id == after:
                             doc.blocks.insert(i + 1, b)
                             break
+                    else:
+                        raise ValueError(f"Invalid draft history: missing anchor {after}")
         elif op == "remove":
             doc.blocks = [b for b in doc.blocks if b.id != c["block_id"]]
+        elif op == "order":
+            ids = _json.loads(c["new_json"])
+            by_id = {b.id: b for b in doc.blocks}
+            if set(ids) != set(by_id) or len(ids) != len(by_id):
+                raise ValueError("Invalid block order in draft history")
+            doc.blocks = [by_id[bid] for bid in ids]
         elif op == "meta":
             new = _json.loads(c["new_json"]) if c["new_json"] else None
             if new:
                 doc.meta = doc.meta.model_validate({**doc.meta.model_dump(), **new})
+    from ..core.blocks import doc_word_count
+    from ..core.pagination import paginate_xhs
+    from ..core import config
+    doc.version, doc.id = target_seq, f"{article_id}-v{target_seq}"
+    doc.meta.word_count = doc_word_count(doc)
+    doc.meta.xhs_pages = paginate_xhs(doc, int(config.get("cards.max_chars_per_page", 300)),
+                                    int(config.get("cards.image_char_cost", 150)),
+                                    int((config.get("variants.xhs.pages") or [3, 9])[1]))
     out = dict(checkpoint)
+    out["word_count"] = doc.meta.word_count
+    out["status"] = "editing"
     out["doc_json"] = doc.model_dump_json()
     out["version"] = target_seq
     out["id"] = f"{article_id}-v{target_seq}"
@@ -323,7 +346,7 @@ def create_review(article_id: str, draft_id: str, draft_version: int,
 
 def latest_review(article_id: str) -> dict | None:
     return db.query_one(
-        "SELECT * FROM reviews WHERE article_id=? ORDER BY created_at DESC LIMIT 1", (article_id,))
+        "SELECT * FROM reviews WHERE article_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1", (article_id,))
 
 
 def list_review_items(review_id: str) -> list[dict]:
@@ -379,7 +402,6 @@ def claim_job(types: tuple[str, ...] | None = None) -> dict | None:
                                AND run_after<=strftime('%s','now')
                                ORDER BY created_at LIMIT 1)
                    RETURNING *""").fetchone()
-        conn.commit()
         return dict(row) if row else None
 
 
@@ -400,9 +422,9 @@ def fail_job(jid: str, error: str, requeue: bool = False) -> None:
 
 def list_jobs(article_id: str | None = None, limit: int = 50) -> list[dict]:
     if article_id:
-        return db.query("SELECT * FROM jobs WHERE article_id=? ORDER BY created_at DESC LIMIT ?",
+        return db.query("SELECT * FROM jobs WHERE article_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?",
                         (article_id, limit))
-    return db.query("SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (limit,))
+    return db.query("SELECT * FROM jobs ORDER BY created_at DESC, rowid DESC LIMIT ?", (limit,))
 
 
 # ---------- llm_calls / settings / publish ----------

@@ -30,10 +30,12 @@ class InsertRefs(BaseModel):
 
 
 class SaveVersion(BaseModel):
+    expected_version: int | None = None
     note: str = ""
 
 
 class Rollback(BaseModel):
+    expected_version: int | None = None
     version: int
 
 
@@ -63,7 +65,7 @@ def versions(aid: str) -> dict:
 def save_version(aid: str, body: SaveVersion) -> dict:
     """主动保存版本（V1.4）：当前 HEAD 落为命名版本，进可回滚列表。"""
     try:
-        doc = draft_service.save_named_version(aid, body.note)
+        doc = draft_service.save_named_version(aid, body.note, body.expected_version)
     except ValueError as e:
         raise HTTPException(409, str(e))
     return {"version": doc.version, "note": body.note}
@@ -72,7 +74,7 @@ def save_version(aid: str, body: SaveVersion) -> dict:
 @router.post("/articles/{aid}/rollback")
 def rollback_draft(aid: str, body: Rollback) -> dict:
     try:
-        doc = draft_service.rollback(aid, body.version)
+        doc = draft_service.rollback(aid, body.version, body.expected_version)
     except ValueError as e:
         raise HTTPException(404, str(e))
     return {"version": doc.version, "rolled_back_to": body.version,
@@ -91,13 +93,6 @@ def edit_draft(draft_id: str, body: EditOps) -> dict:
     if not changed:
         raise HTTPException(400, "没有生效的修改")
 
-    # 定稿 = 版本快照而非只读锁（V1.7）：定稿后继续编辑自动回到 EDITING，
-    # 再次定稿生成全新独立版本
-    art = dao.get_article(aid)
-    if art and art["status"] == "FINALIZED":
-        from ..core.models import ArticleStatus
-        dao.set_article_status(aid, ArticleStatus.EDITING)
-
     # 标题联动（反馈 1.4）：改主标题 → 同步正文一级标题块 + 项目文件夹改名
     title_op = next((o for o in body.ops
                      if o.get("op") == "update_meta" and o.get("field") == "title_selected"),
@@ -108,10 +103,11 @@ def edit_draft(draft_id: str, body: EditOps) -> dict:
             if b.type == BlockType.HEADING and b.level == 1:
                 b.text = title_op["value"]
                 break
-        library.rename_to_created_title(aid, title_op["value"])
         folder_renamed = True
 
     saved = draft_service.save_new_version(new, origin="human")
+    if folder_renamed:
+        library.rename_to_created_title(aid, title_op["value"])
     recheck = draft_service.maybe_recheck(aid, old, saved)
     return {"draft_id": saved.id, "version": saved.version,
             "recheck_enqueued": recheck, "folder_renamed": folder_renamed}
