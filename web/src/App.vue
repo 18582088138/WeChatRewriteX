@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, onUnmounted } from 'vue'
 import { NConfigProvider, NMessageProvider, NDialogProvider, zhCN, dateZhCN } from 'naive-ui'
 import { useAppStore } from './stores/app'
 
@@ -9,6 +9,8 @@ onMounted(() => {
   store.startSse()
   store.loadDevMode()
 })
+
+onUnmounted(() => store.stopSse())
 
 // taste 规范：主按钮近黑，accent 朱红只给品牌/关键数据，圆角 6-8px
 const themeOverrides = {

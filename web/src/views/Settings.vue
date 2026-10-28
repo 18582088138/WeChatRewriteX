@@ -28,7 +28,10 @@ const editable = ref({
 })
 
 async function load() {
-  data.value = await api.get('/api/settings')
+  try { data.value = await api.get('/api/settings') } catch (error: any) {
+    data.value = { settings: {}, channels: [], llm_available: false, searcher: 'null', embedding_available: false }
+    message.warning(error.message)
+  }
   const s = data.value.settings
   for (const k of Object.keys(editable.value)) {
     const v = k.split('.').reduce((o, p) => o?.[p], s)
@@ -65,6 +68,8 @@ async function loadLogs() {
 function saveToken() {
   setToken(token.value.trim())
   message.success('访问令牌已保存到本机')
+  load()
+  store.startSse()
 }
 </script>
 

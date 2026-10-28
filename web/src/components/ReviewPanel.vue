@@ -1,13 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NButton, NEmpty, useDialog, useMessage } from 'naive-ui'
 import { api } from '../api'
-import type { DraftDoc, ReviewItem } from '../types'
+import { useAppStore } from '../stores/app'
+import type { DraftDoc, DraftView, ReviewItem } from '../types'
 
 const props = defineProps<{ articleId: string }>()
 const emit = defineEmits<{ (e: 'goto-publish'): void }>()
 const message = useMessage()
 const dialog = useDialog()
+const store = useAppStore()
+const reviewCurrent = ref(false)
+const saveBusy = ref(false)
 
 const review = ref<any>(null)
 const items = ref<ReviewItem[]>([])
@@ -77,20 +81,30 @@ const SEV_EDGE: Record<string, string> = {
   blocker: 'var(--pill-neg-ink)', warn: '#E3B23C', info: 'var(--control)',
 }
 
-async function load() {
+let generation = 0
+let controller: AbortController | null = null
+async function load(preserveEdits = false) {
+  if (preserveEdits && (editingId.value || saveBusy.value)) return
+  const current = ++generation
+  controller?.abort()
+  controller = new AbortController()
+  const signal = controller.signal
   loading.value = true
   try {
-    const r = await api.get(`/api/articles/${props.articleId}/reviews/latest`)
-    review.value = r.review
-    items.value = r.items
-  } catch { review.value = null; items.value = [] }
-  try {
-    const d = await api.get(`/api/articles/${props.articleId}/draft`)
-    doc.value = d.draft.doc
-    draftId.value = d.draft.id
-  } catch { doc.value = null }
-  loading.value = false
+    const [r, d] = await Promise.all([
+      api.get(`/api/articles/${props.articleId}/reviews/latest`, signal).catch(() => null),
+      api.get<DraftView>(`/api/articles/${props.articleId}/draft`, signal).catch(() => null),
+    ])
+    if (current !== generation || (preserveEdits && (editingId.value || saveBusy.value))) return
+    review.value = r?.review || null
+    reviewCurrent.value = !!r?.current
+    items.value = r?.items || []
+    doc.value = d?.draft.doc || null
+    draftId.value = d?.draft.id || ''
+  } finally { if (current === generation) loading.value = false }
 }
+watch(() => store.articleTicks[props.articleId] || 0, () => load(true))
+onUnmounted(() => controller?.abort())
 onMounted(() => {
   window.addEventListener('mousemove', onMove)
   window.addEventListener('mouseup', onUp)
@@ -115,8 +129,8 @@ const sortedItems = computed(() => {
   const INF = Number.MAX_SAFE_INTEGER
   const sev: Record<string, number> = { blocker: 0, warn: 1, info: 2 }
   return [...items.value].sort((a, b) => {
-    const ia = (a.block_id && blockOrder.value.get(a.block_id)) ?? INF
-    const ib = (b.block_id && blockOrder.value.get(b.block_id)) ?? INF
+    const ia = a.block_id ? (blockOrder.value.get(a.block_id) ?? INF) : INF
+    const ib = b.block_id ? (blockOrder.value.get(b.block_id) ?? INF) : INF
     if (ia !== ib) return ia - ib
     return (sev[a.severity] ?? 3) - (sev[b.severity] ?? 3)
   })
@@ -140,17 +154,17 @@ function dblclickBlock(b: any) {
   editText.value = b.text
 }
 async function saveEdit() {
-  if (!editingId.value || !doc.value) return
-  const b: any = doc.value.blocks.find(x => x.id === editingId.value)
-  if (b && b.text !== editText.value) {
-    try {
-      const r = await api.put(`/api/drafts/${draftId.value}/edit`,
-        { ops: [{ op: 'update', block_id: b.id, text: editText.value }] })
-      message.success(`已保存为 v${r.version}` + (r.recheck_enqueued ? '（已触发复审）' : ''))
-      await load()
-    } catch (e: any) { message.error(e.message) }
-  }
-  editingId.value = null
+  if (!editingId.value || !doc.value || saveBusy.value) return
+  const b = doc.value.blocks.find(x => x.id === editingId.value)
+  if (!b || b.text === editText.value) { editingId.value = null; return }
+  saveBusy.value = true
+  try {
+    const r = await api.put(`/api/drafts/${draftId.value}/edit`,
+      { ops: [{ op: 'update', block_id: b.id, text: editText.value }] })
+    editingId.value = null
+    message.success(`已保存为 v${r.version}`)
+    await load()
+  } catch (e: any) { message.error(e.message) } finally { saveBusy.value = false }
 }
 
 async function resolve(item: ReviewItem, action: 'accept' | 'dismiss' | 'fix') {
@@ -179,20 +193,21 @@ async function reReview() {
   try {
     await api.post(`/api/articles/${props.articleId}/advance`, { stage: 'review' })
     message.success('复审任务已提交')
-    setTimeout(load, 1500)
+    setTimeout(() => load(), 1500)
   } catch (e: any) { message.error(e.message) }
 }
 
 async function finalize(force = false) {
+  if (!doc.value || finalizing.value || saveBusy.value || editingId.value || loading.value) return
   finalizing.value = true
   try {
-    const r = await api.post(`/api/articles/${props.articleId}/finalize`, { force })
+    const r = await api.post(`/api/articles/${props.articleId}/finalize`, { force, expected_version: doc.value?.version })
     message.success(r.already_finalized ? '已是定稿版本（无新改动）' : `已定稿为 v${r.version}`)
     if (!r.already_finalized) emit('goto-publish')
   } catch (e: any) {
-    if (String(e.message).includes('blocker')) {
+    if (e.status === 409 && /blocker|审稿/.test(String(e.message))) {
       dialog.warning({
-        title: '存在未处理 blocker',
+        title: '审稿确认未完成',
         content: `${e.message}。可以双击正文修改、采纳并修复，或强制定稿（将留痕）。`,
         positiveText: '强制定稿', negativeText: '再改改',
         onPositiveClick: () => finalize(true),
@@ -270,6 +285,9 @@ async function finalize(force = false) {
       </div>
 
       <div class="review-items">
+        <p v-if="review && !reviewCurrent" class="text-sm mb-3" style="color: var(--pill-warn-ink);">内容已修改，当前审稿已过期，请重新审稿。</p>
+        <p v-if="scores.coverage === 'rules_only'" class="text-xs mb-3" style="color: var(--muted);">已完成规则审稿；未配置 AI 审稿模型，事实与来源需人工确认。</p>
+        <p v-if="scores.coverage === 'failed'" class="text-sm mb-3" style="color: var(--pill-neg-ink);">AI 审稿失败，请重试或在人工确认后强制定稿。</p>
         <NEmpty v-if="!loading && !items.length" description="暂无审稿意见" class="py-12" />
         <div v-for="item in sortedItems" :key="item.id"
              class="px-3.5 py-3 cursor-pointer transition-colors hover:bg-[var(--raised)] review-item"
@@ -302,7 +320,7 @@ async function finalize(force = false) {
 
       <div class="p-3 shrink-0" style="border-top: 1px solid var(--rule);">
         <NButton block type="primary" :loading="finalizing"
-                 :disabled="!doc" @click="finalize(false)">
+                 :disabled="!doc || saveBusy || !!editingId || loading" @click="finalize(false)">
           定稿{{ pendingBlockers.length ? `（含 ${pendingBlockers.length} 个阻断项）` : '' }}
         </NButton>
         <div class="text-[11px] mt-1.5 text-center" style="color: var(--faint);">

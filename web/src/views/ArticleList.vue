@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { NButton, NInput, NModal, NUpload, NUploadDragger,
+import { NButton, NInput, NModal, NPagination, NUpload, NUploadDragger,
          useMessage, type UploadFileInfo } from 'naive-ui'
 import { api } from '../api'
 import { useAppStore } from '../stores/app'
@@ -21,20 +21,20 @@ const newTitle = ref('')
 const fileList = ref<UploadFileInfo[]>([])
 const creating = ref(false)
 
-const list = computed(() => {
-  let rows = store.articles
-  if (filter.value !== '全部') rows = rows.filter(a => a.ui_status === filter.value)
-  const kw = q.value.trim().toLowerCase()
-  if (kw) rows = rows.filter(a => (a.title + a.url).toLowerCase().includes(kw))
-  return rows
+const list = computed(() => store.articles)
+const counts = computed(() => store.articleCounts)
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+watch([filter, q], () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    store.articleFilter = filter.value === '全部' ? '' : filter.value
+    store.articleSearch = q.value.trim()
+    store.articlePage = 1
+    store.refreshArticles()
+  }, 250)
 })
-
-const counts = computed(() => ({
-  全部: store.articles.length,
-  New: store.articles.filter(a => a.ui_status === 'New').length,
-  Process: store.articles.filter(a => a.ui_status === 'Process').length,
-  Done: store.articles.filter(a => a.ui_status === 'Done').length,
-}))
+watch(() => store.articlePage, () => store.refreshArticles())
+onUnmounted(() => { if (searchTimer) clearTimeout(searchTimer) })
 
 /** 从上传文件里推断主题名：优先公共父目录名（文件夹上传时 webkitRelativePath 带目录） */
 function guessTitle(files: UploadFileInfo[]): string {
@@ -122,7 +122,7 @@ onMounted(store.refreshArticles)
         <div>
           <h1 class="text-2xl font-semibold tracking-tight">文章</h1>
           <p class="text-sm mt-1" style="color: var(--muted);">
-            共 {{ store.articles.length }} 篇 · 处理中 {{ counts.Process }} 篇
+            共 {{ store.articleTotal }} 篇 · 处理中 {{ counts.Process }} 篇
           </p>
         </div>
         <!-- 筛选（下划线 tabs 风格）+ 搜索 -->
@@ -167,6 +167,9 @@ onMounted(store.refreshArticles)
           <StatusChip :status="a.status" :ui-status="a.ui_status" />
         </div>
       </div>
+      <NPagination v-if="store.articleTotal > store.articlePageSize" class="mt-5"
+                   v-model:page="store.articlePage" :page-size="store.articlePageSize"
+                   :item-count="store.articleTotal" />
     </main>
 
     <!-- 资料收集弹窗：网页链接 / 本地文件 双模式 -->

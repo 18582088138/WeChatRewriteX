@@ -9,15 +9,22 @@ export function setToken(t: string) {
   localStorage.setItem('wenshu_token', t)
 }
 
-function withToken(url: string): string {
-  const t = getToken()
-  return t ? url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(t) : url
+function authHeaders(json = false): Record<string, string> {
+  const headers: Record<string, string> = json ? { 'Content-Type': 'application/json' } : {}
+  const token = getToken()
+  if (token) headers.Authorization = 'Bearer ' + token
+  return headers
 }
 
-async function request<T = any>(method: string, url: string, body?: unknown): Promise<T> {
-  const resp = await fetch(withToken(url), {
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number, readonly code?: string) { super(message) }
+}
+
+async function request<T = any>(method: string, url: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  const resp = await fetch(url, {
     method,
-    headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+    headers: authHeaders(body !== undefined),
+    signal, credentials: 'same-origin',
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
   if (!resp.ok) {
@@ -25,13 +32,13 @@ async function request<T = any>(method: string, url: string, body?: unknown): Pr
     try {
       detail = (await resp.json()).detail || detail
     } catch { /* ignore */ }
-    throw new Error(detail)
+    throw new ApiError(detail, resp.status)
   }
   return resp.json() as Promise<T>
 }
 
 export const api = {
-  get: <T = any>(url: string) => request<T>('GET', url),
+  get: <T = any>(url: string, signal?: AbortSignal) => request<T>('GET', url, undefined, signal),
   post: <T = any>(url: string, body?: unknown) => request<T>('POST', url, body),
   put: <T = any>(url: string, body?: unknown) => request<T>('PUT', url, body),
   del: <T = any>(url: string) => request<T>('DELETE', url),
@@ -39,7 +46,7 @@ export const api = {
   async upload(url: string, file: File): Promise<any> {
     const form = new FormData()
     form.append('file', file)
-    const resp = await fetch(withToken(url), { method: 'POST', body: form })
+    const resp = await fetch(url, { method: 'POST', body: form, headers: authHeaders(), credentials: 'same-origin' })
     if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || resp.statusText)
     return resp.json()
   },
@@ -48,18 +55,18 @@ export const api = {
   async uploadBatch(url: string, files: File[]): Promise<any> {
     const form = new FormData()
     for (const f of files) form.append('files', f, f.name)
-    const resp = await fetch(withToken(url), { method: 'POST', body: form })
+    const resp = await fetch(url, { method: 'POST', body: form, headers: authHeaders(), credentials: 'same-origin' })
     if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || resp.statusText)
     return resp.json()
   },
 
   fileUrl(rel: string | null | undefined): string {
-    return rel ? withToken('/files/' + rel.replace(/^data\//, '')) : ''
+    return rel ? '/files/' + rel.replace(/^data\//, '').replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/') : ''
   },
 
   /** 将后端返回的 /files/... 路径补上访问令牌 */
   absUrl(path: string | null | undefined): string {
-    return path ? withToken(path) : ''
+    return path?.startsWith('/files/') ? this.fileUrl(path.slice(7)) : path || ''
   },
 }
 
@@ -73,17 +80,23 @@ export interface SseEvent {
 export function subscribeSse(onEvent: (e: SseEvent) => void): () => void {
   let closed = false
   let es: EventSource | null = null
-  const connect = () => {
+  let reconnect: ReturnType<typeof setTimeout> | null = null
+  const connect = async () => {
     if (closed) return
-    es = new EventSource(withToken('/api/sse'))
+    try { await api.get('/api/session') } catch {
+      if (!closed) reconnect = setTimeout(connect, 3000)
+      return
+    }
+    if (closed) return
+    es = new EventSource('/api/sse')
     es.onmessage = (ev) => {
       try { onEvent(JSON.parse(ev.data)) } catch { /* heartbeat */ }
     }
     es.onerror = () => {
       es?.close()
-      if (!closed) setTimeout(connect, 3000)
+      if (!closed) reconnect = setTimeout(connect, 3000)
     }
   }
   connect()
-  return () => { closed = true; es?.close() }
+  return () => { closed = true; if (reconnect) clearTimeout(reconnect); es?.close() }
 }

@@ -11,6 +11,8 @@ export interface Article {
   progress?: { running: string[]; pending: string[]; last_done: string | null }
   materials_count?: number
   versions?: DraftRow[]
+  selected_material_ids?: string[]
+  user_notes?: string
   latest_review?: { id: string } | null
   publish_jobs?: PublishJob[]
 }
@@ -32,6 +34,8 @@ export interface DraftDoc {
   version: number
   blocks: Block[]
   meta: {
+    subtitle: string
+    ref_links: { title: string; url: string }[]
     keywords: string[]
     one_liner: string
     title_candidates: string[]
@@ -64,7 +68,9 @@ export interface Material {
   fetch_status: string
   watermark?: number | null
   width?: number
+  duration?: number | null
   height?: number
+  source_material_id?: string | null
   source_url?: string
   created_at: string
 }
@@ -96,4 +102,26 @@ export interface VersionRow {
   status: string
   origin: string
   created_at: string
+}
+
+
+export interface DraftView {
+  draft: DraftRow & { doc: DraftDoc }
+  versions: VersionInfo[]
+}
+export interface VersionInfo {
+  version: number
+  origin: string
+  status: string
+  checkpoint: boolean
+  saved?: boolean
+  note?: string
+  draft_id?: string
+  word_count: number | null
+  created_at: string
+}
+export interface ArticlePage {
+  articles: Article[]
+  total: number
+  counts: Record<string, number>
 }

@@ -55,7 +55,7 @@ onMounted(async () => {
   else if (['DRAFTED'].includes(s || '')) tab.value = 'create'
   else tab.value = 'materials'
 })
-watch(() => store.workbenchTick, load)
+watch(() => store.articleTicks[aid] || 0, load)
 
 const status = computed(() => article.value?.status || '')
 
