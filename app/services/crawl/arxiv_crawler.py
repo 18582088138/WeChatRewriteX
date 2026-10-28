@@ -6,6 +6,8 @@ import xml.etree.ElementTree as ET
 
 import httpx
 
+from .. import http
+
 from .base import CrawlError, RawArticle
 
 _ATOM = "{http://www.w3.org/2005/Atom}"
@@ -24,7 +26,7 @@ class ArxivCrawler:
         arxiv_id = m.group(1)
         api = f"https://export.arxiv.org/api/query?id_list={arxiv_id}"
         try:
-            resp = httpx.get(api, timeout=30)
+            resp = http.get(api, timeout=30)
             resp.raise_for_status()
         except httpx.HTTPError as e:
             raise CrawlError(f"arXiv API 请求失败: {e}") from e

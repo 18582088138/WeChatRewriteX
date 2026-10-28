@@ -7,7 +7,7 @@ from __future__ import annotations
 import array
 import math
 
-import httpx
+from ..http import client_for
 
 from ...core import config
 from ..llm.router import PROVIDER_PRESETS, _enabled_channels, _resolve
@@ -49,7 +49,7 @@ class ApiEmbedder:
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        with httpx.Client(timeout=60) as client:
+        with client_for(self.base_url, timeout=60) as client:
             resp = client.post(
                 f"{self.base_url}/embeddings",
                 headers={"Authorization": f"Bearer {self.key}"},

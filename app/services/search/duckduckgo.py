@@ -8,6 +8,8 @@ from __future__ import annotations
 from urllib.parse import parse_qs, quote_plus, urlparse
 
 import httpx
+
+from .. import http
 from lxml import html as lxml_html
 
 from .base import SearchResult
@@ -26,7 +28,7 @@ class DuckDuckGoSearcher:
                days_window: int | None = None) -> list[SearchResult]:
         url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
         try:
-            resp = httpx.get(url, headers={"User-Agent": UA}, timeout=20,
+            resp = http.get(url, headers={"User-Agent": UA}, timeout=20,
                              follow_redirects=True)
             resp.raise_for_status()
         except httpx.HTTPError:

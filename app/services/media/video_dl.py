@@ -4,6 +4,8 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+from ..http import proxy_for
+
 MAX_MB = 200
 
 
@@ -23,6 +25,9 @@ def download_video(url: str, max_mb: int = MAX_MB, timeout: int = 240) -> tuple[
             "outtmpl": out,
             "socket_timeout": 60,
         }
+        proxy = proxy_for(url)
+        if proxy:
+            opts["proxy"] = proxy
         try:
             import yt_dlp.utils  # noqa
             with yt_dlp.YoutubeDL(opts) as ydl:

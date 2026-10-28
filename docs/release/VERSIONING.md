@@ -14,7 +14,9 @@
 
 ## 2. CHANGELOG：每次发布三句话
 
-建议新增 `CHANGELOG.md`，按 [Keep a Changelog](https://keepachangelog.com/zh-CN/) 精简约定：
+已新增 [CHANGELOG.md](../../CHANGELOG.md)，每轮更新记录用户可感知的变化、验证结果和已知问题。
+未打包的改动标记“未发布”；正式发布时移除该标记，实际版本号以 `app/__init__.py` 为准。
+按 [Keep a Changelog](https://keepachangelog.com/zh-CN/) 精简约定：
 
 ```
 ## [1.7.0] - 2026-11-xx

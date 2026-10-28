@@ -4,12 +4,11 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
 
-import httpx
-
 from ...core import config
 from ...storage import library
 from ..crawl.base import ImageRef
 from . import filter as media_filter
+from ..http import client_for
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
@@ -35,7 +34,7 @@ def referer_for(url: str, fallback: str | None = None) -> str:
 
 def download_file(url: str, referer: str | None = None, timeout: float = 30) -> bytes:
     headers = {"User-Agent": UA, "Referer": referer_for(url, referer)}
-    with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+    with client_for(url, timeout=timeout, follow_redirects=True) as client:
         resp = client.get(url, headers=headers)
         resp.raise_for_status()
         return resp.content

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import httpx
 
+from .. import http
+
 from ...core import config
 from .base import SearchResult
 
@@ -24,7 +26,7 @@ class TavilySearcher:
         if days_window:
             payload["days"] = max(1, days_window * 2 + 1)  # 前后 N 天 → 总跨度
         try:
-            resp = httpx.post("https://api.tavily.com/search", json=payload, timeout=30)
+            resp = http.post("https://api.tavily.com/search", json=payload, timeout=30)
             resp.raise_for_status()
         except httpx.HTTPError:
             return []

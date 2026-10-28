@@ -7,7 +7,7 @@
 """
 from __future__ import annotations
 
-import httpx
+from .. import http
 
 from ...core import config
 from ...storage import dao, library
@@ -24,7 +24,7 @@ def _pexels_images(query: str, limit: int) -> list[dict]:
     if not key:
         return []
     try:
-        resp = httpx.get(_PEXELS_IMG, params={"query": query, "per_page": limit},
+        resp = http.get(_PEXELS_IMG, params={"query": query, "per_page": limit},
                          headers={"Authorization": key}, timeout=20)
         resp.raise_for_status()
         return [{"url": p["src"]["large"], "title": p.get("alt") or query,
@@ -39,7 +39,7 @@ def _pexels_videos(query: str, limit: int) -> list[dict]:
     if not key:
         return []
     try:
-        resp = httpx.get(_PEXELS_VID, params={"query": query, "per_page": limit},
+        resp = http.get(_PEXELS_VID, params={"query": query, "per_page": limit},
                          headers={"Authorization": key}, timeout=20)
         resp.raise_for_status()
         out = []
@@ -61,7 +61,7 @@ def _pixabay_images(query: str, limit: int) -> list[dict]:
     if not key:
         return []
     try:
-        resp = httpx.get(_PIXABAY_IMG,
+        resp = http.get(_PIXABAY_IMG,
                          params={"key": key, "q": query, "per_page": limit,
                                  "image_type": "photo", "safesearch": "true"},
                          timeout=20)
@@ -78,7 +78,7 @@ def _pixabay_videos(query: str, limit: int) -> list[dict]:
     if not key:
         return []
     try:
-        resp = httpx.get(_PIXABAY_VID,
+        resp = http.get(_PIXABAY_VID,
                          params={"key": key, "q": query, "per_page": limit,
                                  "safesearch": "true"}, timeout=20)
         resp.raise_for_status()

@@ -6,6 +6,8 @@ from urllib.parse import quote
 
 import httpx
 
+from .. import http
+
 from .base import SearchResult
 
 _ATOM = "{http://www.w3.org/2005/Atom}"
@@ -24,7 +26,7 @@ class ArxivSearcher:
         url = (f"https://export.arxiv.org/api/query?search_query={q}"
                f"&start=0&max_results={max_results}&sortBy=submittedDate&sortOrder=descending")
         try:
-            resp = httpx.get(url, timeout=30)
+            resp = http.get(url, timeout=30)
             resp.raise_for_status()
         except httpx.HTTPError:
             return []

@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import re
 
+import httpx
 import trafilatura
 from lxml import html as lxml_html
 
 from .base import CrawlError, ImageRef, RawArticle
+from .. import http
 
 _SKIP_IMG = re.compile(r"logo|icon|avatar|sprite|blank|pixel|loading", re.I)
 
@@ -18,7 +20,14 @@ class TrafilaturaCrawler:
         return url.startswith(("http://", "https://"))
 
     def fetch(self, url: str) -> RawArticle:
-        html_text = trafilatura.fetch_url(url)
+        from .wechat_mp import UA
+        try:
+            response = http.get(url, headers={"User-Agent": UA}, timeout=30,
+                                follow_redirects=True)
+            response.raise_for_status()
+            html_text = response.text
+        except httpx.HTTPError as exc:
+            raise CrawlError(f"页面请求失败，请检查网络和系统代理: {exc}") from exc
         if not html_text:
             raise CrawlError("页面抓取失败（可能需要 JS 渲染或存在反爬）")
         from ..media.filter import clean_markdown, image_url_ok

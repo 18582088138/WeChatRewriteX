@@ -9,6 +9,8 @@ import base64
 from urllib.parse import parse_qs, quote_plus, urlparse
 
 import httpx
+
+from .. import http
 from lxml import html as lxml_html
 
 from .base import SearchResult
@@ -30,7 +32,7 @@ class BingSearcher:
         if days_window:
             params["filters"] = f"ex1:\"ez{(days_window * 2)}\""
         try:
-            resp = httpx.get("https://www.bing.com/search", params=params,
+            resp = http.get("https://www.bing.com/search", params=params,
                              headers={"User-Agent": UA,
                                       "Accept-Language": "zh-CN,zh;q=0.9"},
                              timeout=20, follow_redirects=True)

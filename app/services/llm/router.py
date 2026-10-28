@@ -15,6 +15,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from ...core import config
+from ..http import client_for
 from ...storage import dao
 
 PROVIDER_PRESETS = {
@@ -84,7 +85,7 @@ def _chat(channel: dict, model: str, messages: list[dict], temperature: float,
         payload["response_format"] = {"type": "json_object"}
     if max_tokens:
         payload["max_tokens"] = max_tokens
-    with httpx.Client(timeout=timeout) as client:
+    with client_for(base_url, timeout=timeout) as client:
         resp = client.post(
             f"{base_url.rstrip('/')}/chat/completions",
             headers={"Authorization": f"Bearer {key}"},

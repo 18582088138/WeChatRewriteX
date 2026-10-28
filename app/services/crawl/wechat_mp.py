@@ -12,6 +12,7 @@ import httpx
 from lxml import html as lxml_html
 
 from .base import CrawlError, ImageRef, RawArticle
+from .. import http
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
@@ -33,7 +34,10 @@ class WechatMpCrawler:
 
     def fetch(self, url: str) -> RawArticle:
         try:
-            resp = httpx.get(url, headers={"User-Agent": UA}, timeout=30, follow_redirects=True)
+            resp = http.get(url, headers={"User-Agent": UA}, timeout=30, follow_redirects=True)
+        except httpx.TimeoutException as e:
+            raise CrawlError("公众号连接超时，请检查网络和系统代理；公司网络需启用 PAC 自动代理，"
+                             "也可设置 WENSHU_HTTP_PROXY 后重试") from e
         except httpx.HTTPError as e:
             raise CrawlError(f"公众号文章请求失败: {e}") from e
         if resp.status_code != 200:
