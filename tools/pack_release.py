@@ -39,7 +39,8 @@ def _web_dist_fresh() -> bool:
     if not dist.exists():
         return False
     inputs = [f for f in (ROOT / "web" / "src").rglob("*") if f.is_file()]
-    inputs += [ROOT / "web" / name for name in ("package.json", "package-lock.json", "vite.config.ts", "tsconfig.json")]
+    inputs += [ROOT / "web" / name for name in ("package.json", "package-lock.json", "index.html")]
+    inputs += list((ROOT / "web").glob("*.config.*")) + list((ROOT / "web").glob("tsconfig*.json"))
     newest_src = max((f.stat().st_mtime for f in inputs if f.exists()), default=0)
     return dist.stat().st_mtime >= newest_src
 
@@ -94,9 +95,13 @@ def bundle_browsers(pkg_dir: Path) -> None:
 
 
 def copy_docs(dst: Path) -> None:
-    (dst / "docs").mkdir(parents=True, exist_ok=True)
+    # Preserve repository-relative links, including deployment -> architecture.
+    shutil.copytree(ROOT / "docs", dst / "docs", dirs_exist_ok=True)
+    for name in ("README.md", "CHANGELOG.md"):
+        shutil.copy(ROOT / name, dst / name)
+    # Keep the entry points used by older release packages.
     for name in ("ARTIFACTS.md", "DEPLOY.md"):
-        shutil.copy(ROOT / "docs" / "release" / name, dst / "docs" / name)
+        (dst / "docs" / name).write_text(f"发布文档见 [{name}](release/{name})。\n", encoding="utf-8")
 
 
 def main() -> None:
@@ -128,7 +133,7 @@ def main() -> None:
     # 2. sdist 源码包
     if not args.skip_sdist:
         print("[2] sdist 源码包")
-        run([PY, "-m", "build", "--sdist"])
+        run([PY, "-m", "build", "--sdist", "--no-isolation"])
         sdist = ROOT / "dist" / f"wenshu-{ver}.tar.gz"
         if sdist.exists():
             shutil.copy(sdist, RELEASE / sdist.name)

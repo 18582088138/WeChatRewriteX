@@ -77,6 +77,7 @@ Vue 类型检查、浏览器、冷安装 wheel、Docker。只有缺少 Chromium 
 
 依赖更新使用 `uv pip compile pyproject.toml --python-version 3.10 --universal --generate-hashes -o requirements.lock`，
 开发锁加 `--extra dev`；更新后须验证冷环境。源码安装按 `requirements-dev.lock` 运行测试，前端要求 Node ≥20.19。
+冻结构建锁 `requirements-build.lock` 加 `--extra dev --extra packaging`；发布工具、Linux 构建和 CI 使用同一份构建依赖。
 最低 Python 版本必须显式指定，锁文件用环境标记选择各 Python 版本兼容的 NumPy、Pillow 等依赖。
 
 进程配置与事件总线目前仍是单数据根资源，AppContext 显式持有它们。完整独立数据根、多用户、独立 worker
