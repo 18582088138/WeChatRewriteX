@@ -33,6 +33,9 @@ def create_app(start_worker: bool = True, llm=None) -> FastAPI:
             if not start_worker:
                 db.init_db()
                 config.set_db_overlay(dao.db_settings)
+            # 外部项目文件夹导入：启动时全量扫一次 + 后台定时扫描（V1.14）
+            from .services import imports as import_svc
+            import_svc.start_watcher()
             hooks.register_hooks()
             from . import logging_setup
             logging_setup.configure()

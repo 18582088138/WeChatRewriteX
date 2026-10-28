@@ -197,3 +197,10 @@ def reopen(aid: str) -> dict:
 @jobs_router.get("")
 def list_jobs(article_id: str | None = None, limit: int = 50) -> dict:
     return {"jobs": dao.list_jobs(article_id, limit)}
+
+
+@router.post("/imports/scan")
+def scan_imports() -> dict:
+    """手动触发 resource/ 项目文件夹扫描导入（外部拷贝进来的文章文件夹）。"""
+    from ..services import imports as import_svc
+    return import_svc.scan_once()

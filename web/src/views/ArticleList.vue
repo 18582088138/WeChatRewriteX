@@ -20,6 +20,26 @@ const newNotes = ref('')
 const newTitle = ref('')
 const fileList = ref<UploadFileInfo[]>([])
 const creating = ref(false)
+const scanning = ref(false)
+
+/** 手动扫描 resource/ 下新增的项目文件夹并导入（也可后台每 30s 自动扫描） */
+async function scanImports() {
+  scanning.value = true
+  try {
+    const r = await api.post('/api/articles/imports/scan')
+    const n = r.imported?.length || 0
+    if (n) {
+      message.success(`已导入 ${n} 个项目文件夹：${r.imported.map((x: any) => x.folder).join('、').slice(0, 80)}`)
+    } else {
+      message.info('没有发现新的项目文件夹（resource/ 下未入库的文件夹才会被导入）')
+    }
+    await store.refreshArticles()
+  } catch (e: any) {
+    message.error(e.message)
+  } finally {
+    scanning.value = false
+  }
+}
 
 const list = computed(() => store.articles)
 const counts = computed(() => store.articleCounts)

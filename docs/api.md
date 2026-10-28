@@ -25,6 +25,7 @@ Base URL: `http://127.0.0.1:8000`，所有接口前缀 `/api`。运行时可访�
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
+| POST | `/api/articles/imports/scan` | 扫描 resource/ 下新增的项目文件夹并导入（外部拷贝进来的文章文件夹：重建 article+素材+草稿，幂等按 lib_dir 去重） |
 | POST | `/api/articles` | 资料收集录入。`{url?, title?, user_notes?, style_pack?, target_word_count?, auto_collect=true}`。链接模式：url 必填、默认自动入队收集；本地文件模式：url 留空 + title 主题名（立档为 `local://` 文章，不自动收集，素材走批量上传） |
 | GET | `/api/articles?status=&q=&limit=&offset=` | SQL 分页列表。`status` ∈ `New/Process/Done/Failed`；limit 默认 200，最大 500。返回文章、状态计数、总数、分页参数及批量 progress |
 | GET | `/api/articles/{aid}` | 详情：状态、素材数、版本列表、最新审稿、发布记录 |

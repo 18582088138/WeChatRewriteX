@@ -28,6 +28,21 @@ Vue 严格类型检查和生产构建通过。Docker 本机未安装，镜像运
 - 数据根 `resource/`（gitignore）；日志 `log/wenshu.log`（gitignore，常驻持久化）
 - 一键打包：`python tools/pack_release.py`（默认全平台，产物进 release/）
 
+## V1.14 外部项目文件夹导入（2026-10-29）
+
+- `app/services/imports.py`：扫描 resource/ 一级子目录（含 reference/ 或 drafts/ 即项目
+  文件夹），幂等重建 article + materials + draft 到 DB。标题取文件夹名（去时间戳）；
+  原始链接优先读 **notes.md 收集报告**（最权威），reference/primary meta 兜底；
+  状态推断：有草稿 → DRAFTED（可继续审稿/编辑/定稿/导出），否则 COLLECTED。
+- 触发方式：启动时全量扫一次 + 后台线程每 30s 定时扫（`library.watch_imports` /
+  `library.import_scan_interval_sec` 可配）+ 列表页「扫描导入」按钮
+  （POST /api/articles/imports/scan）。
+- 注意：素材行**直接引用现有文件路径不复制文件**；drafts 读最新 vNNN.json 重映射
+  article_id/id；历史增量变更/审稿/导出记录不在导入范围（外部导入只带 素材+草稿）。
+- 坑：primary 不能用「reference 第一个子目录/创建时间/page.html」识别——硬化版
+  也给参考存快照，拷贝会重置 ctime，且拟定标题≠原文标题。notes.md 的「- 原文:」
+  字段才是权威来源。
+
 ## V1.12 补充 2：输出目录规范化（2026-10-28）
 
 - **exports 批次化**：单独出卡片改走 export_variants 导出小红书包（注册 publish job），
