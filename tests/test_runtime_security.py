@@ -62,7 +62,7 @@ def test_legacy_upgrade_and_offline_backup_restore(tmp_path):
     command = [sys.executable, "-X", "utf8", "scripts/backup_data.py", str(destination)]
     guard = RuntimeLock(root).acquire()
     try:
-        refused = subprocess.run(command, cwd=workspace, env=env, capture_output=True, text=True)
+        refused = subprocess.run(command, cwd=workspace, env=env, capture_output=True, text=True, encoding="utf-8")
         assert refused.returncode != 0 and "已有运行实例" in refused.stderr
         assert not destination.exists()
     finally:
