@@ -76,6 +76,8 @@ def save_version(aid: str, body: SaveVersion) -> dict:
 def rollback_draft(aid: str, body: Rollback) -> dict:
     try:
         doc = draft_service.rollback(aid, body.version, body.expected_version)
+    except draft_service.VersionConflict as e:
+        raise HTTPException(409, str(e))
     except ValueError as e:
         raise HTTPException(404, str(e))
     return {"version": doc.version, "rolled_back_to": body.version,

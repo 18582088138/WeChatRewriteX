@@ -36,6 +36,14 @@ def test_replay_historical_order_and_metadata():
     with pytest.raises(draft_service.VersionConflict):
         draft_service.resolve_head_row(f"{aid}-v1")
     assert draft_service.resolve_head_row(f"{aid}-v999") is None
+    from fastapi.testclient import TestClient
+    from app.main import create_app
+    with TestClient(create_app(start_worker=False)) as client:
+        stale = client.post(f"/api/articles/{aid}/rollback", json={"version": 1, "expected_version": 2})
+        assert stale.status_code == 409
+        missing = client.post(f"/api/articles/{aid}/rollback", json={"version": 999, "expected_version": 3})
+        assert missing.status_code == 404
+        assert dao.next_version(aid) == 4
 
 
 def test_atomic_edit_rollback_on_partial_failure(monkeypatch):

@@ -18,7 +18,7 @@ copy .env.example .env                # 填入 DEEPSEEK_API_KEY 等
 
 # 启动
 python -m app                          # 打开 http://127.0.0.1:8000
-python -m app --host 0.0.0.0           # 局域网/手机访问（请同时在 .env 设 APP_ACCESS_TOKEN）
+python -m app --host 0.0.0.0           # 局域网/手机访问（必须在 .env 设 APP_ACCESS_TOKEN）
 ```
 
 开发模式（前端热更新）：终端 A `python -m app`，终端 B `cd web && npm run dev`，访问 `http://127.0.0.1:5173`。
