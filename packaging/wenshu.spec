@@ -2,6 +2,7 @@
 # 用法（仓库根目录）：pyinstaller packaging/wenshu.spec
 # 前置：python scripts/build_assets.py（生成 app/_assets）
 import os
+import sys
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
@@ -14,6 +15,14 @@ datas = [(os.path.join(ROOT, "app", "_assets"), "wenshu_assets"),
           "app/services/cards/themes")]
 hiddenimports = collect_submodules("app")
 binaries = []
+
+# conda/venv 的 OpenSSL 运行库必须显式随包（否则冻结态 _ssl 导入即炸：
+# ImportError: DLL load failed while importing _ssl）。
+# sys.base_prefix 在 venv 中指向其宿主 conda 环境，Library/bin 下有这两个 DLL。
+for _dll in ("libssl-3-x64.dll", "libcrypto-3-x64.dll"):
+    _p = os.path.join(sys.base_prefix, "Library", "bin", _dll)
+    if os.path.exists(_p):
+        binaries.append((_p, "."))
 
 # uvicorn / playwright / trafilatura 等含动态导入与数据文件的依赖，整包收集。
 # justext（trafilatura 正文抽取的停用词表 stoplists）、certifi（CA 根证书）、

@@ -81,10 +81,20 @@ def targz_dir(src: Path, out: Path) -> None:
 
 
 def bundle_browsers(pkg_dir: Path) -> None:
-    """把本机 ms-playwright 缓存的 chromium_headless_shell 打进发布包（卡片渲染免安装）。"""
+    """把与当前环境 playwright 匹配的 chromium_headless_shell 打进发布包（免安装）。
+
+    先执行 `playwright install chromium`（幂等，按当前库版本下载对应修订版），
+    再按 mtime 取最新修订目录——避免拿宿主机旧缓存与净室新版 playwright 错配。"""
+    print("  按当前 playwright 版本准备浏览器（playwright install chromium）…")
+    try:
+        subprocess.run([PY, "-m", "playwright", "install", "chromium"],
+                       capture_output=True, timeout=600)
+    except Exception as e:
+        print("  [warn] playwright install 失败（离线？）：", e)
     local = os.environ.get("LOCALAPPDATA")
     src_root = Path(local) / "ms-playwright" if local else None
-    shells = sorted(src_root.glob("chromium_headless_shell-*")) if src_root else []
+    shells = sorted(src_root.glob("chromium_headless_shell-*"),
+                    key=lambda p: p.stat().st_mtime) if src_root else []
     if not shells:
         print("  [warn] 本机无 chromium_headless_shell 缓存，包内不带浏览器；"
               "首启脚本会引导安装（--install-browser）")
