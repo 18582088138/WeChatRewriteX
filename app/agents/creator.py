@@ -45,6 +45,7 @@ class CreatorAgent(AgentBase):
         if key and base and not base.get("reconstructed") and base.get("note") == f"job:{key}":
             return DraftDoc.model_validate_json(base["doc_json"])
         expected_version = base["version"] if base else 0
+        expected_revision = DraftDoc.model_validate_json(base["doc_json"]).edit_revision if base else 0
         style = self.load_style_pack(article.get("style_pack"))
         self.progress(article_id, "汇总证据包与可用素材…")
         evidence = self._evidence_pack(article_id, selected_material_ids)
@@ -83,6 +84,7 @@ class CreatorAgent(AgentBase):
         new_title = (doc.meta.title_candidates or [""])[0]
 
         from ..services import draft_service
+        doc.edit_revision = expected_revision
         doc = draft_service.save_new_version(doc, origin="agent", checkpoint=True,
                                              expected_version=expected_version,
                                              note=f"job:{key}" if key else "")

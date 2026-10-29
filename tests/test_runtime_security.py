@@ -48,14 +48,14 @@ def test_legacy_upgrade_and_offline_backup_restore(tmp_path):
     workspace = Path(__file__).resolve().parents[1]
     upgrade = [sys.executable, "-X", "utf8", "-c", "from app.storage import db; db.init_db()"]
     subprocess.run(upgrade, cwd=workspace, env=env, check=True, capture_output=True)
-    before = root / "backups" / "before-schema-v2.sqlite3"
+    before = root / "backups" / "before-schema-v3.sqlite3"
     checksum = hashlib.sha256(before.read_bytes()).hexdigest()
     with sqlite3.connect(before) as conn:
         assert conn.execute("PRAGMA user_version").fetchone()[0] == 0
         assert conn.execute("SELECT title FROM articles WHERE id='old'").fetchone()[0] == "preserved"
     with sqlite3.connect(root / "app.db") as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
-        assert conn.execute("SELECT version FROM schema_migrations").fetchone()[0] == 2
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert conn.execute("SELECT version FROM schema_migrations").fetchone()[0] == 3
     subprocess.run(upgrade, cwd=workspace, env=env, check=True, capture_output=True)
     assert hashlib.sha256(before.read_bytes()).hexdigest() == checksum
     destination = tmp_path / "backup"

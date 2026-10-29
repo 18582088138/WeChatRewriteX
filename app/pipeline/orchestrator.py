@@ -49,7 +49,9 @@ def run_stage(stage: str, article_id: str, llm=None, payload: dict | None = None
         version = head["version"] if head else 0
         key = (payload or {}).get("_job_id")
         replay = key and head and not head.get("reconstructed") and head.get("note") == f"job:{key}"
-        if version != payload["draft_version"] and not replay:
+        from ..core.models import DraftDoc
+        revision = DraftDoc.model_validate_json(head["doc_json"]).edit_revision if head else 0
+        if (version != payload["draft_version"] or (payload.get("edit_revision") is not None and payload["edit_revision"] != revision)) and not replay:
             return {"skipped": True, "reason": "stale_create", "version": version}
     agents = _get_agents(llm)
     if stage == "collect":
@@ -71,7 +73,10 @@ def run_stage(stage: str, article_id: str, llm=None, payload: dict | None = None
             if not snapshot:
                 raise ValueError("没有草稿")
             expected = (payload or {}).get("draft_version")
-            if expected is not None and expected != snapshot["version"]:
+            from ..core.models import DraftDoc
+            revision = (payload or {}).get("edit_revision")
+            snapshot_doc = DraftDoc.model_validate_json(snapshot["doc_json"])
+            if (expected is not None and expected != snapshot["version"]) or (revision is not None and revision != snapshot_doc.edit_revision):
                 return {"skipped": True, "reason": "stale_review", "version": snapshot["version"]}
             current = dao.get_article(article_id)
             soft = current["status"] in ("FINALIZED", "DONE", "PUBLISHING")
@@ -82,7 +87,7 @@ def run_stage(stage: str, article_id: str, llm=None, payload: dict | None = None
         with db.transaction():
             head = dao.latest_draft(article_id)
             current = dao.get_article(article_id)
-            stale = not head or head["version"] != snapshot["version"]
+            stale = not head or (head["version"], DraftDoc.model_validate_json(head["doc_json"]).edit_revision) != (snapshot["version"], snapshot_doc.edit_revision)
             if not soft and not stale and current["status"] == "REVIEWING":
                 _set_status(article_id, ArticleStatus.REVIEWED)
                 _set_status(article_id, ArticleStatus.EDITING)

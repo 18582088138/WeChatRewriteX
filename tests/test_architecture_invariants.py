@@ -20,49 +20,41 @@ def seeded():
     return aid, doc
 
 
-def test_replay_historical_order_and_metadata():
+def test_replay_legacy_historical_order_and_metadata():
     aid, doc = seeded()
-    doc.blocks.insert(0, Block(id="first", type=BlockType.PARAGRAPH, text="first"))
-    saved = draft_service.save_new_version(doc, "human")
-    row = dao.get_draft(aid, 2)
-    historical = DraftDoc.model_validate_json(row["doc_json"])
-    assert historical.model_dump() == saved.model_dump()
-    assert row["word_count"] == historical.meta.word_count
+    # Build the old sparse-checkpoint + delta layout explicitly; upgrades keep it readable.
+    db.execute("DELETE FROM draft_workspaces WHERE article_id=?", (aid,))
+    dao.save_draft(doc, "agent")
+    candidate = doc.model_copy(deep=True)
+    candidate.blocks.insert(0, Block(id="first", type=BlockType.PARAGRAPH, text="first"))
+    for change in draft_service._diff_blocks(doc, candidate):
+        dao.record_change(aid, 2, change["block_id"], change["op"], change["old"], change["new"], "human")
+    historical = DraftDoc.model_validate_json(dao.get_draft(aid, 2)["doc_json"])
     assert historical.blocks[0].id == "first"
-    saved.blocks = list(reversed(saved.blocks))
-    v3 = draft_service.save_new_version(saved, "human")
-    assert DraftDoc.model_validate_json(dao.get_draft(aid, 3)["doc_json"]) == v3
+    historical.blocks = list(reversed(historical.blocks))
+    saved = draft_service.save_new_version(historical, "human")
+    assert saved.version == 2  # Adopt the unfinalized legacy HEAD into a workspace.
+    assert DraftDoc.model_validate_json(dao.get_draft(aid, 2)["doc_json"]) == saved
     assert dao.get_draft(aid, 999) is None
     with pytest.raises(draft_service.VersionConflict):
         draft_service.resolve_head_row(f"{aid}-v1")
     assert draft_service.resolve_head_row(f"{aid}-v999") is None
-    from fastapi.testclient import TestClient
-    from app.main import create_app
-    with TestClient(create_app(start_worker=False)) as client:
-        stale = client.post(f"/api/articles/{aid}/rollback", json={"version": 1, "expected_version": 2})
-        assert stale.status_code == 409
-        missing = client.post(f"/api/articles/{aid}/rollback", json={"version": 999, "expected_version": 3})
-        assert missing.status_code == 404
-        assert dao.next_version(aid) == 4
+    assert DraftDoc.model_validate_json(dao.get_draft(aid, 1)["doc_json"]).blocks[0].id == "a"
 
 
 def test_atomic_edit_rollback_on_partial_failure(monkeypatch):
     aid, doc = seeded()
-    original = dao.record_change
-    calls = 0
-    def fail_second(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-        if calls == 2:
-            raise RuntimeError("injected disk failure")
-        return original(*args, **kwargs)
-    monkeypatch.setattr(dao, "record_change", fail_second)
-    for block in doc.blocks:
-        block.text += " changed"
+    original = dao.save_workspace
+    def fail_after_write(*args, **kwargs):
+        original(*args, **kwargs)
+        raise RuntimeError("injected disk failure")
+    monkeypatch.setattr(dao, "save_workspace", fail_after_write)
+    doc.blocks[0].text += " changed"
     with pytest.raises(RuntimeError):
         draft_service.save_new_version(doc, "human")
-    assert dao.changes_after(aid, 1) == []
-    assert dao.next_version(aid) == 2
+    restored, _ = draft_service.get_doc(aid)
+    assert restored.blocks[0].text == "alpha"
+    assert restored.edit_revision == doc.edit_revision
 
 
 def test_two_writers_only_one_wins():
@@ -78,8 +70,8 @@ def test_two_writers_only_one_wins():
             return "conflict"
     with ThreadPoolExecutor(2) as pool:
         results = list(pool.map(write, ("one", "two")))
-    assert sorted(map(str, results)) == ["2", "conflict"]
-    assert dao.next_version(aid) == 3
+    assert sorted(map(str, results)) == ["1", "conflict"]
+    assert dao.next_version(aid) == 2
 
 
 def test_finalization_and_all_mutations_share_validity():

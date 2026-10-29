@@ -45,13 +45,13 @@ def test_full_flow_degraded(app_client):
     assert any(i["category"] in ("layout", "originality", "compliance")
                for i in rev["items"])
 
-    # 5. 人工编辑：改一段 → 产生 v2
+    # 5. 定稿前人工编辑仍在 v1 工作副本
     para = next(b for b in draft["doc"]["blocks"] if b["type"] == "paragraph")
     r = app_client.put(f"/api/drafts/{draft['id']}/edit",
                        json={"ops": [{"op": "update", "block_id": para["id"],
                                       "text": "人工修订后的段落，内容完全不同，避免撞稿。"}]})
     assert r.status_code == 200, r.text
-    assert r.json()["version"] == 2
+    assert r.json()["version"] == 1
 
     # 6. 定稿（降级稿与原文有重合，可能撞 blocker：先尝试，不行则强制定稿并留痕）
     r = app_client.post(f"/api/articles/{aid}/finalize", json={"force": False})

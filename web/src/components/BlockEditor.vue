@@ -97,7 +97,7 @@ async function saveCaption(b: Block) {
   saveBusy.value = true
   try {
     const r = await api.put(`/api/drafts/${draftId.value}/edit`,
-      { ops: [{ op: 'set_caption', block_id: b.id, caption: captionText.value }] })
+      { expected_revision: doc.value?.edit_revision, ops: [{ op: 'set_caption', block_id: b.id, caption: captionText.value }] })
     editingCaptionId.value = null
     message.success(`图注已保存（v${r.version}）`)
     await load()
@@ -126,6 +126,8 @@ const coverOf = computed(() => {
 
 const headVersion = computed(() =>
   versions.value.length ? Math.max(...versions.value.map(v => v.version)) : 0)
+const headRevision = computed(() =>
+  versions.value.find(v => v.version === headVersion.value)?.edit_revision)
 const isLatest = computed(() =>
   !versions.value.length || doc.value?.version === headVersion.value)
 /** 回滚列表 = 定稿快照（V1.7 定稿即版本节点；manual 为历史数据兼容） */
@@ -260,7 +262,7 @@ async function onBlockDrop(e: DragEvent, b: Block) {
     : { op: 'insert_after', block_id: b.id,
         block_type: m.kind === 'video' ? 'video' : 'image', asset_id: m.id, caption: m.title }
   try {
-    const r = await api.put(`/api/drafts/${draftId.value}/edit`, { ops: [op] })
+    const r = await api.put(`/api/drafts/${draftId.value}/edit`, { expected_revision: doc.value?.edit_revision, ops: [op] })
     message.success(`已插入素材（v${r.version}）`)
     await load()
   } catch (err: any) { message.error(err.message) }
@@ -283,7 +285,7 @@ async function insertToDoc(m: Material) {
     : { op: 'insert_after', block_id: anchor,
         block_type: m.kind === 'video' ? 'video' : 'image', asset_id: m.id, caption: m.title }
   try {
-    const r = await api.put(`/api/drafts/${draftId.value}/edit`, { ops: [op] })
+    const r = await api.put(`/api/drafts/${draftId.value}/edit`, { expected_revision: doc.value?.edit_revision, ops: [op] })
     message.success(`已插入（v${r.version}）`)
     await load()
   } catch (e: any) { message.error(e.message) }
@@ -311,7 +313,7 @@ async function saveEdit() {
   saveBusy.value = true
   try {
     const r = await api.put(`/api/drafts/${draftId.value}/edit`,
-      { ops: [{ op: 'update', block_id: b.id, text: editText.value }] })
+      { expected_revision: doc.value?.edit_revision, ops: [{ op: 'update', block_id: b.id, text: editText.value }] })
     editingId.value = null
     message.success(`已保存为 v${r.version}` + (r.recheck_enqueued ? '（已触发复审）' : ''))
     await load()
@@ -322,7 +324,7 @@ async function addBlock(afterId: string | null) {
   if (!doc.value || !draftId.value) return
   try {
     const r = await api.put(`/api/drafts/${draftId.value}/edit`,
-      { ops: [{ op: 'insert_after', block_id: afterId, block_type: 'paragraph', text: '' }] })
+      { expected_revision: doc.value?.edit_revision, ops: [{ op: 'insert_after', block_id: afterId, block_type: 'paragraph', text: '' }] })
     await load()
     const d = doc.value!
     const idx = afterId ? d.blocks.findIndex(x => x.id === afterId) + 1 : 0
@@ -333,7 +335,7 @@ async function addBlock(afterId: string | null) {
 
 async function removeBlock(blockId: string) {
   const r = await api.put(`/api/drafts/${draftId.value}/edit`,
-    { ops: [{ op: 'remove', block_id: blockId }] })
+    { expected_revision: doc.value?.edit_revision, ops: [{ op: 'remove', block_id: blockId }] })
   message.success(`已删除块（v${r.version}）`)
   selectedId.value = null
   await load()
@@ -364,7 +366,7 @@ async function runAi() {
   aiBusy.value = true
   try {
     const r = await api.post(`/api/drafts/${draftId.value}/regenerate`,
-      { block_ids: aiTargets.value, instruction: aiInstruction.value })
+      { expected_revision: doc.value?.edit_revision, block_ids: aiTargets.value, instruction: aiInstruction.value })
     message.success(`已生成 v${r.version}` + (r.recheck_enqueued ? '（改动较大，已触发复审）' : ''))
     aiModal.value = false
     await load()
@@ -375,11 +377,11 @@ async function runAi() {
 function doRollback(v: number) {
   dialog.warning({
     title: `回滚到 v${v}？`,
-    content: '将按块级变更日志重建该版本状态，并保存为新版本（当前状态不丢失，可再回滚回来）。',
+    content: '将恢复所选定稿内容到工作副本。定稿前继续使用当前版本；定稿后首次修改开新版本。未定稿改动会被替换。',
     positiveText: '回滚', negativeText: '取消',
     onPositiveClick: async () => {
       try {
-        const r = await api.post(`/api/articles/${props.articleId}/rollback`, { version: v, expected_version: headVersion.value })
+        const r = await api.post(`/api/articles/${props.articleId}/rollback`, { version: v, expected_version: headVersion.value, expected_revision: headRevision.value })
         message.success(`已回滚到 v${r.rolled_back_to}（存为 v${r.version}）`)
         await load()
       } catch (e: any) { message.error(e.message) }
@@ -404,7 +406,7 @@ async function saveTitle() {
               ...metaTitleAlts.value.split('\n').map(s => s.trim()).filter(Boolean)] },
   ]
   try {
-    const r = await api.put(`/api/drafts/${draftId.value}/edit`, { ops })
+    const r = await api.put(`/api/drafts/${draftId.value}/edit`, { expected_revision: doc.value?.edit_revision, ops })
     message.success(`标题已保存（v${r.version}）` + (r.folder_renamed ? '；项目文件夹已同步改名' : ''))
     metaEditing.value = null
     await load(); await loadArticle()
@@ -419,7 +421,7 @@ async function saveSubtitle() {
   }
   try {
     const r = await api.put(`/api/drafts/${draftId.value}/edit`,
-      { ops: [{ op: 'update_meta', field: 'subtitle', value: metaSubtitle.value }] })
+      { expected_revision: doc.value?.edit_revision, ops: [{ op: 'update_meta', field: 'subtitle', value: metaSubtitle.value }] })
     message.success(`副标题已保存（v${r.version}）`)
     metaEditing.value = null
     await load()
@@ -456,7 +458,7 @@ async function saveMeta(field: 'one_liner' | 'keywords' | 'ref_links') {
     op = { op: 'update_meta', field: 'ref_links', value: links }
   }
   try {
-    const r = await api.put(`/api/drafts/${draftId.value}/edit`, { ops: [op] })
+    const r = await api.put(`/api/drafts/${draftId.value}/edit`, { expected_revision: doc.value?.edit_revision, ops: [op] })
     message.success(`已保存（v${r.version}）`)
     metaEditing.value = null
     await load()
@@ -474,7 +476,7 @@ async function openImagePicker(blockId: string) {
 async function replaceImage(m: Material) {
   try {
     const r = await api.put(`/api/drafts/${draftId.value}/edit`,
-      { ops: [{ op: 'replace_image', block_id: imgBlockId.value, asset_id: m.id }] })
+      { expected_revision: doc.value?.edit_revision, ops: [{ op: 'replace_image', block_id: imgBlockId.value, asset_id: m.id }] })
     message.success(`已换图（v${r.version}）`)
     imgModal.value = false
     await load()
@@ -493,6 +495,7 @@ async function runInsert() {
   aiBusy.value = true
   try {
     const r = await api.post(`/api/drafts/${draftId.value}/insert-refs`, {
+      expected_revision: doc.value?.edit_revision,
       material_ids: insertIds.value,
       after_block_id: store.anchorBlockId,
       instruction: insertInstruction.value,

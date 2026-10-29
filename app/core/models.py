@@ -78,6 +78,7 @@ class DraftDoc(BaseModel):
     id: str
     article_id: str
     version: int
+    edit_revision: int = 0               # 工作版本内的并发令牌，不是正式版本号
     blocks: list[Block] = Field(default_factory=list)
     meta: DraftMeta = Field(default_factory=DraftMeta)
 

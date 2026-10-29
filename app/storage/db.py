@@ -102,10 +102,10 @@ def init_db() -> None:
     data_dir().mkdir(parents=True, exist_ok=True)
     with connect() as conn:
         previous = conn.execute("PRAGMA user_version").fetchone()[0]
-        if previous < 2 and conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='articles'").fetchone():
+        if previous < 3 and conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='articles'").fetchone():
             backups = data_dir() / "backups"
             backups.mkdir(parents=True, exist_ok=True)
-            backup = backups / "before-schema-v2.sqlite3"
+            backup = backups / "before-schema-v3.sqlite3"
             if not backup.exists():
                 target = sqlite3.connect(backup)
                 try:
@@ -133,8 +133,8 @@ def init_db() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_article_created ON jobs(article_id, created_at DESC)")
         _init_fts(conn)
         conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT DEFAULT CURRENT_TIMESTAMP)")
-        conn.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(2)")
-        conn.execute("PRAGMA user_version=2")
+        conn.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(3)")
+        conn.execute("PRAGMA user_version=3")
 
 
 def _init_fts(conn: sqlite3.Connection) -> None:

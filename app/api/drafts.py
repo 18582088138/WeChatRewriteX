@@ -1,6 +1,6 @@
 """草稿版本路由：编辑 / 段落重生成 / 资料融合插入 / 版本回滚。
 
-块级增量版本（V1.2）：一切修改只记变更块差异；checkpoint 仅落在创建/定稿/回滚。
+V1.15：定稿前更新持久工作副本；定稿后首次修改开新版；旧增量历史只读兼容。
 """
 from __future__ import annotations
 
@@ -15,26 +15,31 @@ router = APIRouter(prefix="/api", tags=["drafts"])
 
 
 class EditOps(BaseModel):
+    expected_revision: int | None = None
     ops: list[dict]           # [{op: update|remove|replace_image|set_caption|update_meta|insert_after, ...}]
 
 
 class Regenerate(BaseModel):
+    expected_revision: int | None = None
     block_ids: list[str]
     instruction: str = ""
 
 
 class InsertRefs(BaseModel):
+    expected_revision: int | None = None
     material_ids: list[str]
     after_block_id: str | None = None
     instruction: str = ""
 
 
 class SaveVersion(BaseModel):
+    expected_revision: int | None = None
     expected_version: int | None = None
     note: str = ""
 
 
 class Rollback(BaseModel):
+    expected_revision: int | None = None
     expected_version: int | None = None
     version: int
 
@@ -64,9 +69,9 @@ def versions(aid: str) -> dict:
 
 @router.post("/articles/{aid}/versions/save")
 def save_version(aid: str, body: SaveVersion) -> dict:
-    """主动保存版本（V1.4）：当前 HEAD 落为命名版本，进可回滚列表。"""
+    """兼容旧保存入口：保存当前工作副本及备注，正式快照由定稿生成。"""
     try:
-        doc = draft_service.save_named_version(aid, body.note, body.expected_version)
+        doc = draft_service.save_named_version(aid, body.note, body.expected_version, body.expected_revision)
     except ValueError as e:
         raise HTTPException(409, str(e))
     return {"version": doc.version, "note": body.note}
@@ -75,7 +80,7 @@ def save_version(aid: str, body: SaveVersion) -> dict:
 @router.post("/articles/{aid}/rollback")
 def rollback_draft(aid: str, body: Rollback) -> dict:
     try:
-        doc = draft_service.rollback(aid, body.version, body.expected_version)
+        doc = draft_service.rollback(aid, body.version, body.expected_version, body.expected_revision)
     except draft_service.VersionConflict as e:
         raise HTTPException(409, str(e))
     except ValueError as e:
@@ -86,7 +91,7 @@ def rollback_draft(aid: str, body: Rollback) -> dict:
 
 @router.put("/drafts/{draft_id}/edit")
 def edit_draft(draft_id: str, body: EditOps) -> dict:
-    row = draft_service.resolve_head_row(draft_id)
+    row = draft_service.resolve_head_row(draft_id, body.expected_revision)
     if not row:
         raise HTTPException(404, "草稿不存在")
     aid = row["article_id"]
@@ -118,7 +123,7 @@ def edit_draft(draft_id: str, body: EditOps) -> dict:
 
 @router.post("/drafts/{draft_id}/regenerate")
 def regenerate(draft_id: str, body: Regenerate) -> dict:
-    row = draft_service.resolve_head_row(draft_id)
+    row = draft_service.resolve_head_row(draft_id, body.expected_revision)
     if not row:
         raise HTTPException(404, "草稿不存在")
     if not body.block_ids:
@@ -140,7 +145,7 @@ def regenerate(draft_id: str, body: Regenerate) -> dict:
 
 @router.post("/drafts/{draft_id}/insert-refs")
 def insert_refs(draft_id: str, body: InsertRefs) -> dict:
-    row = draft_service.resolve_head_row(draft_id)
+    row = draft_service.resolve_head_row(draft_id, body.expected_revision)
     if not row:
         raise HTTPException(404, "草稿不存在")
     if not body.material_ids:

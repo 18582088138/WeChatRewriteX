@@ -11,6 +11,7 @@ const message = useMessage()
 const dialog = useDialog()
 const store = useAppStore()
 const reviewCurrent = ref(false)
+const reviewChanged = ref(false)
 const saveBusy = ref(false)
 
 const review = ref<any>(null)
@@ -84,7 +85,7 @@ const SEV_EDGE: Record<string, string> = {
 let generation = 0
 let controller: AbortController | null = null
 async function load(preserveEdits = false) {
-  if (preserveEdits && (editingId.value || saveBusy.value)) return
+  if (preserveEdits && (editingId.value || saveBusy.value || busyId.value || finalizing.value)) return
   const current = ++generation
   controller?.abort()
   controller = new AbortController()
@@ -95,9 +96,10 @@ async function load(preserveEdits = false) {
       api.get(`/api/articles/${props.articleId}/reviews/latest`, signal).catch(() => null),
       api.get<DraftView>(`/api/articles/${props.articleId}/draft`, signal).catch(() => null),
     ])
-    if (current !== generation || (preserveEdits && (editingId.value || saveBusy.value))) return
+    if (current !== generation || (preserveEdits && (editingId.value || saveBusy.value || busyId.value || finalizing.value))) return
     review.value = r?.review || null
     reviewCurrent.value = !!r?.current
+    reviewChanged.value = !!r?.content_changed
     items.value = r?.items || []
     doc.value = d?.draft.doc || null
     draftId.value = d?.draft.id || ''
@@ -147,9 +149,9 @@ function locate(item: ReviewItem) {
   document.getElementById('rv-' + item.block_id)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 }
 
-/* ---- 双击编辑（与创作分页一致：双击进入、点外/Esc 退出、保存即新版本） ---- */
+/* ---- 双击编辑（与创作分页一致：双击进入、点外/Esc 退出、定稿前保存到当前工作版本） ---- */
 function dblclickBlock(b: any) {
-  if (['image', 'video', 'divider'].includes(b.type)) return
+  if (busyId.value || finalizing.value || ['image', 'video', 'divider'].includes(b.type)) return
   editingId.value = b.id
   editText.value = b.text
 }
@@ -160,7 +162,7 @@ async function saveEdit() {
   saveBusy.value = true
   try {
     const r = await api.put(`/api/drafts/${draftId.value}/edit`,
-      { ops: [{ op: 'update', block_id: b.id, text: editText.value }] })
+      { expected_revision: doc.value?.edit_revision, ops: [{ op: 'update', block_id: b.id, text: editText.value }] })
     editingId.value = null
     message.success(`已保存为 v${r.version}`)
     await load()
@@ -168,9 +170,10 @@ async function saveEdit() {
 }
 
 async function resolve(item: ReviewItem, action: 'accept' | 'dismiss' | 'fix') {
+  if (busyId.value || finalizing.value || saveBusy.value || editingId.value || loading.value) return
   busyId.value = item.id
   try {
-    const r = await api.post(`/api/review-items/${item.id}/resolve`, { action })
+    const r = await api.post(`/api/review-items/${item.id}/resolve`, { action, expected_revision: doc.value?.edit_revision })
     if (action === 'fix') {
       await load()
       flashId.value = item.block_id || null
@@ -198,10 +201,10 @@ async function reReview() {
 }
 
 async function finalize(force = false) {
-  if (!doc.value || finalizing.value || saveBusy.value || editingId.value || loading.value) return
+  if (!doc.value || finalizing.value || saveBusy.value || editingId.value || loading.value || busyId.value) return
   finalizing.value = true
   try {
-    const r = await api.post(`/api/articles/${props.articleId}/finalize`, { force, expected_version: doc.value?.version })
+    const r = await api.post(`/api/articles/${props.articleId}/finalize`, { force, expected_version: doc.value?.version, expected_revision: doc.value?.edit_revision })
     message.success(r.already_finalized ? '已是定稿版本（无新改动）' : `已定稿为 v${r.version}`)
     if (!r.already_finalized) emit('goto-publish')
   } catch (e: any) {
@@ -292,8 +295,9 @@ async function finalize(force = false) {
       </div>
 
       <div class="review-items">
-        <p v-if="review && !reviewCurrent" class="text-sm mb-3" style="color: var(--pill-warn-ink);">内容已修改，当前审稿已过期，请重新审稿。</p>
-        <p v-if="scores.coverage === 'rules_only'" class="text-xs mb-3" style="color: var(--muted);">已完成规则审稿；未配置 AI 审稿模型，事实与来源需人工确认。</p>
+        <p v-if="review && !reviewCurrent" class="text-sm mb-3" style="color: var(--pill-warn-ink);">当前意见属于旧版本或迟到审稿，请重新审稿。</p>
+        <p v-if="reviewCurrent && reviewChanged" class="text-xs mb-3" style="color: var(--muted);">同一工作版本内可继续处理意见；正文已改变，建议定稿前复审，定稿时会复核规则。</p>
+          <p v-if="scores.coverage === 'rules_only'" class="text-xs mb-3" style="color: var(--muted);">已完成规则审稿；未配置 AI 审稿模型，事实与来源需人工确认。</p>
         <p v-if="scores.coverage === 'failed'" class="text-sm mb-3" style="color: var(--pill-neg-ink);">AI 审稿失败，请重试或在人工确认后强制定稿。</p>
         <NEmpty v-if="!loading && !items.length" description="暂无审稿意见" class="py-12" />
         <div v-for="item in sortedItems" :key="item.id"
@@ -315,10 +319,10 @@ async function finalize(force = false) {
             建议：{{ item.suggestion }}</div>
           <div class="flex gap-2 mt-2" @click.stop>
             <NButton v-if="item.auto_fixable && item.status === 'pending'"
-                     size="tiny" type="primary" :loading="busyId === item.id"
+                     size="tiny" type="primary" :loading="busyId === item.id" :disabled="!!busyId || saveBusy || !!editingId || finalizing || !reviewCurrent"
                      @click="resolve(item, 'fix')">采纳并修复</NButton>
             <NButton v-if="!item.auto_fixable && item.status === 'pending'"
-                     size="tiny" @click="resolve(item, 'accept')">标记待改</NButton>
+                     size="tiny" :disabled="!!busyId || saveBusy || !!editingId || finalizing || !reviewCurrent" @click="resolve(item, 'accept')">标记待改</NButton>
             <NButton v-if="item.status === 'pending'" size="tiny" quaternary
                      @click="resolve(item, 'dismiss')">忽略</NButton>
           </div>
@@ -327,7 +331,7 @@ async function finalize(force = false) {
 
       <div class="p-3 shrink-0" style="border-top: 1px solid var(--rule);">
         <NButton block type="primary" :loading="finalizing"
-                 :disabled="!doc || saveBusy || !!editingId || loading" @click="finalize(false)">
+                 :disabled="!doc || saveBusy || !!editingId || loading || !!busyId" @click="finalize(false)">
           定稿{{ pendingBlockers.length ? `（含 ${pendingBlockers.length} 个阻断项）` : '' }}
         </NButton>
         <div class="text-[11px] mt-1.5 text-center" style="color: var(--faint);">

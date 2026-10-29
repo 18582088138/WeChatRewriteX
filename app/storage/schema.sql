@@ -67,6 +67,16 @@ CREATE TABLE IF NOT EXISTS drafts (
 );
 CREATE INDEX IF NOT EXISTS idx_drafts_article ON drafts(article_id, version DESC);
 
+-- 一篇文稿只有一个可变工作副本；定稿后封存到 drafts，旧增量历史只读兼容。
+CREATE TABLE IF NOT EXISTS draft_workspaces (
+  article_id TEXT PRIMARY KEY,
+  version INTEGER NOT NULL,
+  doc_json TEXT NOT NULL,
+  origin TEXT NOT NULL,
+  note TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now', 'localtime'))
+);
+
 -- 块级增量版本（类 Git）：drafts 仅存稀疏 checkpoint（创建/定稿/回滚点），
 -- 每次编辑只记变更块的差异；HEAD = 最近 checkpoint + 后续变更重放。
 CREATE TABLE IF NOT EXISTS draft_changes (

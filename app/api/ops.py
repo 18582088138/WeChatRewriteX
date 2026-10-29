@@ -21,6 +21,7 @@ router = APIRouter(prefix="/api", tags=["ops"])
 # ---------- 审稿 ----------
 
 class ResolveItem(BaseModel):
+    expected_revision: int | None = None
     action: str           # accept | dismiss | fix
     note: str | None = None
 
@@ -34,6 +35,8 @@ def latest_review(aid: str) -> dict:
     draft = dao.latest_draft(aid)
     current = bool(draft and review_matches(review, DraftDoc.model_validate_json(draft["doc_json"])))
     return {"review": review, "items": dao.list_review_items(review["id"]), "current": current,
+            "content_changed": bool(draft and json.loads(review["scores_json"]).get("content_hash") !=
+                                    draft_service.content_hash(DraftDoc.model_validate_json(draft["doc_json"]))),
             "coverage": json.loads(review["scores_json"]).get("coverage", "unknown")}
 
 
@@ -43,21 +46,23 @@ def resolve_item(item_id: str, body: ResolveItem) -> dict:
     item = db.query_one("SELECT * FROM review_items WHERE id=?", (item_id,))
     if not item:
         raise HTTPException(404, "条目不存在")
-    if body.action == "dismiss":
-        dao.set_review_item_status(item_id, "dismissed", body.note)
-        return {"ok": True, "status": "dismissed"}
-    if body.action == "accept":
-        dao.set_review_item_status(item_id, "accepted", body.note)
-        return {"ok": True, "status": "accepted"}
-    if body.action == "fix":
-        if not item["auto_fixable"] or not item["block_id"]:
-            raise HTTPException(400, "该条目不支持 AI 修复")
+    with db.transaction():
         review = db.query_one("SELECT * FROM reviews WHERE id=?", (item["review_id"],))
         article_id = review["article_id"]
         doc, row = draft_service.get_doc(article_id)
+        draft_service.check_revision(doc, body.expected_revision)
         from ..services.workflow import review_matches
         if not review_matches(review, doc):
-            raise HTTPException(409, "审稿意见已过期，请重新审稿")
+            raise HTTPException(409, "审稿意见属于旧版本或迟到审稿，请重新审稿")
+        if body.action in ("dismiss", "accept"):
+            status = "dismissed" if body.action == "dismiss" else "accepted"
+            dao.set_review_item_status(item_id, status, body.note)
+            return {"ok": True, "status": status}
+    if body.action == "fix":
+        if not item["auto_fixable"] or not item["block_id"]:
+            raise HTTPException(400, "该条目不支持 AI 修复")
+        if not any(b.id == item["block_id"] for b in doc.blocks):
+            raise HTTPException(409, "该意见对应的段落已删除，请重新审稿")
         from ..agents.creator import CreatorAgent
         agent = CreatorAgent()
         if not agent.llm_available():
@@ -68,8 +73,9 @@ def resolve_item(item_id: str, body: ResolveItem) -> dict:
             new = agent.regenerate_blocks(article_id, new, [item["block_id"]], instruction)
         except Exception as e:
             raise HTTPException(502, f"AI 修复失败: {e}")
-        saved = draft_service.save_new_version(new, origin="auto_fix")
-        dao.set_review_item_status(item_id, "fixed", f"v{saved.version}", resolved_by="ai")
+        with db.transaction():
+            saved = draft_service.save_new_version(new, origin="auto_fix")
+            dao.set_review_item_status(item_id, "fixed", f"v{saved.version}", resolved_by="ai")
         return {"ok": True, "status": "fixed", "new_version": saved.version}
     raise HTTPException(400, "action 必须是 accept/dismiss/fix")
 

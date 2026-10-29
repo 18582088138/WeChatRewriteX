@@ -1,9 +1,6 @@
-"""草稿版本服务（块级增量版本，类 Git）：
+"""持久工作副本与定稿快照。编辑只递增 revision，定稿后首次修改才开版。
 
-- drafts 表只存**稀疏 checkpoint**（创建 v1 / 定稿 / 回滚点），不再是每版全量备份；
-- 每次编辑只往 draft_changes 记**变更块的差异**（old/new 块快照 + meta diff）；
-- 当前稿 HEAD = 最近 checkpoint + 后续变更重放（dao.latest_draft 透明处理）；
-- 任意版本可重建（get_draft(aid, version)），回滚 = 重建目标态存为新 checkpoint。
+旧 draft_changes 历史继续可读；新工作副本保存在 SQLite，重启不丢失。
 """
 from __future__ import annotations
 
@@ -21,7 +18,7 @@ class VersionConflict(ValueError):
 
 def content_hash(doc: DraftDoc) -> str:
     import hashlib
-    payload = doc.model_dump(exclude={"id", "version", "created_at"})
+    payload = doc.model_dump(exclude={"id", "version", "edit_revision", "created_at"})
     # Pagination/word count are derived and may change with display configuration.
     payload["meta"].pop("word_count", None)
     payload["meta"].pop("xhs_pages", None)
@@ -29,7 +26,7 @@ def content_hash(doc: DraftDoc) -> str:
                                      default=str).encode("utf-8")).hexdigest()
 
 
-def resolve_head_row(draft_id: str) -> dict | None:
+def resolve_head_row(draft_id: str, expected_revision: int | None = None) -> dict | None:
     if "-v" not in draft_id:
         return None
     aid, version = draft_id.rsplit("-v", 1)
@@ -40,7 +37,13 @@ def resolve_head_row(draft_id: str) -> dict | None:
         return None
     if head["version"] != int(version):
         raise VersionConflict(f"草稿已更新至 v{head['version']}，请刷新后重试")
+    check_revision(DraftDoc.model_validate_json(head["doc_json"]), expected_revision)
     return head
+
+
+def check_revision(doc: DraftDoc, expected_revision: int | None) -> None:
+    if expected_revision is not None and expected_revision != doc.edit_revision:
+        raise VersionConflict("当前版本的内容已更新，请刷新后重试")
 
 
 def get_doc(article_id: str, version: int | None = None) -> tuple[DraftDoc, dict]:
@@ -92,17 +95,17 @@ def _project_checkpoint(doc: DraftDoc) -> None:
         logging_setup.log("error", "Checkpoint projection failed %s", doc.id, exc_info=True)
 
 
-def save_named_version(article_id: str, note: str = "", expected_version: int | None = None) -> DraftDoc:
+def save_named_version(article_id: str, note: str = "", expected_version: int | None = None,
+                       expected_revision: int | None = None) -> DraftDoc:
     with db.transaction():
         doc, head = get_doc(article_id)
-        saved = save_new_version(doc, "manual", checkpoint=True, note=note.strip(), expected_version=expected_version)
-        dao.set_draft_status(saved.id, head["status"])
-        return saved
+        check_revision(doc, expected_revision)
+        return save_new_version(doc, "manual", note=note.strip(), expected_version=expected_version)
 
 
 def save_new_version(doc: DraftDoc, origin: str, checkpoint: bool = False,
                      note: str = "", expected_version: int | None = None) -> DraftDoc:
-    """Commit a complete version group with compare-and-swap semantics.
+    """Save working content with version + revision compare-and-swap semantics.
 
     AI/network work must finish before entering this short unit of work.
     """
@@ -119,18 +122,15 @@ def save_new_version(doc: DraftDoc, origin: str, checkpoint: bool = False,
         if expected != current:
             raise VersionConflict(f"草稿已更新至 v{current}，请刷新后重试")
         old = DraftDoc.model_validate_json(head["doc_json"]) if head else None
+        if old:
+            check_revision(old, doc.edit_revision)
         changes = _diff_blocks(old, doc) if old else []
-        if head and not checkpoint and not changes:
+        if head and not changes and origin != "rollback" and not (origin == "manual" and note and head["status"] != "finalized"):
             return old
-        doc.version = dao.next_version(doc.article_id)
+        doc.version = dao.next_version(doc.article_id) if not head or head["status"] == "finalized" else current
         doc.id = f"{doc.article_id}-v{doc.version}"
-        if checkpoint or not head:
-            dao.save_draft(doc, origin=origin, note=note)
-            db.after_commit(lambda: _project_checkpoint(doc))
-        else:
-            for c in changes:
-                dao.record_change(doc.article_id, doc.version, c["block_id"], c["op"],
-                                  c["old"], c["new"], origin)
+        doc.edit_revision = (old.edit_revision + 1) if old else 1
+        dao.save_workspace(doc, origin, note)
         if old and (content_hash(old) != content_hash(doc) or origin == "rollback"):
             # Every mutation path shares this rule, including AI repair and rollback.
             art = dao.get_article(doc.article_id)
@@ -151,12 +151,17 @@ def save_checkpoint(article_id: str, origin: str, status: str = "editing",
         if not head:
             return None
         doc = DraftDoc.model_validate_json(head["doc_json"])
-        saved = save_new_version(doc, origin=origin, checkpoint=True, note=note)
-        dao.set_draft_status(saved.id, status)
-        return saved
+        if head["status"] == "finalized":
+            return doc
+        # Sealing changes the concurrency token but keeps the user's version.
+        doc.edit_revision += 1
+        dao.seal_workspace(doc, origin, status, note)
+        db.after_commit(lambda: _project_checkpoint(doc))
+        return doc
 
 
-def rollback(article_id: str, target_version: int, expected_version: int | None = None) -> DraftDoc:
+def rollback(article_id: str, target_version: int, expected_version: int | None = None,
+             expected_revision: int | None = None) -> DraftDoc:
     with db.transaction():
         head = dao.latest_draft(article_id)
         row = dao.get_draft(article_id, target_version)
@@ -164,6 +169,9 @@ def rollback(article_id: str, target_version: int, expected_version: int | None 
             raise ValueError(f"版本 v{target_version} 不存在")
         doc = DraftDoc.model_validate_json(row["doc_json"])
         doc.version = head["version"]
+        current = DraftDoc.model_validate_json(head["doc_json"])
+        check_revision(current, expected_revision)
+        doc.edit_revision = current.edit_revision
         return save_new_version(doc, "rollback", checkpoint=True,
                                 note=f"回滚到 v{target_version}", expected_version=expected_version)
 
@@ -243,6 +251,7 @@ def maybe_recheck(article_id: str, old: DraftDoc, new: DraftDoc) -> bool:
     if changed >= int(cfg.get("min_changed_blocks", 3)) or \
             delta_pct >= float(cfg.get("min_word_delta_pct", 20)):
         from ..pipeline import queue
-        queue.enqueue("review", article_id, {"draft_version": new.version})
+        queue.enqueue("review", article_id, {"draft_version": new.version,
+                                             "edit_revision": new.edit_revision})
         return True
     return False

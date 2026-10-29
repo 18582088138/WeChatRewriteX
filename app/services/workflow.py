@@ -13,16 +13,22 @@ def review_matches(review: dict | None, doc: DraftDoc) -> bool:
     if not review:
         return False
     scores = json.loads(review.get("scores_json") or "{}")
-    # Legacy reviews require rerun; version equality alone is insufficient.
-    return scores.get("content_hash") == draft_service.content_hash(doc)
+    if review["draft_version"] != doc.version or scores.get("stale"):
+        return False
+    # Reports accepted against HEAD stay actionable throughout this working version.
+    # Legacy reports retain their strict hash check until rerun.
+    return scores.get("content_hash") == draft_service.content_hash(doc) or bool(
+        scores.get("context_valid") and doc.edit_revision >= scores.get("edit_revision", 0))
 
 
-def finalize(article_id: str, force: bool = False, expected_version: int | None = None) -> dict:
+def finalize(article_id: str, force: bool = False, expected_version: int | None = None,
+             expected_revision: int | None = None) -> dict:
     with db.transaction():
         art = dao.get_article(article_id)
         if not art:
             raise ValueError("文章不存在")
         doc, row = draft_service.get_doc(article_id)
+        draft_service.check_revision(doc, expected_revision)
         if expected_version is not None and doc.version != expected_version:
             raise draft_service.VersionConflict("草稿已更新，请刷新后重试")
         cur = ArticleStatus(art["status"])
@@ -43,6 +49,15 @@ def finalize(article_id: str, force: bool = False, expected_version: int | None 
             reasons.append("AI 审稿未完成")
         if blockers and config.get("review.block_on_blocker", True):
             reasons.append(f"存在 {blockers} 个未处理 blocker")
+        # A report is a working-version checklist, not proof that later text was AI reviewed.
+        # Recheck deterministic rules against the actual content being sealed.
+        from ..agents.reviewer import ReviewerAgent
+        checker = ReviewerAgent()
+        style = checker.load_style_pack(art.get("style_pack"))
+        rules = checker._check_layout(doc) + checker._check_banlist(doc, style.get("banlist", []))
+        rule_blockers = sum(i.severity == "blocker" for i in rules)
+        if rule_blockers and config.get("review.block_on_blocker", True):
+            reasons.append(f"当前正文仍有 {rule_blockers} 个规则 blocker")
         if reasons and not force:
             raise ValueError("；".join(reasons))
         cp = draft_service.save_checkpoint(article_id, "finalized", "finalized",

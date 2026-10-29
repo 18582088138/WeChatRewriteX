@@ -10,6 +10,8 @@ import pytest
 def _isolated_data_dir(tmp_path_factory):
     d = tmp_path_factory.mktemp("wenshu-data")
     os.environ["WENSHU_DATA_DIR"] = str(d)
+    original_log_dir = os.environ.get("WENSHU_LOG_DIR")
+    os.environ["WENSHU_LOG_DIR"] = str(d / "logs")
     # 测试确定性：屏蔽本机/`.env` 中的真实密钥，全流程走降级路径与 FakeLLM
     saved = {}
     for k in ("DEEPSEEK_API_KEY", "ARK_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY",
@@ -20,6 +22,10 @@ def _isolated_data_dir(tmp_path_factory):
         os.environ[k] = ""
     yield d
     os.environ.pop("WENSHU_DATA_DIR", None)
+    if original_log_dir is None:
+        os.environ.pop("WENSHU_LOG_DIR", None)
+    else:
+        os.environ["WENSHU_LOG_DIR"] = original_log_dir
     os.environ.update(saved)
 
 

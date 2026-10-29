@@ -200,6 +200,9 @@ def save_draft(doc: DraftDoc, origin: str = "agent", status: str = "editing",
 
 @db.read_snapshot
 def get_draft(article_id: str, version: int) -> dict | None:
+    workspace = get_workspace(article_id)
+    if workspace and workspace["version"] == version:
+        return workspace
     if version < 1 or version >= next_version(article_id):
         return None
     if not db.query_one("SELECT 1 FROM drafts WHERE article_id=? AND version=? UNION ALL SELECT 1 FROM draft_changes WHERE article_id=? AND seq=?", (article_id, version, article_id, version)):
@@ -219,6 +222,9 @@ def get_draft_by_id(draft_id: str) -> dict | None:
 @db.read_snapshot
 def latest_draft(article_id: str) -> dict | None:
     """当前 HEAD：最近 checkpoint + 后续变更重放（无变更则直接返回 checkpoint）。"""
+    workspace = get_workspace(article_id)
+    if workspace:
+        return workspace
     cp = latest_checkpoint(article_id)
     if not cp:
         return None
@@ -227,6 +233,33 @@ def latest_draft(article_id: str) -> dict | None:
         return cp
     last_seq = changes[-1]["seq"]
     return _reconstruct(article_id, cp, last_seq)
+
+
+def get_workspace(article_id: str) -> dict | None:
+    row = db.query_one("SELECT * FROM draft_workspaces WHERE article_id=?", (article_id,))
+    if not row:
+        return None
+    doc = DraftDoc.model_validate_json(row["doc_json"])
+    return {**row, "id": doc.id, "word_count": doc.meta.word_count,
+            "status": "editing", "workspace": True}
+
+
+def save_workspace(doc: DraftDoc, origin: str, note: str = "") -> None:
+    db.execute("""INSERT INTO draft_workspaces(article_id,version,doc_json,origin,note)
+                  VALUES(?,?,?,?,?) ON CONFLICT(article_id) DO UPDATE SET
+                  version=excluded.version, doc_json=excluded.doc_json,
+                  origin=excluded.origin, note=excluded.note""",
+               (doc.article_id, doc.version, doc.model_dump_json(), origin, note))
+
+
+def seal_workspace(doc: DraftDoc, origin: str, status: str, note: str) -> None:
+    existing = db.query_one("SELECT status FROM drafts WHERE id=?", (doc.id,))
+    if existing and existing["status"] == "finalized":
+        raise ValueError("已定稿快照不可覆盖")
+    # Only the current unfinalized legacy checkpoint may be replaced on sealing.
+    db.execute("DELETE FROM drafts WHERE id=? AND status<>'finalized'", (doc.id,))
+    save_draft(doc, origin, status, note)
+    db.execute("DELETE FROM draft_workspaces WHERE article_id=?", (doc.article_id,))
 
 
 def _reconstruct(article_id: str, checkpoint: dict, target_seq: int) -> dict:
@@ -303,7 +336,8 @@ def list_drafts(article_id: str) -> list[dict]:
 def next_version(article_id: str) -> int:
     row = db.query_one("SELECT MAX(version) AS v FROM drafts WHERE article_id=?", (article_id,))
     chg = db.query_one("SELECT MAX(seq) AS s FROM draft_changes WHERE article_id=?", (article_id,))
-    return max(row["v"] or 0, chg["s"] or 0) + 1
+    workspace = db.query_one("SELECT version FROM draft_workspaces WHERE article_id=?", (article_id,))
+    return max(row["v"] or 0, chg["s"] or 0, workspace["version"] if workspace else 0) + 1
 
 
 def record_change(article_id: str, seq: int, block_id: str, op: str,
@@ -350,8 +384,18 @@ def list_draft_versions(article_id: str) -> list[dict]:
         out.append({"version": g["seq"], "origin": g["origin"], "status": "",
                     "word_count": None, "created_at": g["created_at"],
                     "checkpoint": False, "changes": g["n"]})
-    out.sort(key=lambda x: -x["version"])
-    return out
+    workspace = get_workspace(article_id)
+    if workspace:
+        out = [v for v in out if v["version"] != workspace["version"]]
+        out.append({"version": workspace["version"], "origin": workspace["origin"],
+                    "status": "editing", "word_count": workspace["word_count"],
+                    "created_at": workspace["created_at"], "checkpoint": False,
+                    "saved": False, "draft_id": workspace["id"], "note": workspace["note"]})
+    unique = {v["version"]: v for v in reversed(out)}
+    head = latest_draft(article_id)
+    if head and head["version"] in unique:
+        unique[head["version"]]["edit_revision"] = DraftDoc.model_validate_json(head["doc_json"]).edit_revision
+    return sorted(unique.values(), key=lambda x: -x["version"])
 
 
 def set_draft_status(draft_id: str, status: str) -> None:
@@ -382,7 +426,7 @@ def create_review(article_id: str, draft_id: str, draft_version: int,
 
 def latest_review(article_id: str) -> dict | None:
     return db.query_one(
-        "SELECT * FROM reviews WHERE article_id=? ORDER BY draft_version DESC, created_at DESC, rowid DESC LIMIT 1", (article_id,))
+        "SELECT * FROM reviews WHERE article_id=? ORDER BY COALESCE(json_extract(scores_json, '$.stale'), 0), draft_version DESC, created_at DESC, rowid DESC LIMIT 1", (article_id,))
 
 
 def list_review_items(review_id: str) -> list[dict]:

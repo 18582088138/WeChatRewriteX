@@ -86,6 +86,11 @@ class ReviewerAgent(AgentBase):
         scores["content_hash"] = content_hash(doc)
         scores["job_id"] = key
         with db.transaction():
+            head = dao.latest_draft(article_id)
+            current = DraftDoc.model_validate_json(head["doc_json"]) if head else None
+            scores["edit_revision"] = doc.edit_revision
+            scores["stale"] = not current or (current.version, current.edit_revision) != (doc.version, doc.edit_revision)
+            scores["context_valid"] = not scores["stale"]
             review_id = dao.create_review(article_id, draft["id"], draft["version"], items, scores)
         events.bus.publish(events.REVIEW_FINISHED, article_id,
                            review_id=review_id,

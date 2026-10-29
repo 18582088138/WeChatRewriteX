@@ -26,7 +26,7 @@ test('editing survives event refresh and produces downloadable packages', async 
   await refresh
   await expect(editor).toHaveValue('浏览器人工修改：这一段是尚未提交的内容。')
   await editor.blur()
-  await expect.poll(async () => (await (await request.get(`/api/articles/${aid}/draft`)).json()).draft.version).toBe(2)
+  await expect.poll(async () => (await (await request.get(`/api/articles/${aid}/draft`)).json()).draft.doc.edit_revision).toBeGreaterThan(1)
   await request.post(`/api/articles/${aid}/advance`, { data: { stage: 'review' } })
   await expect.poll(async () => (await (await request.get(`/api/articles/${aid}`)).json()).status).toBe('EDITING')
   await expect.poll(async () => (await (await request.get(`/api/articles/${aid}/reviews/latest`)).json()).current).toBe(true)

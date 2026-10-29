@@ -29,6 +29,7 @@ export interface Block {
 }
 
 export interface DraftDoc {
+  edit_revision: number
   id: string
   article_id: string
   version: number
@@ -110,6 +111,7 @@ export interface DraftView {
   versions: VersionInfo[]
 }
 export interface VersionInfo {
+  edit_revision?: number
   version: number
   origin: string
   status: string

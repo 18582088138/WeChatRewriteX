@@ -26,6 +26,7 @@ class CreateArticle(BaseModel):
 
 
 class Finalize(BaseModel):
+    expected_revision: int | None = None
     expected_version: int | None = None
     force: bool = False
 
@@ -130,7 +131,9 @@ def advance(aid: str, body: Advance) -> dict:
     if body.stage == "review" and not dao.latest_draft(aid):
         raise HTTPException(409, "没有草稿，先完成创作")
     head = dao.latest_draft(aid)
-    payload = {"draft_version": head["version"] if head else 0}
+    from ..core.models import DraftDoc
+    payload = {"draft_version": head["version"] if head else 0,
+               "edit_revision": DraftDoc.model_validate_json(head["doc_json"]).edit_revision if head else 0}
     if body.selected_material_ids:
         payload["selected_material_ids"] = body.selected_material_ids
     job_id = queue.enqueue(body.stage, aid, payload)
@@ -177,7 +180,7 @@ class RevealExport(BaseModel):
 def finalize(aid: str, body: Finalize) -> dict:
     from ..services import workflow
     try:
-        return workflow.finalize(aid, body.force, body.expected_version)
+        return workflow.finalize(aid, body.force, body.expected_version, body.expected_revision)
     except ValueError as e:
         raise HTTPException(409, str(e))
 
