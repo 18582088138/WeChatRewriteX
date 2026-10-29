@@ -6,7 +6,6 @@ let stopSse: (() => void) | null = null
 let refreshTimer: ReturnType<typeof setTimeout> | null = null
 let refreshId = 0
 let refreshController: AbortController | null = null
-const articleTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 /** 全局：文章列表 + SSE 事件驱动刷新 + 编辑器共享状态（选中块锚点）。 */
 export const useAppStore = defineStore('app', {
@@ -31,6 +30,10 @@ export const useAppStore = defineStore('app', {
     devMode: false as boolean,
   }),
   actions: {
+    invalidateArticle(aid: string) {
+      this.articleTicks[aid] = (this.articleTicks[aid] || 0) + 1
+      this.workbenchTick++
+    },
     async refreshArticles() {
       const id = ++refreshId
       refreshController?.abort()
@@ -62,6 +65,13 @@ export const useAppStore = defineStore('app', {
       stopSse?.()
       stopSse = subscribeSse((e) => {
         this.lastEvent = e
+        if (e.type === 'connection.ready') {
+          this.refreshArticles()
+          for (const aid of new Set([...Object.keys(this.articleTicks), ...this.articles.map(a => a.id)])) {
+            this.invalidateArticle(aid)
+          }
+          return
+        }
         if (e.type === 'stage.progress') {
           this.progressLog.push({ ts: e.ts, article_id: e.article_id, message: String(e.message || '') })
           if (this.progressLog.length > 40) this.progressLog.splice(0, this.progressLog.length - 40)
@@ -72,14 +82,8 @@ export const useAppStore = defineStore('app', {
           refreshTimer = setTimeout(() => this.refreshArticles(), 250)
         }
         if (e.article_id) {
-          const aid = e.article_id
-          const previous = articleTimers.get(aid)
-          if (previous) clearTimeout(previous)
-          articleTimers.set(aid, setTimeout(() => {
-            this.articleTicks[aid] = (this.articleTicks[aid] || 0) + 1
-            this.workbenchTick++
-            articleTimers.delete(aid)
-          }, 150))
+          // Completion is actionable immediately; Vue batches same-turn events.
+          this.invalidateArticle(e.article_id)
         }
       })
     },
@@ -87,8 +91,6 @@ export const useAppStore = defineStore('app', {
       stopSse?.()
       stopSse = null
       if (refreshTimer) clearTimeout(refreshTimer)
-      for (const timer of articleTimers.values()) clearTimeout(timer)
-      articleTimers.clear()
       refreshController?.abort()
     },
     clearProgress() {

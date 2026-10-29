@@ -90,6 +90,8 @@ export function subscribeSse(onEvent: (e: SseEvent) => void): () => void {
     }
     if (closed) return
     es = new EventSource('/api/sse')
+    // Recover completion events missed while offline by fetching current state.
+    es.onopen = () => onEvent({ type: 'connection.ready', ts: Date.now() / 1000 })
     es.onmessage = (ev) => {
       try { onEvent(JSON.parse(ev.data)) } catch { /* heartbeat */ }
     }

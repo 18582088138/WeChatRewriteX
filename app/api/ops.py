@@ -14,6 +14,7 @@ from ..core.models import ArticleStatus, DraftDoc
 from ..pipeline import queue
 from ..services import draft_service
 from ..storage import dao
+from ..storage import db
 
 router = APIRouter(prefix="/api", tags=["ops"])
 
@@ -27,6 +28,7 @@ class ResolveItem(BaseModel):
 
 
 @router.get("/articles/{aid}/reviews/latest")
+@db.read_snapshot
 def latest_review(aid: str) -> dict:
     review = dao.latest_review(aid)
     if not review:
@@ -38,6 +40,24 @@ def latest_review(aid: str) -> dict:
             "content_changed": bool(draft and json.loads(review["scores_json"]).get("content_hash") !=
                                     draft_service.content_hash(DraftDoc.model_validate_json(draft["doc_json"]))),
             "coverage": json.loads(review["scores_json"]).get("coverage", "unknown")}
+
+
+@router.get("/articles/{aid}/review-context")
+@db.read_snapshot
+def review_context(aid: str) -> dict:
+    """Document and review from a single read snapshot for reactive panels."""
+    from .drafts import _doc_view
+    try:
+        draft = _doc_view(aid)
+    except ValueError:
+        draft = None
+    try:
+        review = latest_review(aid)
+    except HTTPException as exc:
+        if exc.status_code != 404:
+            raise
+        review = None
+    return {"draft": draft, "review": review}
 
 
 @router.post("/review-items/{item_id}/resolve")

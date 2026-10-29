@@ -150,10 +150,12 @@ function assetUrl(assetId: string) { return api.absUrl(`/api/materials/${assetId
 /* ================= 加载 ================= */
 let loadController: AbortController | null = null
 let loadGeneration = 0
+let pendingRefresh = false
 const hasLocalEdit = () => !!(editingId.value || editingCaptionId.value || metaEditing.value ||
   saveBusy.value || aiBusy.value || aiModal.value || insertModal.value || imgModal.value)
 async function load(version?: number, preserveEdits = false) {
-  if (preserveEdits && (hasLocalEdit() || !isLatest.value)) return
+  if (preserveEdits && (hasLocalEdit() || !isLatest.value)) { pendingRefresh = true; return }
+  pendingRefresh = false
   const generation = ++loadGeneration
   loadController?.abort()
   loadController = new AbortController()
@@ -161,7 +163,8 @@ async function load(version?: number, preserveEdits = false) {
   try {
     const r = await api.get<DraftView>(`/api/articles/${props.articleId}/draft` +
                             (version ? `?version=${version}` : ''), loadController.signal)
-    if (generation !== loadGeneration || (preserveEdits && hasLocalEdit())) return
+    if (generation !== loadGeneration) return
+    if (preserveEdits && (hasLocalEdit() || !isLatest.value)) { pendingRefresh = true; return }
     doc.value = r.draft.doc
     draftId.value = r.draft.id
     versions.value = r.versions
@@ -222,6 +225,10 @@ onUnmounted(() => {
   if (closeTimer) clearTimeout(closeTimer)
 })
 watch(() => store.articleTicks[props.articleId] || 0, () => { load(undefined, true); loadArticle() })
+// Events received while an AI modal / edit is active must be replayed on exit.
+watch(() => hasLocalEdit() || !isLatest.value, blocked => {
+  if (!blocked && pendingRefresh) void load(undefined, true)
+})
 
 /* ================= 会话素材（左窗「创作素材」） ================= */
 async function removeFromSession(m: Material) {
@@ -369,6 +376,7 @@ async function runAi() {
       { expected_revision: doc.value?.edit_revision, block_ids: aiTargets.value, instruction: aiInstruction.value })
     message.success(`已生成 v${r.version}` + (r.recheck_enqueued ? '（改动较大，已触发复审）' : ''))
     aiModal.value = false
+    store.invalidateArticle(props.articleId)
     await load()
   } catch (e: any) { message.error(e.message) } finally { aiBusy.value = false }
 }

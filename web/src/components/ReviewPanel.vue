@@ -84,28 +84,33 @@ const SEV_EDGE: Record<string, string> = {
 
 let generation = 0
 let controller: AbortController | null = null
+let pendingRefresh = false
+const hasLocalEdit = () => !!(editingId.value || saveBusy.value || busyId.value || finalizing.value)
 async function load(preserveEdits = false) {
-  if (preserveEdits && (editingId.value || saveBusy.value || busyId.value || finalizing.value)) return
+  if (preserveEdits && hasLocalEdit()) { pendingRefresh = true; return }
+  pendingRefresh = false
   const current = ++generation
   controller?.abort()
   controller = new AbortController()
   const signal = controller.signal
   loading.value = true
   try {
-    const [r, d] = await Promise.all([
-      api.get(`/api/articles/${props.articleId}/reviews/latest`, signal).catch(() => null),
-      api.get<DraftView>(`/api/articles/${props.articleId}/draft`, signal).catch(() => null),
-    ])
-    if (current !== generation || (preserveEdits && (editingId.value || saveBusy.value || busyId.value || finalizing.value))) return
+    const context = await api.get<{ draft: DraftView | null; review: any }>(`/api/articles/${props.articleId}/review-context`, signal)
+    if (current !== generation) return
+    if (preserveEdits && hasLocalEdit()) { pendingRefresh = true; return }
+    const r = context.review, d = context.draft
     review.value = r?.review || null
     reviewCurrent.value = !!r?.current
     reviewChanged.value = !!r?.content_changed
     items.value = r?.items || []
     doc.value = d?.draft.doc || null
     draftId.value = d?.draft.id || ''
+  } catch (error: any) {
+    if (error.name !== 'AbortError') message.error(error.message)
   } finally { if (current === generation) loading.value = false }
 }
 watch(() => store.articleTicks[props.articleId] || 0, () => load(true))
+watch(hasLocalEdit, blocked => { if (!blocked && pendingRefresh) void load(true) })
 onUnmounted(() => controller?.abort())
 onMounted(() => {
   window.addEventListener('mousemove', onMove)
@@ -174,6 +179,7 @@ async function resolve(item: ReviewItem, action: 'accept' | 'dismiss' | 'fix') {
   busyId.value = item.id
   try {
     const r = await api.post(`/api/review-items/${item.id}/resolve`, { action, expected_revision: doc.value?.edit_revision })
+    store.invalidateArticle(props.articleId)
     if (action === 'fix') {
       await load()
       flashId.value = item.block_id || null
@@ -196,7 +202,7 @@ async function reReview() {
   try {
     await api.post(`/api/articles/${props.articleId}/advance`, { stage: 'review' })
     message.success('复审任务已提交')
-    setTimeout(() => load(), 1500)
+    await load(true)
   } catch (e: any) { message.error(e.message) }
 }
 
@@ -206,6 +212,8 @@ async function finalize(force = false) {
   try {
     const r = await api.post(`/api/articles/${props.articleId}/finalize`, { force, expected_version: doc.value?.version, expected_revision: doc.value?.edit_revision })
     message.success(r.already_finalized ? '已是定稿版本（无新改动）' : `已定稿为 v${r.version}`)
+    await load()
+    store.invalidateArticle(props.articleId)
     if (!r.already_finalized) emit('goto-publish')
   } catch (e: any) {
     if (e.status === 409 && /blocker|审稿/.test(String(e.message))) {

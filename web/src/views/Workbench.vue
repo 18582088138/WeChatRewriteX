@@ -17,6 +17,8 @@ const message = useMessage()
 const store = useAppStore()
 
 const aid = route.params.id as string
+// Register the open article for SSE reconnect recovery even when off-list.
+store.invalidateArticle(aid)
 const article = ref<Article | null>(null)
 const tab = ref('create')
 const busy = ref(false)
