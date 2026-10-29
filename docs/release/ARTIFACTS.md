@@ -5,9 +5,11 @@
 
 ## 当前交付状态
 
-- `dist/wenshu-1.15.0.tar.gz`：源码包（含内置运行资产），待本轮构建；支持 pip 本地安装。
+- `release/v1.15.0/wenshu-1.15.0-py3-none-any.whl`：已构建并在独立环境、非源码目录安装验收，覆盖工作版本、定稿、导出、卡片和下载。
+
+- `dist/wenshu-1.15.0.tar.gz`：源码包（含内置运行资产），已构建；支持 pip 本地安装。
 - Windows 绿色包 `release/v1.15.0/文枢-v1.15.0-windows-x64.zip`：含独立 exe、双启动脚本、
-  自带 Chromium 与完整 docs/，等待本轮重新构建及验收。
+  自带 Chromium 与完整 docs/，已重新构建；隔离 exe 验收通过。
 - Linux 独立包 `release/v1.15.0/文枢-v1.15.0-linux-x64.tar.gz`：打包工程已同步，尚未实际构建二进制。
 - Docker：本版未预构建镜像；Dockerfile 在仓库内维护，需要时 `docker build -t wenshu-studio .`。
 
@@ -70,4 +72,6 @@ Python/SQLite/Node/Playwright 信息。`--reuse-exe` 只有在内嵌版本及源
 - `Dockerfile`、`.dockerignore`：运行镜像构建与上下文隔离。
 - `scripts/start_windows.bat`、`scripts/start_windows.ps1`、`scripts/start_linux.sh`：平台启动入口。
 
-V1.15 验收：87 项后端回归与 2 项真实浏览器流程通过（含四平台导出、定稿后自动开版和历史视图回滚），Vue 类型检查及生产构建通过。Windows exe、Python 分发包正在重新构建，完成后更新本清单。
+V1.15 验收：87 项后端回归与 2 项真实浏览器流程通过（含四平台导出、定稿后自动开版和历史视图回滚），Vue 类型检查及生产构建通过。Windows exe、sdist、wheel 已生成；exe 与 wheel 隔离验收通过，未使用原项目数据库。exe 输出管道的中文编码问题已修复，内置 Chromium revision 为 1248。业务提交 436e27d 的 GitHub CI 已全部通过（Windows/Linux Python 3.10/3.12、浏览器与安装包、Docker）。
+
+冻结程序复验：`python scripts/frozen_smoke.py release/v1.15.0/文枢-v1.15.0-windows-x64`。该脚本使用临时空数据目录并屏蔽真实模型/搜索密钥。运行后只结束自己启动的 exe 进程树。

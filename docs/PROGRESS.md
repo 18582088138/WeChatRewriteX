@@ -5,6 +5,7 @@
 新增 draft_workspaces，schema v3；旧增量历史只读兼容，定稿快照保持不可变。
 以下 V1.14/V1.12/更早记录为历史行为，exports 批次化和每次编辑升版本已被 V1.15 替代。
 工作区原有未跟踪 web/web/ 保留。本轮不创建正式 tag 或 GitHub Release。
+本轮完成 87 项后端测试、2 项浏览器 E2E、严格 Vue 构建、独立 wheel 与 Windows exe 四平台端到端验收；业务提交 436e27d 的 GitHub CI 全绿。Linux 二进制未在本机生成。
 验证和实际打包清单维护在 [ARTIFACTS.md](release/ARTIFACTS.md)。
 
 ---
