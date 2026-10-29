@@ -137,7 +137,9 @@ def test_finalize_version_node(app_client):
                        json={"ops": [{"op": "update", "block_id": para["id"],
                                       "text": "定稿后还能继续改的一段话。"}]})
     assert r.status_code == 200, r.text
-    assert app_client.get(f"/api/articles/{aid}").json()["status"] == "EDITING"
+    assert r.json()["version"] == v1 + 1
+    # Automatic re-review can already have moved EDITING -> REVIEWING.
+    _wait_status(app_client, aid, {"EDITING"})
 
     # The previous review cannot approve edited content; rerun review explicitly.
     app_client.post(f"/api/articles/{aid}/advance", json={"stage": "review"})
@@ -151,7 +153,7 @@ def test_finalize_version_node(app_client):
     # 再次定稿 → 全新独立版本，回滚列表两个定稿快照
     r = app_client.post(f"/api/articles/{aid}/finalize", json={})
     v2 = r.json()["version"]
-    assert v2 > v1
+    assert v2 == v1 + 1
     vers3 = app_client.get(f"/api/articles/{aid}/versions").json()["versions"]
     finals3 = [v for v in vers3 if v.get("checkpoint") and v["origin"] == "finalized"]
     assert len(finals3) == 2 and {f["version"] for f in finals3} == {v1, v2}
