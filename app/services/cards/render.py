@@ -67,10 +67,9 @@ def _brand_footer() -> str:
 
 
 def _foot_title(title: str) -> str:
-    """页脚标题前缀：按标题长度自适应截取前 5~8 字。"""
+    """页脚标题：超过 20 字截断并补 '...'（V1.17 补充）。"""
     t = (title or "").strip()
-    n = 8 if len(t) > 12 else (6 if len(t) > 8 else len(t))
-    return t[:n]
+    return t if len(t) <= 20 else t[:20] + "..."
 
 
 def _img_html(asset_id: str, caption: str = "") -> str:
@@ -97,7 +96,7 @@ def _page_html(page, doc: DraftDoc, idx: int, total: int, last: bool = False) ->
     esc = html_mod.escape
     no = f"{idx + 1:02d}"
     title0 = (doc.meta.title_candidates or [""])[0]
-    pageno = (f'<div class="foot"><span class="logo">{esc(brand.BRAND)} · AI 要闻解读'
+    pageno = (f'<div class="foot"><span class="logo">{esc(brand.BRAND)}'
               f' · {esc(_foot_title(title0))}</span>'
               f'<span class="pageno">{no} / {total:02d}</span></div>')
 
