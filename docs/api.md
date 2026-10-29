@@ -1,4 +1,4 @@
-# 接口文档（1.15.0 · 2026-10-29）
+# 接口文档（1.16.0 · 2026-10-29）
 
 Base URL: `http://127.0.0.1:8000`，所有接口前缀 `/api`。运行时可访问 `/docs` 查看自动生成的 OpenAPI。
 
@@ -117,3 +117,7 @@ SSE 推送，前端工作台实时展示。主题与报道主体提取为**纯�
 | GET | `/api/articles/{aid}/costs` | API 费用监控：按 收集/创作/审稿 环节聚合调用数与 tokens + 全流程汇总 |
 
 V1.15 审稿意见 resolve 请求支持 expected_revision；同一已接受的工作版本报告允许连续处理意见，跨版本、迟到报告或被删除段落返回 409。reviews/latest 返回 current（意见上下文有效）和 content_changed（报告后正文有改动），两者含义不同。
+# V1.16 增量接口
+
+- `POST /api/settings/reload-env`：无请求体。返回 `ok`、`generation`、`changed_count`、`token_changed`、`services`（同 GET settings 的脱敏状态）。文件读/解析失败或启动绑定项变更返回 422，原配置完整保留。令牌轮换会在本次授权响应重签 HttpOnly 会话。
+- `GET /api/articles/{aid}/review-context`：返回 `{draft, review}`。`draft` 与草稿接口响应一致，`review` 与 latest review 一致；不存在时对应字段为 null。两者在同一个数据库读快照中取得，用于审稿页实时刷新。

@@ -1,19 +1,19 @@
-# 产物清单（文枢 - 自媒体 Studio 1.15.0）
+# 产物清单（文枢 - 自媒体 Studio 1.16.0）
 
 版本单一来源为 `app/__init__.py`。打包脚本更新与实际执行包生成是两个步骤，
 旧 exe 不会自动获得源码更新。升级和回退见 [架构与升级说明](../ARCHITECTURE.md)。
 
 ## 当前交付状态
 
-- `release/v1.15.0/wenshu-1.15.0-py3-none-any.whl`：已构建并在独立环境、非源码目录安装验收，覆盖工作版本、定稿、导出、卡片和下载。
+- `release/v1.16.0/wenshu-1.16.0-py3-none-any.whl`：已构建，独立环境与非源码目录安装验收通过（含环境热加载、卡片与三平台导出）。
 
-- `dist/wenshu-1.15.0.tar.gz`：源码包（含内置运行资产），已构建；支持 pip 本地安装。
-- Windows 绿色包 `release/v1.15.0/文枢-v1.15.0-windows-x64.zip`：含独立 exe、双启动脚本、
-  自带 Chromium 与完整 docs/，已重新构建；隔离 exe 验收通过。
-- Linux 独立包 `release/v1.15.0/文枢-v1.15.0-linux-x64.tar.gz`：打包工程已同步，尚未实际构建二进制。
+- `dist/wenshu-1.16.0.tar.gz`：源码包（含内置运行资产），已构建；支持 pip 本地安装。
+- Windows 绿色包 `release/v1.16.0/文枢-v1.16.0-windows-x64.zip`：含 exe + `_internal/`、双启动脚本、
+  自带 Chromium 与完整 docs/，目录式构建和隔离 exe 四平台验收通过。
+- Linux 独立包 `release/v1.16.0/文枢-v1.16.0-linux-x64.tar.gz`：打包工程已同步，尚未实际构建二进制。
 - Docker：本版未预构建镜像；Dockerfile 在仓库内维护，需要时 `docker build -t wenshu-studio .`。
 
-## 输出目录约定（V1.15）
+## 输出目录约定（V1.16）
 
 - **发布根 `release/v<版本号>/`**：zip / sdist / SHA256SUMS 按版本分目录归档，避免互相覆盖。
 - **构建中间产物在 `build/`**：`build/dist-windows/`（原始 exe）、`build/dist-linux/`、
@@ -74,4 +74,14 @@ Python/SQLite/Node/Playwright 信息。`--reuse-exe` 只有在内嵌版本及源
 
 V1.15 验收：87 项后端回归与 2 项真实浏览器流程通过（含四平台导出、定稿后自动开版和历史视图回滚），Vue 类型检查及生产构建通过。Windows exe、sdist、wheel 已生成；exe 与 wheel 隔离验收通过，未使用原项目数据库。exe 输出管道的中文编码问题已修复，内置 Chromium revision 为 1248。业务提交 436e27d 的 GitHub CI 已全部通过（Windows/Linux Python 3.10/3.12、浏览器与安装包、Docker）。
 
-冻结程序复验：`python scripts/frozen_smoke.py release/v1.15.0/文枢-v1.15.0-windows-x64`。该脚本使用临时空数据目录并屏蔽真实模型/搜索密钥。运行后只结束自己启动的 exe 进程树。
+冻结程序复验：`python scripts/frozen_smoke.py release/v1.16.0/文枢-v1.16.0-windows-x64`。该脚本使用临时空数据目录并屏蔽真实模型/搜索密钥。运行后只结束自己启动的 exe 进程树。
+
+## V1.16 验收（2026-10-29）
+
+97 项后端回归、5 项真实浏览器流程、Vue 严格类型检查与生产构建通过。新增验证覆盖环境配置替换/删除/失败保留、实际模型 HTTP 请求读取新 key（MockTransport，无付费调用）、令牌会话轮换、后台扫描不阻塞就绪、LLM 完成后的页面刷新、编辑缓冲与方向键翻页。
+
+Windows exe 与独立安装 wheel 均在临时数据目录通过环境热加载和发布流程验收；浏览器 revision 1248。Linux 独立二进制未实际构建，Docker 未在本机运行。代码按功能提交并 push main，未创建 tag/GitHub Release。
+
+同机 3 次新进程测量：源码就绪中位数 1.911 → 1.462 秒（约 24%）；Windows 旧单文件包 17.333 → 新目录式包 1.478 秒（约 91%），新版样本范围 1.475–3.409 秒。未清操作系统文件缓存；不代表机器重启后磁盘冷缓存耗时，也不包含浏览器绘制。原始样本见 [V1.16-startup.json](V1.16-startup.json)。
+
+新版程序需要整体保留 exe 与 `_internal/`。发布目录的 SHA256SUMS.txt 覆盖 zip、sdist 与 wheel。

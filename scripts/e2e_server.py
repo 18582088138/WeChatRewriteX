@@ -16,6 +16,10 @@ def main():
             os.environ[key] = ""
         import uvicorn
         from app.main import create_app
+        from app.core import config
+        # Reload tests must never read the developer's .env or credentials.
+        config.RUNTIME_ROOT = Path(directory)
+        (config.RUNTIME_ROOT / ".env").write_text("", encoding="utf-8")
         uvicorn.run(create_app(), host="127.0.0.1", port=8011, log_level="warning")
 
 if __name__ == "__main__":

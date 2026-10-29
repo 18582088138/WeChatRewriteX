@@ -40,9 +40,9 @@ python -m app                 # → http://127.0.0.1:8000
 **方式三：pip 本地安装 / Docker**
 
 ```powershell
-pip install dist/wenshu-1.15.0.tar.gz; wenshu            # 源码包安装（交付 sdist）
-docker build -t wenshu-studio:1.15.0 .                   # 容器化（服务器批量部署，本版未预构建）
-docker run -d --env-file .env -p 8000:8000 wenshu-studio:1.15.0
+pip install dist/wenshu-1.16.0.tar.gz; wenshu            # 源码包安装（交付 sdist）
+docker build -t wenshu-studio:1.16.0 .                   # 容器化（服务器批量部署，本版未预构建）
+docker run -d --env-file .env -p 8000:8000 wenshu-studio:1.16.0
 ```
 
 发布包产物与部署细节见 [docs/release/ARTIFACTS.md](docs/release/ARTIFACTS.md) 与
@@ -98,3 +98,6 @@ cd web && npm ci && npm run build && npx playwright install chromium && npm run 
 发布包固定存放在 `resource/<项目目录>/exports/<平台>/`，重新生成成功后替换同平台文件，失败保留上一份完整包。旧 `runs/` 不自动删除；文稿版本由文稿系统管理。小红书品牌签名和 Logo 放在最后正文页底部。
 
 X 提供逐条 `post-NN.txt`、合并预览 `thread.txt` 和媒体/回复顺序 `thread.json`；微博提供完整摘要 `weibo.txt` 与 `media.json`。平台规范与人工发布步骤见 [V1.15 说明](docs/release/V1.15.md)。旧 exe 需替换为新构建。
+# V1.16 更新
+
+设置页支持保存 `.env` 后点击“刷新环境变量”；创作/审稿内容在任务完成后自动更新，小红书卡片大图支持 ←/→ 翻页。绿色包改为 exe + `_internal/`，升级时请整体替换程序目录并保留自己的配置与数据。详见 [V1.16 说明](docs/release/V1.16.md)。

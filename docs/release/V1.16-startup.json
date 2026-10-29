@@ -1,0 +1,61 @@
+{
+  "method": "3 independent processes per case; launch to HTTP /api/ready; Windows same machine, filesystem caches not cleared; SPA metric is HTML return, not paint.",
+  "samples": {
+    "ready-before.json": [
+      {
+        "ready_seconds": 1.709,
+        "spa_seconds": 1.89
+      },
+      {
+        "ready_seconds": 1.911,
+        "spa_seconds": 2.078
+      },
+      {
+        "ready_seconds": 2.192,
+        "spa_seconds": 2.443
+      }
+    ],
+    "ready-after-idle.json": [
+      {
+        "ready_seconds": 1.477,
+        "spa_seconds": 1.703
+      },
+      {
+        "ready_seconds": 1.46,
+        "spa_seconds": 1.642
+      },
+      {
+        "ready_seconds": 1.462,
+        "spa_seconds": 1.665
+      }
+    ],
+    "exe-before.json": [
+      {
+        "ready_seconds": 15.926,
+        "spa_seconds": 16.156
+      },
+      {
+        "ready_seconds": 17.333,
+        "spa_seconds": 17.565
+      },
+      {
+        "ready_seconds": 20.458,
+        "spa_seconds": 21.259
+      }
+    ],
+    "exe-after-final.json": [
+      {
+        "ready_seconds": 1.475,
+        "spa_seconds": 1.67
+      },
+      {
+        "ready_seconds": 3.409,
+        "spa_seconds": 3.788
+      },
+      {
+        "ready_seconds": 1.478,
+        "spa_seconds": 1.656
+      }
+    ]
+  }
+}
