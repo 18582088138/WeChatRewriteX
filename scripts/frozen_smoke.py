@@ -62,6 +62,14 @@ def main():
                         return response.json()
                     wait(lambda: client.get("/api/ready").status_code == 200)
                     assert client.get("/").status_code == 200
+                    env_file = root / ".env"
+                    for key in ("frozen-test-first", "frozen-test-second"):
+                        env_file.write_text(f"DEEPSEEK_API_KEY={key}\n", encoding="utf-8")
+                        reloaded = request("POST", "/api/settings/reload-env")
+                        assert reloaded["services"]["llm_purposes"]["create"]
+                        assert key not in json.dumps(reloaded)
+                    env_file.write_text("", encoding="utf-8")
+                    assert not request("POST", "/api/settings/reload-env")["services"]["llm_available"]
                     aid = request("POST", "/api/articles", json={"title": "冻结包验收", "auto_collect": False})["article"]["id"]
                     base = f"/api/articles/{aid}"
                     request("POST", base + "/materials/upload-batch", files={"files": ("source.md", "冻结程序需要验证实际文稿生成、编辑、审稿和四平台导出。".encode(), "text/markdown")})
@@ -90,7 +98,7 @@ def main():
                     assert edited["version"] == 2
                     historical = request("GET", base + "/draft?version=1")["draft"]
                     assert historical["status"] == "finalized"
-                    print(f"Frozen {info['version']} smoke passed: frontend, working versions, finalization, all 4 exports, cards and downloads")
+                    print(f"Frozen {info['version']} smoke passed: environment reload, frontend, working versions, finalization, all 4 exports, cards and downloads")
             finally:
                 if process.poll() is None:
                     # PyInstaller has a bootloader child: terminate only this owned process tree.

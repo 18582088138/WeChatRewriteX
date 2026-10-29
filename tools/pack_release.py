@@ -131,6 +131,15 @@ def clear_package(path: Path) -> None:
         shutil.rmtree(path)
 
 
+def copy_frozen_bundle(source: Path, target: Path, executable: str) -> None:
+    """Only ship compiled assets; a run from build/ may have seeded local .env/data."""
+    if not (source / executable).is_file() or not (source / "_internal").is_dir():
+        raise SystemExit("冻结包不完整：缺少可执行文件或 _internal")
+    target.mkdir(parents=True)
+    shutil.copy2(source / executable, target / executable)
+    shutil.copytree(source / "_internal", target / "_internal")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="文枢 一键打包（默认全平台）")
     ap.add_argument("--skip-tests", action="store_true")
@@ -192,7 +201,7 @@ def main() -> None:
             print("[3] 复用已核验的 文枢.exe")
         win_dir = ver_dir / f"文枢-v{ver}-windows-x64"
         clear_package(win_dir)
-        shutil.copytree(bundle, win_dir)
+        copy_frozen_bundle(bundle, win_dir, "文枢.exe")
         shutil.copy(ROOT / "scripts" / "start_windows.bat", win_dir / "启动文枢.bat")
         shutil.copy(ROOT / "scripts" / "start_windows.ps1", win_dir / "启动文枢.ps1")
         copy_docs(win_dir)
@@ -214,7 +223,7 @@ def main() -> None:
             linux_bin = linux_bundle / "文枢"
             linux_dir = ver_dir / f"文枢-v{ver}-linux-x64"
             clear_package(linux_dir)
-            shutil.copytree(linux_bundle, linux_dir)
+            copy_frozen_bundle(linux_bundle, linux_dir, "文枢")
             (linux_dir / "文枢").chmod(0o755)
             shutil.copy(ROOT / "scripts" / "start_linux.sh", linux_dir / "start_linux.sh")
             (linux_dir / "start_linux.sh").chmod(0o755)

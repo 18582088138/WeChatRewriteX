@@ -15,6 +15,18 @@ def main():
     with TestClient(create_app(start_worker=False)) as client:
         assert client.get("/api/ready").status_code == 200
         assert client.get("/").status_code == 200
+        env_file = config.RUNTIME_ROOT / ".env"
+        original_env = env_file.read_text(encoding="utf-8")
+        try:
+            env_file.write_text("DEEPSEEK_API_KEY=wheel-test-key\n", encoding="utf-8")
+            result = client.post("/api/settings/reload-env")
+            assert result.status_code == 200 and result.json()["services"]["llm_purposes"]["create"]
+            assert "wheel-test-key" not in result.text
+            env_file.write_text("", encoding="utf-8")
+            assert client.post("/api/settings/reload-env").status_code == 200
+        finally:
+            env_file.write_text(original_env, encoding="utf-8")
+            assert client.post("/api/settings/reload-env").status_code == 200
         aid = dao.create_article("local://wheel", title="安装包验收")["id"]
         doc = draft_service.save_new_version(DraftDoc(id="", article_id=aid, version=0,
             blocks=[Block(id="b", type=BlockType.PARAGRAPH, text="安装包中的卡片主题、数据库结构和前端资源均可用。")]),
