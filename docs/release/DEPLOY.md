@@ -1,4 +1,4 @@
-# 部署步骤（文枢 - 自媒体 Studio 1.11.0）
+# 部署步骤（文枢 - 自媒体 Studio 1.15.0）
 
 升级前请停止服务并备份，步骤见 [架构与升级说明](../ARCHITECTURE.md)。旧 exe 不会自动获得源码更新；
 以下二进制部署流程适用于重新构建的执行包。每个数据根仅运行一个 ASGI worker；远程绑定必须配置令牌。
@@ -7,7 +7,7 @@
 
 ## 一、Windows 部署
 
-1. **解压**：将 `文枢-v1.11.0-windows-x64.zip` 解压到任意目录（路径避免中文空格更稳妥，
+1. **解压**：将 `文枢-v1.15.0-windows-x64.zip` 解压到任意目录（路径避免中文空格更稳妥，
    如 `D:\Apps\wenshu\`）。
 2. **启动**（三种方式任选）：
    - 资源管理器双击 `启动文枢.bat`；
@@ -34,7 +34,7 @@
 > 本版未预出 Linux 二进制包；先执行 `bash packaging/build_linux_binary.sh`（需 Docker）
 > 得到 `release/linux/文枢`，按下述结构组装后按本节流程部署。也可直接走第四节 pip 安装。
 
-1. **解压**：`tar -xzf 文枢-v1.11.0-linux-x64.tar.gz && cd 文枢-v1.11.0-linux-x64`
+1. **解压**：`tar -xzf 文枢-v1.15.0-linux-x64.tar.gz && cd 文枢-v1.15.0-linux-x64`
 2. **启动**：`./start_linux.sh`。脚本自动：创建目录 → 补可执行权限 → 首启安装 Chromium
    （仅一次）→ 拉起主程序（默认监听 127.0.0.1:8000）。
    - 服务器对外提供访问：`./文枢 --host 0.0.0.0 --port 8000`（必须在 `.env` 配置
@@ -48,9 +48,9 @@
 ## 三、Docker（可选容器化方案，本版未预构建镜像）
 
 ```bash
-docker build -t wenshu-studio:1.11.0 .
+docker build -t wenshu-studio:1.15.0 .
 docker run -d --name wenshu --env-file .env -p 8000:8000 \
-  -v wenshu-resource:/app/resource -v wenshu-log:/app/log wenshu-studio:1.11.0
+  -v wenshu-resource:/app/resource -v wenshu-log:/app/log wenshu-studio:1.15.0
 ```
 
 镜像内置全部依赖与 Chromium；`resource`（数据）与 `log`（日志）用 volume 持久化。
@@ -58,7 +58,7 @@ docker run -d --name wenshu --env-file .env -p 8000:8000 \
 ## 四、pip 本地安装（源码包）
 
 ```bash
-pip install wenshu-1.11.0.tar.gz
+pip install wenshu-1.15.0.tar.gz
 wenshu                 # 启动；首启在当前目录自动铺 config/、web/dist、.env
 ```
 

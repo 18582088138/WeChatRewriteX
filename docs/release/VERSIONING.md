@@ -5,7 +5,7 @@
 
 ## 1. 版本号：语义化 + 单一来源
 
-- 采用 [SemVer](https://semver.org/lang/zh-CN/)：`主.次.修订`（当前源码版本 1.11.0）。
+- 采用 [SemVer](https://semver.org/lang/zh-CN/)：`主.次.修订`（当前源码版本 1.15.0）。
   新增功能升次版本；纯修复升修订；不兼容变更升主版本。
 - **单一来源** ✅：版本号只写在 `app/__init__.py` 的 `__version__`；
   `pyproject.toml` 用 `dynamic = ["version"]` 从它读取，`tools/pack_release.py` 也读它。
@@ -33,7 +33,7 @@ python tools/pack_release.py          # 测试门槛→资产归集→sdist→ex
 ```
 
 - 测试是打包的第 0 步，红灯不出包（可 `--skip-tests` 仅本地调试时绕过）；
-- 产物统一进 `release/`（已 gitignore），文件名带版本号；
+- 产物统一进 `release/v<版本号>/`（已 gitignore），文件名带版本号；
 - `SHA256SUMS.txt` 随包发布，用户可校验下载完整性 ✅。
 - 构建环境使用 `requirements-build.lock`，先执行 `pip install --require-hashes -r requirements-build.lock`；
   `--version`、`--build-info` 验证产物，`--reuse-exe` 拒绝未核验或源码不匹配的旧程序。

@@ -83,8 +83,8 @@ def targz_dir(src: Path, out: Path) -> None:
 def bundle_browsers(pkg_dir: Path) -> None:
     """把与当前环境 playwright 匹配的 chromium_headless_shell 打进发布包（免安装）。
 
-    先执行 `playwright install chromium`（幂等，按当前库版本下载对应修订版），
-    再按 mtime 取最新修订目录——避免拿宿主机旧缓存与净室新版 playwright 错配。"""
+    先执行 `playwright install chromium`，再按当前驱动要求的 revision 选取。
+    文件 mtime 不能代表 revision；别的 Python 环境可能刚下载了另一版本。"""
     print("  按当前 playwright 版本准备浏览器（playwright install chromium）…")
     try:
         subprocess.run([PY, "-m", "playwright", "install", "chromium"],
@@ -93,15 +93,23 @@ def bundle_browsers(pkg_dir: Path) -> None:
         print("  [warn] playwright install 失败（离线？）：", e)
     local = os.environ.get("LOCALAPPDATA")
     src_root = Path(local) / "ms-playwright" if local else None
-    shells = sorted(src_root.glob("chromium_headless_shell-*"),
-                    key=lambda p: p.stat().st_mtime) if src_root else []
-    if not shells:
+    import playwright
+    browser_config = Path(playwright.__file__).parent / "driver" / "package" / "browsers.json"
+    browsers = json.loads(browser_config.read_text(encoding="utf-8"))["browsers"]
+    revision = next(b["revision"] for b in browsers if b["name"] == "chromium-headless-shell")
+    custom = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if custom and custom != "0":
+        src_root = Path(custom)
+    elif custom == "0":
+        src_root = browser_config.parent / ".local-browsers"
+    shell = src_root / f"chromium_headless_shell-{revision}" if src_root else None
+    if not shell or not shell.is_dir():
         print("  [warn] 本机无 chromium_headless_shell 缓存，包内不带浏览器；"
               "首启脚本会引导安装（--install-browser）")
         return
     dst = pkg_dir / "playwright-browsers"
-    shutil.copytree(shells[-1], dst / shells[-1].name)
-    print(f"  浏览器已打入发布包：{shells[-1].name}")
+    shutil.copytree(shell, dst / shell.name)
+    print(f"  浏览器已打入发布包：{shell.name}")
 
 
 def copy_docs(dst: Path) -> None:

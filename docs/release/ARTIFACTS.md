@@ -1,24 +1,23 @@
-# 产物清单（文枢 - 自媒体 Studio 1.12.0）
+# 产物清单（文枢 - 自媒体 Studio 1.15.0）
 
 版本单一来源为 `app/__init__.py`。打包脚本更新与实际执行包生成是两个步骤，
 旧 exe 不会自动获得源码更新。升级和回退见 [架构与升级说明](../ARCHITECTURE.md)。
 
 ## 当前交付状态
 
-- `dist/wenshu-1.12.0.tar.gz`：源码包（含内置运行资产），支持 pip 本地安装。
-- Windows 绿色包 `release/v1.12.0/文枢-v1.12.0-windows-x64.zip`：含独立 exe、双启动脚本、
-  自带 Chromium 与完整 docs/，已出包。
-- Linux 独立包 `release/v1.12.0/文枢-v1.12.0-linux-x64.tar.gz`：打包工程已同步，尚未实际构建二进制。
+- `dist/wenshu-1.15.0.tar.gz`：源码包（含内置运行资产），待本轮构建；支持 pip 本地安装。
+- Windows 绿色包 `release/v1.15.0/文枢-v1.15.0-windows-x64.zip`：含独立 exe、双启动脚本、
+  自带 Chromium 与完整 docs/，等待本轮重新构建及验收。
+- Linux 独立包 `release/v1.15.0/文枢-v1.15.0-linux-x64.tar.gz`：打包工程已同步，尚未实际构建二进制。
 - Docker：本版未预构建镜像；Dockerfile 在仓库内维护，需要时 `docker build -t wenshu-studio .`。
 
-## 输出目录约定（V1.12 规范化）
+## 输出目录约定（V1.15）
 
 - **发布根 `release/v<版本号>/`**：zip / sdist / SHA256SUMS 按版本分目录归档，避免互相覆盖。
 - **构建中间产物在 `build/`**：`build/dist-windows/`（原始 exe）、`build/dist-linux/`、
   `build/pyinstaller*/` 均为中间态，不入发布根、不入 git。
-- **文章导出批次 `exports/runs/<批次>/`**：每次「生成发布包」或「重新生成卡片」产生一个
-  新批次目录，平台包在批次内（`xhs/cards/` 等），批次之间永不覆盖；发布页展示各平台
-  最近一次成功批次，资源管理器可查看全部历史批次。
+- **文章文件导出 exports/<平台>/**：固定最终文件目录；成功替换，失败保留完整旧包。
+  不再保留新 runs 批次或文稿 snapshot.json，文稿版本由 drafts 管理。旧 runs 不自动删除。
 - **缓存 `resource/_cache/`**：Logo 徽章、视频首帧、UI 截图统一缓存位置，与业务目录分离。
 
 ## 构建步骤
@@ -70,3 +69,5 @@ Python/SQLite/Node/Playwright 信息。`--reuse-exe` 只有在内嵌版本及源
 - `packaging/build_linux_binary.sh`：Linux 容器内冻结构建。
 - `Dockerfile`、`.dockerignore`：运行镜像构建与上下文隔离。
 - `scripts/start_windows.bat`、`scripts/start_windows.ps1`、`scripts/start_linux.sh`：平台启动入口。
+
+V1.15 验收：87 项后端回归与 2 项真实浏览器流程通过（含四平台导出、定稿后自动开版和历史视图回滚），Vue 类型检查及生产构建通过。Windows exe、Python 分发包正在重新构建，完成后更新本清单。

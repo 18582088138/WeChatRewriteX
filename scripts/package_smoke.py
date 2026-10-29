@@ -6,8 +6,8 @@ def main():
     from fastapi.testclient import TestClient
     from app.main import WEB_DIST, create_app
     from app.core import config
-    from app.core.models import Block, BlockType, DraftDoc
-    from app.services import draft_service
+    from app.core.models import ArticleStatus, Block, BlockType, DraftDoc
+    from app.services import draft_service, workflow
     from app.services.cards.render import render_cards
     from app.storage import dao
     assert WEB_DIST.joinpath("index.html").is_file(), "missing frontend package assets"
@@ -16,11 +16,23 @@ def main():
         assert client.get("/api/ready").status_code == 200
         assert client.get("/").status_code == 200
         aid = dao.create_article("local://wheel", title="安装包验收")["id"]
-        draft_service.save_new_version(DraftDoc(id="", article_id=aid, version=0,
+        doc = draft_service.save_new_version(DraftDoc(id="", article_id=aid, version=0,
             blocks=[Block(id="b", type=BlockType.PARAGRAPH, text="安装包中的卡片主题、数据库结构和前端资源均可用。")]),
             "agent", checkpoint=True)
         cards = render_cards(aid)
-        assert cards and all(path.stat().st_size > 1000 for path in cards)
+        assert len(cards) == 2 and all(path.stat().st_size > 1000 for path in cards)
+        doc.blocks[0].text += " 连续编辑不升正式版本。"
+        saved = draft_service.save_new_version(doc, "human")
+        assert saved.version == 1 and saved.edit_revision > doc.edit_revision
+        dao.set_article_status(aid, ArticleStatus.EDITING)
+        assert workflow.finalize(aid, force=True)["version"] == 1
+        from app.services.publish.exporter import export_variants
+        result = export_variants(aid, ["x", "weibo", "xhs"])
+        assert result["ok"]
+        assert (Path(result["export_root"]) / "x" / "thread.json").is_file()
+        assert not (Path(result["export_root"]) / "runs").exists()
+        files = client.get(f"/api/articles/{aid}/exports").json()["files"]
+        assert client.get("/files/" + next(p for p in files if p.endswith("post-01.txt"))).status_code == 200
         assert client.get("/files/app.db").status_code == 404
     print("Installed wheel smoke passed: schema, prompts, frontend, cards and file boundary")
 

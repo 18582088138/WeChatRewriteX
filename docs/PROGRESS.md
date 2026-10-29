@@ -1,3 +1,14 @@
+# V1.15 当前开发进度（2026-10-29）
+
+加固分支已合并，已同步 main，并在 main 实现本轮版本/审稿、路径、固定导出、小红书末页及 X/微博结构调整。
+版本为 1.15.0；详细行为与兼容影响见 [V1.15 说明](release/V1.15.md)。
+新增 draft_workspaces，schema v3；旧增量历史只读兼容，定稿快照保持不可变。
+以下 V1.14/V1.12/更早记录为历史行为，exports 批次化和每次编辑升版本已被 V1.15 替代。
+工作区原有未跟踪 web/web/ 保留。本轮不创建正式 tag 或 GitHub Release。
+验证和实际打包清单维护在 [ARTIFACTS.md](release/ARTIFACTS.md)。
+
+---
+
 # 架构优化进度补充（2026-10-28 / 1.11.0）
 
 架构实现分支：`codex/architecture-hardening`。已落地版本事务/CAS、审稿与定稿有效性、

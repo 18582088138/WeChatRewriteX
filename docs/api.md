@@ -1,4 +1,4 @@
-# 接口文档（1.11.0 · 2026-10-28）
+# 接口文档（1.15.0 · 2026-10-29）
 
 Base URL: `http://127.0.0.1:8000`，所有接口前缀 `/api`。运行时可访问 `/docs` 查看自动生成的 OpenAPI。
 
@@ -13,10 +13,11 @@ Base URL: `http://127.0.0.1:8000`，所有接口前缀 `/api`。运行时可访�
 
 - 错误体统一 `{ "detail": "人类可读信息" }`；状态码 `400` 参数错误 · `404` 不存在 ·
   `409` 状态/版本冲突 · `422` 类型或范围校验失败 · `502` 外部调用失败（爬取/LLM） · `503` 所需渠道未配置或服务未就绪。
-- 文案版本为**块级增量 + checkpoint**：每次实际编辑原子记录变更组，版本时间线保留历史；
-  创建、主动保存、定稿和回滚生成 checkpoint。旧 draft ID 提交返回 409，虚构版本返回 404；
-  定稿、保存版本和回滚可提交 `expected_version` 防止覆盖并发编辑。
-  改动超阈值（默认 ≥3 块或字数变化 >20%）自动触发增量复审。
+- 文案采用持久工作副本 + 定稿快照：定稿前版本号稳定，修改只增加 draft.doc.edit_revision；
+  定稿封存当前号，之后首次修改开下一号。旧增量历史保持可读。
+  编辑/AI/采纳/回滚/定稿应提交 expected_revision；文章级操作还可带 expected_version。
+  旧客户端省略 revision 时按服务端读取快照提交，新前端始终携带，冲突返回 409。
+  改动超阈值仍可自动复审，异步结果按版本与 revision 检测迟到。
 - 文章状态机与 UI 三态（New/Process/Done）映射见 `docs/design/02`；定稿/发布态下的复审为
   **软审**（只出报告，不改文章状态）。
 - LLM/搜索/embedding 未配置时走降级路径（保底稿 / 仅原文 / 纯 FTS），流程不中断。
@@ -30,7 +31,7 @@ Base URL: `http://127.0.0.1:8000`，所有接口前缀 `/api`。运行时可访�
 | GET | `/api/articles?status=&q=&limit=&offset=` | SQL 分页列表。`status` ∈ `New/Process/Done/Failed`；limit 默认 200，最大 500。返回文章、状态计数、总数、分页参数及批量 progress |
 | GET | `/api/articles/{aid}` | 详情：状态、素材数、版本列表、最新审稿、发布记录 |
 | POST | `/api/articles/{aid}/advance` | 推进阶段 `{stage: collect\|create\|review, selected_material_ids?}`；当前状态不允许 → 409。`selected_material_ids` 为 create 阶段的「勾选参与创作素材集」（素材库「导入 & 创作」按钮）；收集 → 后续阶段需手动或 `pipeline.auto` 连跑 |
-| POST | `/api/articles/{aid}/finalize` | `{force=false, expected_version?}` 生成正式 checkpoint。审稿必须匹配当前内容；缺失、过期、AI 失败或未处理 blocker 返回 409，force=true 跳过审稿限制并记录原因，仍不能跳过版本冲突。规则降级审稿允许人工定稿。已定稿幂等，之后实际编辑或回滚转回 EDITING |
+| POST | `/api/articles/{aid}/finalize` | `{force=false, expected_version?, expected_revision?}` 生成正式 checkpoint。审稿须属于当前工作版本且非迟到，定稿复核当前规则；缺失、过期、AI 失败或未处理 blocker 返回 409，force=true 跳过审稿限制并记录原因，仍不能跳过版本冲突。规则降级审稿允许人工定稿。已定稿幂等，之后实际编辑或回滚转回 EDITING |
 | POST | `/api/articles/{aid}/reopen` | 定稿/完成后回炉编辑（FINALIZED/DONE → EDITING） |
 | GET | `/api/jobs?article_id=&limit=` | 任务队列状态（type/status/attempts/error/结果） |
 
@@ -69,11 +70,11 @@ SSE 推送，前端工作台实时展示。主题与报道主体提取为**纯�
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/articles/{aid}/draft?version=` | 取文案（默认最新版）+ 版本列表；`draft.doc` 为块模型 |
-| GET | `/api/articles/{aid}/versions` | 版本时间线（checkpoint 快照 + 编辑变更组） |
-| POST | `/api/articles/{aid}/versions/save` | `{note?, expected_version?}` 当前 HEAD 落为命名 checkpoint |
-| POST | `/api/articles/{aid}/rollback` | `{version, expected_version?}` 重建目标态存为新 checkpoint；旧 HEAD 返回 409，目标不存在返回 404 |
+| GET | `/api/articles/{aid}/versions` | 版本时间线（正式快照 + 当前工作副本 + 旧增量历史） |
+| POST | `/api/articles/{aid}/versions/save` | `{note?, expected_version?, expected_revision?}` 保存当前工作副本和备注；不创建正式版本 |
+| POST | `/api/articles/{aid}/rollback` | `{version, expected_version?, expected_revision?}` 将目标内容恢复到工作副本，覆盖未定稿改动；仅定稿后首次修改开版；旧 HEAD 返回 409，目标不存在返回 404 |
 | PUT | `/api/articles/{aid}/selection` | `{material_ids: []}` 保存创作会话勾选素材集合（左窗数据源） |
-| PUT | `/api/drafts/{draft_id}/edit` | 批量编辑 `{ops: [...]}`。op ∈ `update` / `remove` / `replace_image` / `set_caption` / `insert_after`（新增块/插图） / `update_meta`。返回 `{version, recheck_enqueued, folder_renamed}`；`title_selected` 触发标题联动（正文一级标题+项目文件夹改名） |
+| PUT | `/api/drafts/{draft_id}/edit` | 批量编辑 `{expected_revision?, ops: [...]}`。op ∈ `update` / `remove` / `replace_image` / `set_caption` / `insert_after`（新增块/插图） / `update_meta`。返回 `{version, recheck_enqueued, folder_renamed}`；`title_selected` 触发标题联动（正文一级标题+项目文件夹改名） |
 | POST | `/api/drafts/{draft_id}/regenerate` | 段落 AI 重生成 `{block_ids: [], instruction}` → 新版本；LLM 未配置 → 503 |
 | POST | `/api/drafts/{draft_id}/insert-refs` | 参考素材融合插入 `{material_ids: [], after_block_id?, instruction?}` → 新版本 |
 
@@ -99,8 +100,8 @@ SSE 推送，前端工作台实时展示。主题与报道主体提取为**纯�
 | POST | `/api/articles/{aid}/exports/reveal` | `{platform}` 打开该平台最新完成发布包的本地文件夹；未生成 404 |
 | POST | `/api/articles/{aid}/cards?theme=` | 单独生成小红书卡片 PNG（Playwright 截图，含溢出校验） |
 
-导出位置：`<data_root>/library/articles/<文章目录>/exports/runs/<job-id>/<平台>/`。
-各含 README.txt、snapshot.json 和带文件 hash 的 manifest.json；小红书 cards/ 为 1080×1440 PNG。
+导出位置：`<data_root>/<项目目录>/exports/<平台>/`。
+各含 README.txt 和带文件 hash 的 manifest.json，不保存文稿历史。成功替换固定包，失败保留上次完整包。小红书 cards/ 为 1080×1440 PNG，品牌位于最后正文页底部。X 与微博格式见 [V1.15 发布规范](release/V1.15.md)。
 
 ## 设置 / 系统
 
@@ -114,3 +115,5 @@ SSE 推送，前端工作台实时展示。主题与报道主体提取为**纯�
 | GET | `/api/ready` | 检查数据库与 worker，返回队列、磁盘及事件序号/丢弃指标，未就绪为 503 |
 | GET | `/api/logs/tail?lines=` | 运行日志尾部（须开启开发者模式，否则 403） |
 | GET | `/api/articles/{aid}/costs` | API 费用监控：按 收集/创作/审稿 环节聚合调用数与 tokens + 全流程汇总 |
+
+V1.15 审稿意见 resolve 请求支持 expected_revision；同一已接受的工作版本报告允许连续处理意见，跨版本、迟到报告或被删除段落返回 409。reviews/latest 返回 current（意见上下文有效）和 content_changed（报告后正文有改动），两者含义不同。
