@@ -23,6 +23,10 @@ from ..storage import dao, db, library
 _SYS_DIRS = {"_cache", "common", "backups", "style_reference", "library", "runs"}
 _IMG_DIR_KIND = {"图片": "image", "视频": "video", "音频": "audio", "其他": "doc"}
 _IMPORT_THREAD: threading.Thread | None = None
+_WATCH_LOCK = threading.RLock()
+_WATCH_STOP = threading.Event()
+_WATCH_USERS = 0
+_SCAN_LOCK = threading.Lock()
 
 
 def _is_project_dir(d: Path) -> bool:
@@ -33,6 +37,12 @@ def _is_project_dir(d: Path) -> bool:
 
 def scan_once() -> dict:
     """扫一遍 resource/，导入尚未入库的项目文件夹。返回 {imported, skipped}。"""
+    # Background first scan and manual refresh must not import a folder twice.
+    with _SCAN_LOCK:
+        return _scan_once()
+
+
+def _scan_once() -> dict:
     root = config.data_dir()
     imported, skipped = [], []
     if not root.is_dir():
@@ -48,6 +58,8 @@ def scan_once() -> dict:
             imported.append({"folder": d.name, "article_id": aid})
         except Exception as e:
             skipped.append(f"{d.name}（导入失败: {e}）")
+            from .. import logging_setup
+            logging_setup.log("error", "External project import failed folder=%s", d.name, exc_info=True)
     return {"imported": imported, "skipped": skipped}
 
 
@@ -164,24 +176,39 @@ def _import_draft(d: Path, aid: str) -> int:
 
 # ---------- 定时扫描 ----------
 
-def start_watcher() -> None:
-    """启动时全量扫一次 + 后台线程定时扫描（默认开启，可用配置关闭）。"""
-    global _IMPORT_THREAD
+def start_watcher() -> bool:
+    """V1.16: first full scan runs in background, never on the ready path."""
+    global _IMPORT_THREAD, _WATCH_USERS
     if not config.get("library.watch_imports", True):
-        return
-    scan_once()
-    if _IMPORT_THREAD and _IMPORT_THREAD.is_alive():
-        return
-    interval = int(config.get("library.import_scan_interval_sec", 30))
+        return False
+    with _WATCH_LOCK:
+        _WATCH_USERS += 1
+        if _IMPORT_THREAD and _IMPORT_THREAD.is_alive():
+            return True
+        _WATCH_STOP.clear()
+        interval = max(1, int(config.get("library.import_scan_interval_sec", 30)))
 
-    def _loop():
-        import time
-        while True:
-            time.sleep(interval)
-            try:
-                scan_once()
-            except Exception:
-                pass
+        def _loop():
+            while not _WATCH_STOP.is_set():
+                try:
+                    scan_once()
+                except Exception:
+                    from .. import logging_setup
+                    logging_setup.log("error", "External project scan failed", exc_info=True)
+                if _WATCH_STOP.wait(interval):
+                    break
 
-    _IMPORT_THREAD = threading.Thread(target=_loop, name="import-watcher", daemon=True)
-    _IMPORT_THREAD.start()
+        _IMPORT_THREAD = threading.Thread(target=_loop, name="import-watcher", daemon=True)
+        _IMPORT_THREAD.start()
+        return True
+
+
+def stop_watcher() -> None:
+    global _IMPORT_THREAD, _WATCH_USERS
+    with _WATCH_LOCK:
+        _WATCH_USERS = max(0, _WATCH_USERS - 1)
+        if _WATCH_USERS or _IMPORT_THREAD is None:
+            return
+        _WATCH_STOP.set()
+        _IMPORT_THREAD.join()
+        _IMPORT_THREAD = None

@@ -28,26 +28,31 @@ def create_app(start_worker: bool = True, llm=None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app):
         app.state.runtime = None
+        app.state.import_watcher = False
+        startup_started = time.perf_counter()
         try:
             app.state.runtime = queue.start(llm) if start_worker else None
             if not start_worker:
                 db.init_db()
                 config.set_db_overlay(dao.db_settings)
-            # 外部项目文件夹导入：启动时全量扫一次 + 后台定时扫描（V1.14）
-            from .services import imports as import_svc
-            import_svc.start_watcher()
             hooks.register_hooks()
             from . import logging_setup
             logging_setup.configure()
+            from .services import imports as import_svc
+            app.state.import_watcher = import_svc.start_watcher()
             from .context import AppContext
             from .core import events
             import copy
             app.state.context = AppContext(data_dir(), copy.deepcopy(config.all_settings()),
                                             dao, events.bus, app.state.runtime)
             app.state.ready = True
+            logging_setup.log("info", "Application ready in %.3fs (lifespan); import scan runs in background",
+                              time.perf_counter() - startup_started)
             yield
         finally:
             app.state.ready = False
+            if app.state.import_watcher:
+                import_svc.stop_watcher()
             if app.state.runtime is not None:
                 queue.stop()
             from .services.http import close_clients

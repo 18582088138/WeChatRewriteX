@@ -55,6 +55,7 @@ def _npm_build() -> None:
 
 def run(cmd: list[str], **kw) -> None:
     print("  $", " ".join(str(c) for c in cmd))
+    kw.setdefault("env", {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
     subprocess.run(cmd, cwd=ROOT, check=True, **kw)
 
 
@@ -122,6 +123,14 @@ def copy_docs(dst: Path) -> None:
         (dst / "docs" / name).write_text(f"发布文档见 [{name}](release/{name})。\n", encoding="utf-8")
 
 
+def clear_package(path: Path) -> None:
+    resolved = path.resolve()
+    if path.is_symlink() or resolved == RELEASE.resolve() or not resolved.is_relative_to(RELEASE.resolve()):
+        raise SystemExit("拒绝清理发布目录以外的路径")
+    if path.exists():
+        shutil.rmtree(path)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="文枢 一键打包（默认全平台）")
     ap.add_argument("--skip-tests", action="store_true")
@@ -161,10 +170,14 @@ def main() -> None:
 
     # 3. Windows 绿色执行包
     if not args.skip_windows:
-        exe = ROOT / "build" / "dist-windows" / "文枢.exe"
+        bundle = ROOT / "build" / "dist-windows" / "文枢"
+        exe = bundle / "文枢.exe"
+        if bundle.is_symlink() or not bundle.resolve().is_relative_to((ROOT / "build").resolve()):
+            raise SystemExit("冻结输出目录无效")
         if not (args.reuse_exe and exe.exists()):
             print("[3] Windows exe（PyInstaller，约 3~5 分钟）")
             run([PY, "-m", "PyInstaller", "packaging/wenshu.spec",
+                 "--noconfirm",
                  "--distpath", str(ROOT / "build" / "dist-windows"),
                  "--workpath", str(ROOT / "build" / "pyinstaller")])
         else:
@@ -178,10 +191,8 @@ def main() -> None:
                 raise SystemExit("exe 与当前版本/源码不匹配，请重新构建")
             print("[3] 复用已核验的 文枢.exe")
         win_dir = ver_dir / f"文枢-v{ver}-windows-x64"
-        if win_dir.exists():
-            shutil.rmtree(win_dir)
-        win_dir.mkdir()
-        shutil.copy(exe, win_dir / "文枢.exe")
+        clear_package(win_dir)
+        shutil.copytree(bundle, win_dir)
         shutil.copy(ROOT / "scripts" / "start_windows.bat", win_dir / "启动文枢.bat")
         shutil.copy(ROOT / "scripts" / "start_windows.ps1", win_dir / "启动文枢.ps1")
         copy_docs(win_dir)
@@ -199,12 +210,11 @@ def main() -> None:
             print("  [跳过] Docker 不可用——Linux 包未出。需要时启动 Docker 后重跑本脚本。")
         else:
             run(["bash", "packaging/build_linux_binary.sh"])
-            linux_bin = ROOT / "build" / "dist-linux" / "文枢"
+            linux_bundle = ROOT / "build" / "dist-linux" / "文枢"
+            linux_bin = linux_bundle / "文枢"
             linux_dir = ver_dir / f"文枢-v{ver}-linux-x64"
-            if linux_dir.exists():
-                shutil.rmtree(linux_dir)
-            linux_dir.mkdir()
-            shutil.copy(linux_bin, linux_dir / "文枢")
+            clear_package(linux_dir)
+            shutil.copytree(linux_bundle, linux_dir)
             (linux_dir / "文枢").chmod(0o755)
             shutil.copy(ROOT / "scripts" / "start_linux.sh", linux_dir / "start_linux.sh")
             (linux_dir / "start_linux.sh").chmod(0o755)

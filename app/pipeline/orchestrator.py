@@ -1,9 +1,6 @@
 """编排器：状态推进 + Agent 调用 + auto 模式连跑。业务逻辑全在 agents/，这里只做编排。"""
 from __future__ import annotations
 
-from ..agents.collector import CollectorAgent
-from ..agents.reviewer import ReviewerAgent
-from ..agents.creator import CreatorAgent
 from ..core import config, events
 from ..core.models import ArticleStatus
 from ..core.statemachine import transition
@@ -13,6 +10,11 @@ _agents: dict[str, object] = {}
 
 
 def _get_agents(llm=None):
+    # V1.16: defer crawl/LLM/template imports until the first pipeline job.
+    # The HTTP UI no longer waits for trafilatura and Agent initialization.
+    from ..agents.collector import CollectorAgent
+    from ..agents.reviewer import ReviewerAgent
+    from ..agents.creator import CreatorAgent
     if llm is not None:
         return {"collect": CollectorAgent(llm), "create": CreatorAgent(llm),
                 "review": ReviewerAgent(llm)}

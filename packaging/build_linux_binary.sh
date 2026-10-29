@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# 借助 Docker 构建 Linux 端单文件二进制（产出 release/linux/文枢）
+# 借助 Docker 构建 Linux 端目录式二进制包（产出 build/dist-linux/文枢/）
 # 原理：PyInstaller 不支持跨平台交叉编译，Linux 二进制必须在 Linux 环境内
 #       构建——用 python:3.12 容器挂载本仓库，在容器里安装依赖并执行 spec。
 # 前置：本机装有 Docker 并已启动；仓库根目录执行：bash packaging/build_linux_binary.sh
@@ -18,10 +18,10 @@ MSYS_NO_PATHCONV=1 docker run --rm -v "$SRC:/src" -w /src python:3.12 bash -c '
     python -m pip install --require-hashes -r requirements-build.lock
     python scripts/build_assets.py
     python -m PyInstaller packaging/wenshu.spec --distpath build/dist-linux --workpath build/pyinstaller-linux
-    build/dist-linux/文枢 --version
-    build/dist-linux/文枢 --build-info
+    build/dist-linux/文枢/文枢 --version
+    build/dist-linux/文枢/文枢 --build-info
 '
 
 echo "[2/2] 校验产物..."
-test -f build/dist-linux/文枢 && echo "OK → build/dist-linux/文枢" \
+test -f build/dist-linux/文枢/文枢 && echo "OK → build/dist-linux/文枢/" \
     || { echo "构建失败：未见 build/dist-linux/文枢"; exit 1; }

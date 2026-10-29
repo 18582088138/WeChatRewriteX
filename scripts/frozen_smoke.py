@@ -22,6 +22,8 @@ def main():
     with tempfile.TemporaryDirectory(prefix="wenshu-frozen-") as temp:
         root = Path(temp)
         copied = root / executable.name
+        if (package / "_internal").is_dir():
+            shutil.copytree(package / "_internal", root / "_internal")
         shutil.copy2(executable, copied)
         env = {**os.environ, "WENSHU_DATA_DIR": str(root / "data"),
                "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8",

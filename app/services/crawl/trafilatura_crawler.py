@@ -4,7 +4,6 @@ from __future__ import annotations
 import re
 
 import httpx
-import trafilatura
 from lxml import html as lxml_html
 
 from .base import CrawlError, ImageRef, RawArticle
@@ -20,6 +19,8 @@ class TrafilaturaCrawler:
         return url.startswith(("http://", "https://"))
 
     def fetch(self, url: str) -> RawArticle:
+        # Parsing is non-core startup work; load only for actual article fetches.
+        import trafilatura
         from .wechat_mp import UA
         try:
             response = http.get(url, untrusted=True, headers={"User-Agent": UA}, timeout=30,

@@ -1,4 +1,4 @@
-# PyInstaller 构建脚本：文枢 - 自媒体 Studio 单文件绿色执行包
+# PyInstaller 构建脚本：V1.16 目录式绿色包，避免每次启动解压原生依赖。
 # 用法（仓库根目录）：pyinstaller packaging/wenshu.spec
 # 前置：python scripts/build_assets.py（生成 app/_assets）
 import os
@@ -51,9 +51,8 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="文枢",
     debug=False,
     strip=False,
@@ -62,3 +61,4 @@ exe = EXE(
     disable_windowed_traceback=False,
     icon=None,
 )
+coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="文枢")
