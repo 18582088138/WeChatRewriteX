@@ -24,7 +24,22 @@ const docMeta = ref<any>(null)
 const busy = ref(false)
 const cardsBusy = ref(false)
 const retrying = ref<string[]>([])
-const cardZoom = ref('')          // 卡片大图弹窗（点击外部关闭）
+const cardIndex = ref(-1)
+const cardZoom = computed(() => cardIndex.value >= 0 && cardFiles.value[cardIndex.value]
+  ? api.fileUrl(cardFiles.value[cardIndex.value]!) : '')
+function turnCard(delta: number) {
+  cardIndex.value = Math.max(0, Math.min(cardFiles.value.length - 1, cardIndex.value + delta))
+}
+function onCardKey(event: KeyboardEvent) {
+  if (!cardZoom.value || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey ||
+      (event.target as HTMLElement)?.closest('input,textarea,select,[contenteditable="true"]')) return
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+    event.preventDefault()
+    turnCard(event.key === 'ArrowLeft' ? -1 : 1)
+  } else if (event.key === 'Escape') cardIndex.value = -1
+}
+onMounted(() => window.addEventListener('keydown', onCardKey))
+watch(cardFiles, () => { if (cardIndex.value >= cardFiles.value.length) cardIndex.value = -1 })
 
 let controller: AbortController | null = null
 let generation = 0
@@ -50,6 +65,7 @@ async function load() {
 onMounted(load)
 watch(() => store.articleTicks[props.articleId] || 0, load)
 onUnmounted(() => {
+  window.removeEventListener('keydown', onCardKey)
   generation++
   controller?.abort()
   if (refreshTimer) clearTimeout(refreshTimer)
@@ -217,7 +233,7 @@ function jobMessage(j: PublishJob): string {
         <div v-if="cardFiles.length" class="grid grid-cols-3 gap-2 overflow-y-auto flex-1 min-h-0">
           <img v-for="f in cardFiles" :key="f" :src="api.fileUrl(f)"
                class="rounded-md w-full panel cursor-zoom-in" loading="lazy"
-               @click="cardZoom = api.fileUrl(f)" />
+               @click="cardIndex = cardFiles.indexOf(f)" />
         </div>
         <div v-else class="text-xs" style="color: var(--faint);">
           尚未生成卡片（生成发布包时会自动生成，也可手动生成）。
@@ -226,8 +242,11 @@ function jobMessage(j: PublishJob): string {
     </div>
 
     <!-- 卡片大图弹窗：点击外部关闭 -->
-    <div v-if="cardZoom" class="zoom-mask" @click="cardZoom = ''">
-      <img :src="cardZoom" class="zoom-img" @click.stop />
+    <div v-if="cardZoom" class="zoom-mask" role="dialog" aria-label="小红书卡片阅览" aria-modal="true" @click="cardIndex = -1">
+      <button class="card-prev" aria-label="上一张卡片" :disabled="cardIndex === 0" @click.stop="turnCard(-1)">←</button>
+      <img :src="cardZoom" :alt="`小红书卡片 ${cardIndex + 1}`" class="zoom-img" @click.stop />
+      <button class="card-next" aria-label="下一张卡片" :disabled="cardIndex === cardFiles.length - 1" @click.stop="turnCard(1)">→</button>
+      <div class="card-counter">{{ cardIndex + 1 }} / {{ cardFiles.length }} · ← → 翻页 · Esc 关闭</div>
     </div>
   </div>
 </template>
@@ -241,5 +260,8 @@ function jobMessage(j: PublishJob): string {
 }
 .zoom-img { max-width: min(92vw, 720px); max-height: 92vh; border-radius: 10px;
   cursor: default; box-shadow: 0 18px 60px rgba(0,0,0,.35); }
+.card-prev, .card-next { color: white; font-size: 28px; padding: 12px; cursor: pointer; }
+.card-prev:disabled, .card-next:disabled { opacity: .3; cursor: default; }
+.card-counter { position: absolute; bottom: 8px; color: white; background: #222b; padding: 4px 12px; border-radius: 8px; }
 </style>
 
