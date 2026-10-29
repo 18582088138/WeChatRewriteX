@@ -16,9 +16,12 @@ const router = useRouter()
 const message = useMessage()
 const store = useAppStore()
 
-const aid = route.params.id as string
+// V1.17：route param 必须响应式——SPA 复用同一 Workbench 实例时，
+// 切到另一篇文章要重新加载（修复首次进入状态不同步）
+const aid = computed(() => route.params.id as string)
+watch(aid, async () => { await load() })
 // Register the open article for SSE reconnect recovery even when off-list.
-store.invalidateArticle(aid)
+store.invalidateArticle(aid.value)
 const article = ref<Article | null>(null)
 const tab = ref('create')
 const busy = ref(false)
@@ -33,7 +36,7 @@ async function onInsertRefs(ids: string[]) {
 /** 素材面板「导入 & 创作」：勾选素材集合 → 启动创作流程并跳到创作 tab */
 async function onImportCreate(ids: string[]) {
   try {
-    await api.post(`/api/articles/${aid}/advance`,
+    await api.post(`/api/articles/${aid.value}/advance`,
                    { stage: 'create', selected_material_ids: ids })
     message.success(`已按勾选的 ${ids.length} 份素材启动创作`)
     tab.value = 'create'
@@ -46,7 +49,7 @@ async function onImportCreate(ids: string[]) {
 async function load() {
   article.value = await api.get(`/api/articles/${aid}`)
   if (store.devMode) {
-    try { totalCosts.value = await api.get(`/api/articles/${aid}/costs`) } catch { /* ignore */ }
+    try { totalCosts.value = await api.get(`/api/articles/${aid.value}/costs`) } catch { /* ignore */ }
   }
 }
 onMounted(async () => {
@@ -57,7 +60,7 @@ onMounted(async () => {
   else if (['DRAFTED'].includes(s || '')) tab.value = 'create'
   else tab.value = 'materials'
 })
-watch(() => store.articleTicks[aid] || 0, load)
+watch(() => store.articleTicks[aid.value] || 0, load)
 
 const status = computed(() => article.value?.status || '')
 
@@ -79,7 +82,7 @@ const actions = computed(() => {
 async function runStage(stage: string) {
   busy.value = true
   try {
-    await api.post(`/api/articles/${aid}/advance`, { stage })
+    await api.post(`/api/articles/${aid.value}/advance`, { stage })
     message.success('任务已提交，处理中…')
     setTimeout(load, 800)
   } catch (e: any) {
@@ -94,7 +97,7 @@ async function runRecreate() {
   busy.value = true
   try {
     const sel = article.value?.selected_material_ids || []
-    await api.post(`/api/articles/${aid}/advance`,
+    await api.post(`/api/articles/${aid.value}/advance`,
                    { stage: 'create', selected_material_ids: sel.length ? sel : undefined })
     message.success('再次创作已启动（按当前勾选素材完整重新生成）')
     tab.value = 'create'
@@ -112,7 +115,7 @@ const stageIndex = computed(() => {
 /** 本文相关的进度消息（最新在后，取最近 8 条） */
 const progressMessages = computed(() => {
   return store.progressLog
-    .filter(m => m.article_id === aid)
+    .filter(m => m.article_id === aid.value)
     .slice(-8)
     .map(m => m.message)
 })
@@ -131,7 +134,7 @@ const hasRunning = computed(() => {
   return !!(p && (p.running?.length || p.pending?.length))
 })
 const lastDoneAt = computed(() => {
-  const last = store.progressLog.filter(m => m.article_id === aid).slice(-1)[0]
+  const last = store.progressLog.filter(m => m.article_id === aid.value).slice(-1)[0]
   return last ? last.message : ''
 })
 const logExpanded = ref(false)   // 默认收起；点击才展开（不再随运行自动弹开）
@@ -145,7 +148,11 @@ const logExpanded = ref(false)   // 默认收起；点击才展开（不再随�
                 style="color: var(--muted);" @click="router.push('/articles')">← 文章</button>
         <span class="text-xs" style="color: var(--faint);">/</span>
         <div class="font-medium truncate flex-1 text-[14px]">
-          {{ article?.title || article?.url || '…' }}
+          <a v-if="article?.url && article.url.startsWith('http')"
+             :href="article.url" target="_blank" rel="noopener"
+             class="hover:underline" style="color: inherit;"
+             title="打开原始网页">{{ article?.title || article?.url }}</a>
+          <span v-else>{{ article?.title || article?.url || '…' }}</span>
         </div>
         <StatusChip v-if="article" :status="article.status" :ui-status="article.ui_status" />
       </div>

@@ -46,6 +46,19 @@ Vue 严格类型检查和生产构建通过。Docker 本机未安装，镜像运
 - 数据根 `resource/`（gitignore）；日志 `log/wenshu.log`（gitignore，常驻持久化）
 - 一键打包：`python tools/pack_release.py`（默认全平台，产物进 release/）
 
+## V1.17 状态同步与素材删除/卡片修复（2026-10-29）
+
+1. **首次进入状态同步**：Workbench 的 aid 改为 computed + watch（路由切换即重载），
+   各面板补 articleId watcher——修复 SPA 复用实例时「点击进不去/需手动刷新」。
+2. **素材块删除**：创作页每个块（图/视频/文本）悬停 × 删除；审稿页图片/视频块
+   悬停 × 删除（统一 edit remove op）。
+3. **卡片视频裂图修复**：`_img_html` 对 video 素材改用首帧（共享 `services/media/thumbs.py`，
+   素材库 thumb 端点同源），不再输出 <video> 标签。
+4. **图例关闭**：`_img_html` 不再输出 fig-cap（与正文无关、易误导的素材标题小字）。
+5. **标题超链接**：工作台头部文章标题点击新窗口打开原始网页（local:// 不显示链接）。
+6. **顺手修的隐形 bug**：LLM 幻觉 citations（如 mat_chiplet）导致导出校验失败——
+   creator._payload_to_doc 过滤不存在素材 id 的 citations，含存量清理。
+
 ## V1.14 外部项目文件夹导入（2026-10-29）
 
 - `app/services/imports.py`：扫描 resource/ 一级子目录（含 reference/ 或 drafts/ 即项目

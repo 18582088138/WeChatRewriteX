@@ -63,6 +63,7 @@ async function load() {
   } catch (error: any) { if (!signal.aborted) message.error(error.message) }
 }
 onMounted(load)
+watch(() => props.articleId, load)
 watch(() => store.articleTicks[props.articleId] || 0, load)
 onUnmounted(() => {
   window.removeEventListener('keydown', onCardKey)

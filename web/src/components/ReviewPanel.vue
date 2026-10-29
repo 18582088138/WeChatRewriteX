@@ -117,6 +117,7 @@ onMounted(() => {
   window.addEventListener('mouseup', onUp)
   load()
 })
+watch(() => props.articleId, () => load())
 
 const pendingBlockers = computed(
   () => items.value.filter(i => i.severity === 'blocker' && ['pending', 'accepted'].includes(i.status)))
@@ -160,6 +161,16 @@ function dblclickBlock(b: any) {
   editingId.value = b.id
   editText.value = b.text
 }
+/** 删除图片/视频素材块（V1.17）：走统一 edit 接口 remove op，随后刷新 */
+async function removeMedia(b: any) {
+  try {
+    const r = await api.put(`/api/drafts/${draftId.value}/edit`,
+      { ops: [{ op: 'remove', block_id: b.id }] })
+    message.success(`已删除素材（v${r.version}）`)
+    await load()
+  } catch (e: any) { message.error(e.message) }
+}
+
 async function saveEdit() {
   if (!editingId.value || !doc.value || saveBusy.value) return
   const b = doc.value.blocks.find(x => x.id === editingId.value)
@@ -247,6 +258,8 @@ async function finalize(force = false) {
             <h2 v-else-if="b.type === 'heading'" @dblclick="dblclickBlock(b)">{{ b.text }}</h2>
             <p v-else-if="b.type === 'paragraph'" @dblclick="dblclickBlock(b)">{{ b.text }}</p>
             <blockquote v-else-if="b.type === 'quote'" @dblclick="dblclickBlock(b)">{{ b.text }}</blockquote>
+            <button v-if="['image','video'].includes(b.type)"
+                    class="rv-remove" title="删除该素材" @click.stop="removeMedia(b)">×</button>
             <div v-else-if="b.type === 'image'" class="my-3">
               <img v-if="b.asset_id" :src="api.absUrl(`/api/materials/${b.asset_id}/file`)"
                    class="rounded-md max-w-full" />
@@ -365,6 +378,14 @@ export default {
 .reader-block h1 { font-size: 22px; font-weight: 700; margin: 0 0 20px; line-height: 1.35; }
 .reader-block h2 { font-size: 17px; font-weight: 700; margin: 26px 0 10px; }
 .reader-block p { line-height: 1.9; font-size: 15px; color: #2A2926; margin-bottom: 1em; text-align: justify; }
+.rv-remove {
+  position: absolute; right: 6px; top: 2px; z-index: 4;
+  width: 20px; height: 20px; border-radius: 999px; font-size: 13px; line-height: 1;
+  background: var(--surface); border: 1px solid var(--border); color: var(--faint);
+  opacity: 0; transition: opacity .12s; cursor: pointer;
+}
+.reader-block:hover .rv-remove { opacity: 1; }
+.rv-remove:hover { color: var(--pill-neg-ink); border-color: var(--pill-neg-ink); }
 .reader-block blockquote { border-left: 3px solid var(--accent); background: var(--raised);
   padding: 10px 16px; margin: 0 0 16px; color: #4A463D; font-size: 14px; line-height: 1.8; }
 

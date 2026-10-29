@@ -57,25 +57,6 @@ def material_file(mid: str) -> FileResponse:
     return response(p)
 
 
-def _extract_first_frame(src, out) -> None:
-    """ffmpeg 抽视频首帧（0.5s 优先避开黑场，失败退回 0s）。"""
-    import subprocess
-    try:
-        from imageio_ffmpeg import get_ffmpeg_exe
-        exe = get_ffmpeg_exe()
-    except Exception:
-        import shutil as _sh
-        exe = _sh.which("ffmpeg")
-    if not exe:
-        raise HTTPException(503, "未找到 ffmpeg，无法抽取视频首帧")
-    for ss in ("0.5", "0"):
-        args = [exe, "-y"] + (["-ss", ss] if ss != "0" else []) +                ["-i", str(src), "-frames:v", "1", "-q:v", "3", str(out)]
-        r = subprocess.run(args, capture_output=True, timeout=60)
-        if r.returncode == 0 and out.exists():
-            return
-    raise HTTPException(502, f"视频首帧抽取失败: {src.name}")
-
-
 @router.get("/materials/{mid}/thumb")
 def material_thumb(mid: str):
     """缩略图：图片返回自身；视频先取海报子图，否则抽首帧并缓存。"""
@@ -89,21 +70,11 @@ def material_thumb(mid: str):
         raise HTTPException(404, "图片文件不存在")
     if m["kind"] != "video":
         raise HTTPException(400, "仅图片/视频素材有缩略图")
-    for x in dao.list_materials(scope="article", article_id=m.get("article_id"), kind="image"):
-        if x.get("source_material_id") == mid and x.get("path"):
-            p = library.material_abs_path(x["path"])
-            if p and p.exists():
-                return FileResponse(p)
-    from ..core import config as _config
-    thumbs = _config.data_dir() / "_cache" / "thumbs"
-    thumbs.mkdir(parents=True, exist_ok=True)
-    out = thumbs / f"{mid}.jpg"
-    if not out.exists():
-        src = library.material_abs_path(m.get("path"))
-        if not src or not src.exists():
-            raise HTTPException(404, "链接型视频素材无本地文件，无法抽帧")
-        _extract_first_frame(src, out)
-    return FileResponse(out)
+    from ..services.media.thumbs import video_thumb
+    p = video_thumb(mid, m)
+    if not p:
+        raise HTTPException(404, "链接型视频素材无本地文件，无法抽帧")
+    return FileResponse(p)
 
 
 @router.get("/materials/{mid}/text")

@@ -61,6 +61,7 @@ async function load() {
 onMounted(async () => { await load(); await checkDraft() })
 watch(() => store.articleTicks[props.articleId] || 0, load)
 watch(scope, () => { selected.value = new Set(); load() })
+watch(() => props.articleId, async () => { await load(); await checkDraft() })
 onUnmounted(() => { generation++; controller?.abort() })
 
 /* ---------- 分组与过滤 ---------- */

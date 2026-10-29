@@ -74,17 +74,23 @@ def _foot_title(title: str) -> str:
 
 
 def _img_html(asset_id: str, caption: str = "") -> str:
-    """正文内嵌插图（段落之间，不单独占页）。"""
+    """正文内嵌插图（段落之间，不单独占页）。
+
+    视频素材用首帧截图代替（V1.17 修复裂图）；图例小字已临时关闭（与正文无关、易误导）。
+    """
     esc = html_mod.escape
     m = assets.get_material(asset_id)
-    rel = (m or {}).get("path")
-    p = library.material_abs_path(rel) if rel else None
+    if not m:
+        return ""
+    if m.get("kind") == "video":
+        from ..media.thumbs import video_thumb
+        p = video_thumb(asset_id, m)
+    else:
+        p = library.material_abs_path(m.get("path"))
     if not (p and p.exists()):
         return ""
     uri = "file:///" + str(p).replace("\\", "/")
-    cap = esc(caption or (m or {}).get("title") or "")
-    cap_html = f'<div class="fig-cap">{cap}</div>' if cap else ""
-    return f'<figure class="fig"><img src="{uri}">{cap_html}</figure>'
+    return f'<figure class="fig"><img src="{uri}"></figure>'
 
 
 def _page_html(page, doc: DraftDoc, idx: int, total: int, last: bool = False) -> str:

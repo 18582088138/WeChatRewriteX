@@ -225,6 +225,7 @@ onUnmounted(() => {
   if (closeTimer) clearTimeout(closeTimer)
 })
 watch(() => store.articleTicks[props.articleId] || 0, () => { load(undefined, true); loadArticle() })
+watch(() => props.articleId, async () => { await load(); await loadArticle() })
 // Events received while an AI modal / edit is active must be replayed on exit.
 watch(() => hasLocalEdit() || !isLatest.value, blocked => {
   if (!blocked && pendingRefresh) void load(undefined, true)
@@ -631,6 +632,8 @@ async function runInsert() {
                       class="w-full outline-none bg-transparent text-[15px] leading-[1.9] resize-none"
                       :rows="Math.max(3, Math.ceil(editText.length / 40))" v-focus></textarea>
             <button class="add-block" @click.stop="addBlock(b.id)" title="在此插入文本块">+</button>
+            <button class="remove-block" @click.stop="removeBlock(b.id)"
+                    title="删除此块（图片/视频/文本）">×</button>
           </div>
           <div class="text-center text-xs mt-6" style="color: var(--faint);">
             双击编辑 · 点外部自动保存 · 块间 + 新增 · 双击图片替换 · 左侧素材可拖入指定位置
@@ -858,6 +861,14 @@ export default {
   opacity: 0; transition: opacity .12s; z-index: 3;
 }
 .block-item:hover .add-block { opacity: 1; }
+.remove-block {
+  position: absolute; right: 2px; top: 2px;
+  width: 20px; height: 20px; border-radius: 999px; font-size: 14px; line-height: 1;
+  background: var(--surface); border: 1px solid var(--border); color: var(--faint);
+  opacity: 0; transition: opacity .12s; z-index: 4;
+}
+.block-item:hover .remove-block { opacity: 1; }
+.remove-block:hover { color: var(--pill-neg-ink); border-color: var(--pill-neg-ink); }
 
 /* 底部信息窗口 */
 .bottom-info {

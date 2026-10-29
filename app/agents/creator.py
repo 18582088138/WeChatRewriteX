@@ -238,8 +238,11 @@ class CreatorAgent(AgentBase):
     def _payload_to_doc(self, article_id: str, payload: DraftPayload) -> DraftDoc:
         blocks = bk.blocks_from_llm(payload.model_dump())
         # 校验图片块 asset_id 存在性，不存在则丢弃该块（防幻觉配图）
+        valid_ids = {m["id"] for m in dao.list_materials(article_id=article_id)}
         valid = []
         for b in blocks:
+            # citations 同步过滤：只保留真实存在的素材 id（防 LLM 编造引用源，如 mat_chiplet）
+            b.citations = [cid for cid in (b.citations or []) if cid in valid_ids]
             if b.type in (BlockType.IMAGE, BlockType.VIDEO):
                 if b.asset_id and dao.get_material(b.asset_id):
                     valid.append(b)
