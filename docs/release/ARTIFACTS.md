@@ -33,7 +33,7 @@ python -m venv build/package-env
 python -m pip install --require-hashes -r requirements-build.lock
 python -m playwright install chromium
 cd web && npm ci && npm run build && cd ..
-python tools/pack_release.py --skip-linux   # Windows exe + 源码包 + 文档 + SHA256
+  python tools/pack_release.py --skip-linux   # Windows exe + sdist/wheel + 文档 + SHA256
 ```
 
 PowerShell 5.1 请逐行执行命令，不使用 `&&`。Linux 二进制需要 Linux/Docker，不能用 Windows

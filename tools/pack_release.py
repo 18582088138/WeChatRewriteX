@@ -3,13 +3,13 @@
 用法（仓库根目录，miniforge 环境）：
   python tools/pack_release.py                  # 全量：测试→资产→sdist→Windows exe→Linux(Docker)→组装→校验
   python tools/pack_release.py --skip-tests     # 跳过测试门槛
-  python tools/pack_release.py --reuse-exe      # 复用已构建的 release/windows/文枢.exe，只重组装
+  python tools/pack_release.py --reuse-exe      # 核验 build/dist-windows/文枢/ 后复用，只重组装
   python tools/pack_release.py --skip-linux     # 不出 Linux 包
 
 产物（release/ 目录，不入 git）：
   文枢-v<ver>-windows-x64.zip   Windows 绿色执行包（exe + 启动文枢.bat + docs）
   文枢-v<ver>-linux-x64.tar.gz  Linux 二进制包（二进制 + start_linux.sh + docs）
-  wenshu-<ver>.tar.gz           源码包（sdist，同时留在 dist/）
+  wenshu-<ver>.tar.gz / *.whl    Python 源码包与安装包（同时留在 dist/）
   SHA256SUMS.txt                全部产物校验和
 """
 from __future__ import annotations
@@ -143,11 +143,11 @@ def copy_frozen_bundle(source: Path, target: Path, executable: str) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description="文枢 一键打包（默认全平台）")
     ap.add_argument("--skip-tests", action="store_true")
-    ap.add_argument("--skip-sdist", action="store_true")
+    ap.add_argument("--skip-sdist", action="store_true", help="跳过 Python 发布包（sdist 和 wheel）")
     ap.add_argument("--skip-windows", action="store_true")
     ap.add_argument("--skip-linux", action="store_true")
     ap.add_argument("--reuse-exe", action="store_true",
-                    help="复用 release/windows/文枢.exe（不重跑 PyInstaller）")
+                    help="核验并复用 build/dist-windows/文枢/（不重跑 PyInstaller）")
     args = ap.parse_args()
 
     ver = APP_VERSION
@@ -170,12 +170,14 @@ def main() -> None:
 
     # 2. sdist 源码包
     if not args.skip_sdist:
-        print("[2] sdist 源码包")
-        run([PY, "-m", "build", "--sdist", "--no-isolation"])
-        sdist = ROOT / "dist" / f"wenshu-{ver}.tar.gz"
-        if sdist.exists():
-            shutil.copy(sdist, ver_dir / sdist.name)
-            artifacts.append(ver_dir / sdist.name)
+        print("[2] Python 发布包（sdist + wheel）")
+        run([PY, "-m", "build", "--sdist", "--wheel", "--no-isolation"])
+        for name in (f"wenshu-{ver}.tar.gz", f"wenshu-{ver}-py3-none-any.whl"):
+            artifact = ROOT / "dist" / name
+            if not artifact.is_file():
+                raise SystemExit(f"构建未生成预期发布包：{name}")
+            shutil.copy(artifact, ver_dir / name)
+            artifacts.append(ver_dir / name)
 
     # 3. Windows 绿色执行包
     if not args.skip_windows:
