@@ -7,6 +7,7 @@ export function getToken(): string {
 
 export function setToken(t: string) {
   localStorage.setItem('wenshu_token', t)
+  localStorage.removeItem('wra_token')
 }
 
 function authHeaders(json = false): Record<string, string> {

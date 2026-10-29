@@ -14,6 +14,19 @@ const token = ref(getToken())
 const devMode = ref(false)
 const logLines = ref<string[]>([])
 const logLoading = ref(false)
+const envLoading = ref(false)
+
+async function reloadEnv() {
+  envLoading.value = true
+  try {
+    const result = await api.post('/api/settings/reload-env')
+    if (result.token_changed) { setToken(''); token.value = '' }
+    data.value = result.services
+    store.startSse()
+    message.success(`环境变量已刷新（${result.changed_count} 项变更），新请求立即生效`)
+  } catch (error: any) { message.error(`环境变量刷新失败：${error.message}`) }
+  finally { envLoading.value = false }
+}
 
 const editable = ref({
   'collect.search_window_days': 3,
@@ -86,7 +99,10 @@ function saveToken() {
     <main v-if="data" class="max-w-3xl mx-auto px-6 py-6 space-y-4">
       <!-- 服务状态 -->
       <section class="panel p-5">
-        <div class="font-semibold mb-3">服务状态</div>
+        <div class="flex items-center justify-between mb-3">
+          <div class="font-semibold">服务状态</div>
+          <NButton size="small" :loading="envLoading" @click="reloadEnv">刷新环境变量（Reload Env）</NButton>
+        </div>
         <div class="flex flex-wrap gap-2">
           <NTag :type="data.llm_available ? 'success' : 'error'" :bordered="false">
             LLM {{ data.llm_available ? '已配置' : '未配置（降级模式）' }}</NTag>
@@ -102,8 +118,9 @@ function saveToken() {
           </span>
         </div>
         <div class="text-xs text-ink-400 mt-2">
-          密钥配置在项目根目录 <code class="bg-slate-100 px-1 rounded">.env</code>；
+          密钥配置在程序运行目录 <code class="bg-slate-100 px-1 rounded">.env</code>；
           渠道与模型档位在 <code class="bg-slate-100 px-1 rounded">config/settings.yaml</code>。
+          保存 .env 后点击刷新即可生效；已发出的请求继续使用原配置。数据目录、日志目录、CORS 和浏览器路径变更需要重启。
         </div>
       </section>
 

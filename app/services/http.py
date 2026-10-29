@@ -129,6 +129,21 @@ _clients_lock = threading.RLock()
 @contextmanager
 def client_for(url: str, **kwargs):
     """Borrow a bounded, thread-safe client while preserving per-URL PAC selection."""
+    from ..core.environment import lock
+    # Keep proxy selection and httpx's environment capture in the same generation.
+    with lock:
+        entry, key, transient = _borrow_client(url, kwargs)
+    try:
+        yield entry[0]
+    finally:
+        with _clients_lock:
+            entry[1] -= 1
+            if transient or _clients.get(key) is not entry:
+                if entry[1] == 0:
+                    entry[0].close()
+
+
+def _borrow_client(url: str, kwargs: dict):
     proxy = proxy_for(url)
     if proxy:
         kwargs["proxy"] = proxy
@@ -153,14 +168,7 @@ def client_for(url: str, **kwargs):
         entry[1] += 1
         if key in _clients:
             _clients.move_to_end(key)
-    try:
-        yield entry[0]
-    finally:
-        with _clients_lock:
-            entry[1] -= 1
-            if transient or _clients.get(key) is not entry:
-                if entry[1] == 0:
-                    entry[0].close()
+    return entry, key, transient
 
 
 def close_clients():

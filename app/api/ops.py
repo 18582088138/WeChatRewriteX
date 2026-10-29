@@ -230,6 +230,21 @@ def put_setting(body: SettingPut) -> dict:
 
 # ---------- SSE / 健康 ----------
 
+@router.post("/settings/reload-env")
+def reload_env(request: Request) -> dict:
+    from dataclasses import replace
+    from ..core.environment import lock
+    from ..services.http import close_clients, _cached_windows_proxy
+    with lock:
+        result = config.reload_env()
+        # Retire idle pools; busy clients finish normally before closing.
+        close_clients()
+        _cached_windows_proxy.cache_clear()
+        request.app.state.context = replace(request.app.state.context,
+                                            settings=config.all_settings())
+        result["services"] = get_settings()
+    return result
+
 @router.get("/sse")
 def sse():
     q = events.bus.subscribe()

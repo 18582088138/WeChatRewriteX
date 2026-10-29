@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import yaml
-from dotenv import load_dotenv
+from .environment import environment, lock as env_lock
 
 
 def _is_frozen() -> bool:
@@ -45,6 +45,9 @@ DATA_DIR = RUNTIME_ROOT / "data"
 def ensure_runtime_assets() -> None:
     """首启播种：把内置 config/、web/dist、.env.example 铺到运行根（幂等）。"""
     if BUNDLE_ROOT == RUNTIME_ROOT:
+        src = RUNTIME_ROOT / ".env.example"
+        if src.is_file() and not (RUNTIME_ROOT / ".env").exists():
+            shutil.copy(src, RUNTIME_ROOT / ".env")
         return
     try:
         src_cfg = BUNDLE_ROOT / "config"
@@ -73,7 +76,17 @@ def setup_playwright_browsers() -> None:
 
 ensure_runtime_assets()
 setup_playwright_browsers()
-load_dotenv(RUNTIME_ROOT / ".env")
+if (RUNTIME_ROOT / ".env").is_file():
+    try:
+        environment.apply(RUNTIME_ROOT / ".env", startup=True)
+    except ValueError:
+        # Let Settings repair a malformed file without making the UI unbootable.
+        import warnings
+        warnings.warn(".env 未加载：请修正文件后在设置页刷新环境变量", RuntimeWarning)
+
+
+def reload_env() -> dict:
+    return environment.apply(RUNTIME_ROOT / ".env")
 
 DEFAULTS: dict[str, Any] = {
     "collect": {
@@ -205,7 +218,8 @@ def get(path: str, default: Any = None) -> Any:
 
 
 def get_env(key: str) -> str | None:
-    v = os.environ.get(key)
+    with env_lock:
+        v = os.environ.get(key)
     return v if v else None
 
 

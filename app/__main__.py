@@ -40,6 +40,7 @@ def main() -> None:
         loopback = args.host == "localhost"
     if not loopback and not config.get_env("APP_ACCESS_TOKEN"):
         parser.error("远程绑定必须设置 APP_ACCESS_TOKEN")
+    config.environment.require_token = not loopback
     import uvicorn
     print(f"{APP_FULL_NAME} v{APP_VERSION}  →  http://{args.host}:{args.port}")
     if not args.no_browser and not args.reload:

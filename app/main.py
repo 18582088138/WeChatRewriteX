@@ -101,11 +101,17 @@ def create_app(start_worker: bool = True, llm=None) -> FastAPI:
                         return JSONResponse({"detail": "远程访问必须配置 APP_ACCESS_TOKEN"}, status_code=403)
             result = await call_next(request)
             result.headers["X-Request-ID"] = request_id
-            if token and bearer and authenticated:
+            current_token = config.get_env("APP_ACCESS_TOKEN")
+            # An authorized reload may rotate the token: re-sign this session
+            # without returning the new secret to JavaScript.
+            if current_token and ((bearer and authenticated) or
+                    (path == "/api/settings/reload-env" and result.status_code == 200)):
                 expires = str(int(time.time()) + 8 * 3600)
-                signature = hmac.new(token.encode(), expires.encode(), hashlib.sha256).hexdigest()
+                signature = hmac.new(current_token.encode(), expires.encode(), hashlib.sha256).hexdigest()
                 result.set_cookie("wenshu_session", expires + "." + signature, httponly=True,
                                   secure=request.url.scheme == "https", samesite="strict", max_age=8 * 3600)
+            elif not current_token and path == "/api/settings/reload-env" and result.status_code == 200:
+                result.delete_cookie("wenshu_session")
             return result
         finally:
             context.reset(ctx)
