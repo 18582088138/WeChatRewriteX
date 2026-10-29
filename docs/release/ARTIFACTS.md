@@ -30,7 +30,7 @@
 python -m venv build/package-env
 # Windows PowerShell：.\build\package-env\Scripts\Activate.ps1
 # Linux/macOS：source build/package-env/bin/activate
-python -m pip install --require-hashes -r requirements-build.lock
+python -m pip install -r requirements.txt pyinstaller
 python -m playwright install chromium
 cd web && npm ci && npm run build && cd ..
   python tools/pack_release.py --skip-linux   # Windows exe + sdist/wheel + 文档 + SHA256
@@ -38,7 +38,7 @@ cd web && npm ci && npm run build && cd ..
 
 PowerShell 5.1 请逐行执行命令，不使用 `&&`。Linux 二进制需要 Linux/Docker，不能用 Windows
 PyInstaller 交叉编译：先构建前端，再执行 `bash packaging/build_linux_binary.sh`。
-该脚本使用带 hash 的 `requirements-build.lock`，构建后检查二进制版本与构建信息。
+该脚本按 `requirements.txt` 安装依赖，构建后检查二进制版本与构建信息。
 本地没有 Docker 时，全平台脚本会明确提示 Linux 包未生成。
 
 单独构建 Python 分发包：
@@ -66,7 +66,7 @@ Python/SQLite/Node/Playwright 信息。`--reuse-exe` 只有在内嵌版本及源
 
 - `tools/pack_release.py`：测试门槛、前端新鲜度、资产归集、平台构建、文档组装及校验和。
 - `scripts/build_assets.py`：归集运行资产，生成构建溯源信息。
-- `requirements.lock`：运行依赖；`requirements-dev.lock`：测试依赖；`requirements-build.lock`：构建和冻结依赖。
+- `requirements.txt`：运行依赖；`pyproject.toml`：pip 安装与开发 extras（dev/packaging）。
 - `packaging/wenshu.spec`、`packaging/launcher.py`：PyInstaller 资源与入口。
 - `packaging/build_linux_binary.sh`：Linux 容器内冻结构建。
 - `Dockerfile`、`.dockerignore`：运行镜像构建与上下文隔离。

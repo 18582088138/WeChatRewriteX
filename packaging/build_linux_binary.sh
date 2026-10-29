@@ -15,7 +15,7 @@ SRC="$PWD"
 command -v cygpath >/dev/null 2>&1 && SRC="$(cygpath -w "$PWD")"   # Git Bash → Windows 路径
 MSYS_NO_PATHCONV=1 docker run --rm -v "$SRC:/src" -w /src python:3.12 bash -c '
     set -e
-    python -m pip install --require-hashes -r requirements-build.lock
+    python -m pip install -r requirements.txt pyinstaller
     python scripts/build_assets.py
     python -m PyInstaller packaging/wenshu.spec --distpath build/dist-linux --workpath build/pyinstaller-linux
     build/dist-linux/文枢/文枢 --version

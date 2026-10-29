@@ -20,7 +20,7 @@
 Windows PowerShell（注意 PS 5.1 不支持 `&&`，请逐行执行或用 `;` 分隔）：
 
 ```powershell
-pip install --require-hashes -r requirements.lock
+pip install -r requirements.txt
 python -m playwright install chromium
 cd web; npm ci; npm run build; cd ..
 Copy-Item .env.example .env   # 填入 DEEPSEEK_API_KEY 等
@@ -30,7 +30,7 @@ python -m app                 # → http://127.0.0.1:8000
 Linux / macOS（bash）：
 
 ```bash
-pip install --require-hashes -r requirements.lock
+pip install -r requirements.txt
 python -m playwright install chromium
 cd web && npm ci && npm run build && cd ..
 cp .env.example .env          # 填入 DEEPSEEK_API_KEY 等
@@ -80,7 +80,7 @@ docker run -d --env-file .env -p 8000:8000 wenshu-studio:1.16.0
 ## 测试
 
 ```bash
-pip install --require-hashes -r requirements-dev.lock
+pip install -e ".[dev]"
 python -m playwright install chromium
 python -m pytest tests/        # 版本并发、故障注入、离线端到端、权限与网络边界
 cd web && npm ci && npm run build && npx playwright install chromium && npm run test:e2e
