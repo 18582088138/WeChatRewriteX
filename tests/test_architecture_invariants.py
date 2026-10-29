@@ -184,7 +184,7 @@ def test_late_review_cannot_reopen_finalized_content(monkeypatch):
     assert dao.get_article(aid)["status"] == "FINALIZED"
 
 
-def test_export_crash_recovery_reuses_verified_files():
+def test_export_regeneration_replaces_fixed_package():
     from pathlib import Path
     from app.core.execution import context
     from app.services.publish.exporter import export_variants
@@ -196,7 +196,9 @@ def test_export_crash_recovery_reuses_verified_files():
         mtime = (output / "weibo.txt").stat().st_mtime_ns
         second = export_variants(aid, ["weibo"])
         assert first["export_root"] == second["export_root"]
-        assert (output / "weibo.txt").stat().st_mtime_ns == mtime
+        assert (output / "weibo.txt").stat().st_mtime_ns >= mtime
+        assert output.parent.name == "exports"
+        assert not (output.parent / "runs").exists()
         assert second["ok"]
     finally:
         context.reset(token)
@@ -274,7 +276,7 @@ def test_publish_retry_keeps_snapshot_and_skips_successful_platforms(monkeypatch
             assert retried["ok"]
             assert list(retried["platforms"]) == ["x"]
             assert successful.stat().st_mtime_ns == timestamp
-            snapshot = Path(retried["platforms"]["x"]["export_dir"]) / "snapshot.json"
+            snapshot = Path(retried["platforms"]["x"]["export_dir"]) / "thread.txt"
             assert "unapproved edit" not in snapshot.read_text(encoding="utf-8")
             assert dao.get_article(aid)["status"] == "EDITING"
             assert client.post(f"/api/articles/{aid}/publish/retry", json={"platform": "x"}).status_code == 404

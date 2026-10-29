@@ -51,14 +51,15 @@
   .foot .logo { font-size: 24px; color: #8A8577; letter-spacing: 1px; }
   .pageno { font-size: 24px; color: #8A8577; font-variant-numeric: tabular-nums; }
 
-  /* —— 尾页：品牌收口 —— */
-  .closing { background: {{INK}}; color: #F5F2EA; justify-content: center;
-             align-items: center; position: relative; }
-  .closing-slogan { display: flex; align-items: center; gap: 22px;
-                    font-size: 54px; font-weight: 700; letter-spacing: 6px; }
-  .closing-slogan .brand-mark { width: 30px; height: 30px; }
-  .closing-logo { position: absolute; right: {{PAD}}px; bottom: {{PAD}}px;
-                  width: 120px; height: 120px; border-radius: 50%; }
+  /* 末页品牌区参与布局，预留高度后再自动缩正文。 */
+  .body { min-height: 0; }
+  .brand-footer { display: flex; flex-shrink: 0; align-items: center;
+                  justify-content: center; gap: 20px; padding-top: 20px;
+                  font-size: 28px; color: #8A8577; letter-spacing: 3px; }
+  .brand-footer .brand-footer-logo { width: 64px; height: 64px; border-radius: 50%; }
+  .imgpage.last-page .page-image { flex: 1; min-height: 0; height: auto; }
+  .imgpage.last-page .capband { position: static; flex-shrink: 0; }
+  .imgpage.last-page .brand-footer { padding: 20px {{PAD}}px; background: {{PAPER}}; }
 
   /* —— 正文内嵌插图（段落之间，不单独占页） —— */
   .fig { margin: 0.4em 0 1.15em; }

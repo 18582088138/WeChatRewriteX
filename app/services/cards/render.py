@@ -59,14 +59,11 @@ def _cover_html(doc: DraftDoc, total: int) -> str:
         "</div></div>")
 
 
-def _closing_html(total: int) -> str:
-    """尾页：墨色域 + 居中口号 + 右下角 Logo。"""
+def _brand_footer() -> str:
     logo = brand.badge_data_uri()
-    logo_html = f'<img class="closing-logo" src="{logo}" alt="logo">' if logo else ""
-    return ('<div class="page closing">'
-            f'<div class="closing-slogan"><span class="brand-mark"></span>'
-            f'{brand.SLOGAN}</div>'
-            f"{logo_html}</div>")
+    badge = f'<img class="brand-footer-logo" src="{logo}" alt="logo">' if logo else ""
+    return ('<div class="brand-footer">' + badge +
+            f'<span>{html_mod.escape(brand.SLOGAN)}</span></div>')
 
 
 def _foot_title(title: str) -> str:
@@ -90,7 +87,7 @@ def _img_html(asset_id: str, caption: str = "") -> str:
     return f'<figure class="fig"><img src="{uri}">{cap_html}</figure>'
 
 
-def _page_html(page, doc: DraftDoc, idx: int, total: int) -> str:
+def _page_html(page, doc: DraftDoc, idx: int, total: int, last: bool = False) -> str:
     esc = html_mod.escape
     no = f"{idx + 1:02d}"
     title0 = (doc.meta.title_candidates or [""])[0]
@@ -100,7 +97,7 @@ def _page_html(page, doc: DraftDoc, idx: int, total: int) -> str:
 
     # 插图独占页（仅当该页没有任何文字块时兜底保留整页排版）
     if page.asset_id and not page.block_ids:
-        m = dao.get_material(page.asset_id)
+        m = assets.get_material(page.asset_id)
         rel = (m or {}).get("path")
         p = library.material_abs_path(rel) if rel else None
         if p and p.exists():
@@ -108,9 +105,9 @@ def _page_html(page, doc: DraftDoc, idx: int, total: int) -> str:
             credit_src = (m.get("note") or m.get("source_url") or "素材库")
             credit = f'图源：{esc(credit_src[:60])}'
             cap = esc(page.title) if page.title else ""
-            return (f'<div class="page imgpage"><img src="{uri}">'
+            return (f'<div class="page imgpage{" last-page" if last else ""}"><img class="page-image" src="{uri}">'
                     f'<div class="capband">{cap}<div class="credit">{credit}</div>'
-                    f"</div></div>")
+                    f"</div>{_brand_footer() if last else ''}</div>")
 
     parts = []
     if page.title:
@@ -135,6 +132,8 @@ def _page_html(page, doc: DraftDoc, idx: int, total: int) -> str:
         if img:
             body.append(img)
     parts.append('<div class="body">' + "".join(body) + "</div>")
+    if last:
+        parts.append(_brand_footer())
     parts.append(pageno)
     return '<div class="page content">' + "".join(parts) + "</div>"
 
@@ -156,11 +155,10 @@ def render_cards(article_id: str, theme_name: str | None = None,
     size = theme["size"]
 
     pages = doc.meta.xhs_pages
-    total = len(pages) + 2  # +封面 +尾页（品牌收口）
+    total = len(pages) + 1  # 封面 + 正文；品牌放在最后正文页底部
     pages_html = [_cover_html(doc, total)]
     for i, pg in enumerate(pages):
-        pages_html.append(_page_html(pg, doc, i + 1, total))
-    pages_html.append(_closing_html(total))
+        pages_html.append(_page_html(pg, doc, i + 1, total, last=i == len(pages) - 1))
 
     html_text = (template
                  .replace("{{WIDTH}}", str(size["width"]))
@@ -173,9 +171,7 @@ def render_cards(article_id: str, theme_name: str | None = None,
                  .replace("{{PAPER}}", theme.get("paper", "#FBFAF7"))
                  .replace("{{PAGES}}", "\n".join(pages_html)))
 
-    # 卡片统一进 exports/runs/<批次>/xhs/cards/（与发布包同构，永不覆盖旧批次）
-    import uuid as _uuid
-    out_dir = out_dir or (library.exports_dir(article_id) / "runs" / _uuid.uuid4().hex / "xhs" / "cards")
+    out_dir = out_dir or (library.exports_dir(article_id) / "xhs" / "cards")
     out_dir.mkdir(parents=True, exist_ok=True)
     # Regeneration must not retain pages from a longer previous render.
     for previous in out_dir.glob("page-*.png"):

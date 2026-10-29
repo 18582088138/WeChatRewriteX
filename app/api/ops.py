@@ -162,23 +162,16 @@ def list_exports(aid: str) -> dict:
     root = library.exports_dir(aid)
     if not root.exists():
         return {"files": [], "lib_dir": str(library.article_dir(aid))}
-    # Only expose the newest successful package for each platform, not failed staging.
-    selected = {}
-    for job in dao.list_publish_jobs(aid):
-        if job["platform"] not in selected:
-            selected[job["platform"]] = job
-    directories = [Path(json.loads(j["result_json"]).get("export_dir", ""))
-                   for j in selected.values() if j["status"] == "done"]
-    # 只暴露各平台最近一次成功批次；legacy 的 xhs_cards/ 平行目录不再展示
-    files = [str(p.relative_to(config.data_dir())) for d in directories if d.is_relative_to(root)
-             for p in sorted(d.rglob("*")) if p.is_file() and not p.name.startswith("_")]
+    from ..services.file_access import export_directories, package_files
+    files = [p.relative_to(config.data_dir().resolve()).as_posix()
+             for d in export_directories(aid) for p in sorted(package_files(d))]
     return {"root": str(root), "files": files,
             "lib_dir": str(library.article_dir(aid))}
 
 
 @router.post("/articles/{aid}/cards")
 def gen_cards(aid: str, theme: str | None = None) -> dict:
-    """单独出卡片 = 导出一次小红书包（runs/<批次>/xhs/cards/，批次隔离不覆盖）。"""
+    """单独出卡片 = 更新固定的小红书发布包。"""
     from ..services.publish.exporter import export_variants
     try:
         result = export_variants(aid, ["xhs"])
@@ -186,6 +179,8 @@ def gen_cards(aid: str, theme: str | None = None) -> dict:
         raise HTTPException(409, str(e))
     except Exception as e:
         raise HTTPException(502, f"卡片渲染失败（Playwright/Chromium 缺失？）: {e}")
+    if not result["ok"]:
+        raise HTTPException(502, result["platforms"]["xhs"]["message"])
     cards_dir = Path(result["export_root"]) / "xhs" / "cards"
     files = sorted(cards_dir.glob("page-*.png"))
     return {"files": [str(p.relative_to(config.data_dir())) for p in files],

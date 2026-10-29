@@ -149,11 +149,9 @@ def reveal_export_dir(aid: str, body: RevealExport) -> dict:
     from ..storage import library
     if body.platform not in ("wechat_mp", "xhs", "weibo", "x"):
         raise HTTPException(400, "未知平台")
-    import json
-    job = next((j for j in dao.list_publish_jobs(aid) if j["platform"] == body.platform), None)
+    from ..services.file_access import export_directories
     d = library.exports_dir(aid) / body.platform
-    if job and job["status"] == "done":
-        d = Path(json.loads(job["result_json"]).get("export_dir") or str(d))
+    d = next((p for p in export_directories(aid) if p.name == body.platform), d)
     if not d.resolve().is_relative_to(library.exports_dir(aid).resolve()):
         raise HTTPException(400, "导出路径无效")
     if not d.is_dir():

@@ -31,9 +31,9 @@ def manifest(doc) -> dict:
 def frozen(doc, directory: Path, expected: dict | None = None):
     view = expected if expected is not None else manifest(doc)
     copied = {}
-    directory.mkdir(parents=True, exist_ok=True)
     # Rename/ingest operations use the same lock; no DB transaction spans copies.
     with library._file_lock:
+        directory.mkdir(parents=True, exist_ok=True)
         for mid, material in view.items():
             item = dict(material)
             if material.get("path"):

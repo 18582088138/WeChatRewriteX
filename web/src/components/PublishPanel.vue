@@ -12,8 +12,8 @@ const store = useAppStore()
 const PLATFORMS = [
   { key: 'wechat_mp', label: '微信公众号', desc: '排版 HTML（整页复制进编辑器）+ Markdown + 配图' },
   { key: 'xhs', label: '小红书', desc: '分页卡片组图（1080×1440 PNG）+ 标题正文话题' },
-  { key: 'weibo', label: '微博', desc: '≤140 字短文 + 话题 + 配图（≤9 张）' },
-  { key: 'x', label: 'X', desc: '推文串（hook + 要点 + 来源链接）' },
+  { key: 'weibo', label: '微博', desc: '可配置摘要 + 话题签名 + 媒体清单（默认≤9图）' },
+  { key: 'x', label: 'X', desc: '逐条推文 + 回复顺序 + 媒体清单（普通帖文≤280加权字符）' },
 ]
 
 const selected = ref<string[]>(['wechat_mp', 'xhs'])
@@ -122,7 +122,7 @@ function jobMessage(j: PublishJob): string {
       <div class="panel p-5">
         <div class="font-semibold mb-1">选择平台，生成发布包</div>
         <div class="text-xs mb-4" style="color: var(--faint);">
-          一阶段统一导出到本地发布包（文章素材文件夹 exports/ 内），由你在各平台手动发布；
+          一阶段统一导出到本地发布包（文章素材文件夹 exports/ 各平台固定目录，成功后替换），由你在各平台手动发布；
           自动推送草稿箱为二阶段能力。
         </div>
         <div class="space-y-2">
@@ -146,7 +146,7 @@ function jobMessage(j: PublishJob): string {
             <NButton v-if="latestByPlatform[p.key]?.status === 'failed'" size="tiny"
                      :loading="retrying.includes(p.key)"
                      @click="retryPlatform(p.key)">重试</NButton>
-            <button v-if="latestByPlatform[p.key]?.status === 'done'"
+            <button v-if="exportFiles.some(f => f.includes(`/exports/${p.key}/`))"
                     class="text-xs shrink-0 px-2 py-1 rounded hover:bg-[var(--surface)]"
                     style="color: var(--accent-ink); border: 1px solid var(--border);"
                     title="打开该平台发布包文件夹"

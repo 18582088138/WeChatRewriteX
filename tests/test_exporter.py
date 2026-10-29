@@ -76,5 +76,22 @@ def test_xhs_cards_render():
             pytest.skip("Playwright Chromium is not installed")
     from app.services.cards.render import render_cards
     paths = render_cards(art["id"])
-    assert len(paths) >= 2                     # 封面 + 内容页
+    assert len(paths) == 2                     # 封面 + 内容页，品牌不再独占尾页
     assert all(p.exists() and p.stat().st_size > 5000 for p in paths)
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1080, "height": 1440})
+        page.goto((paths[0].parent / "_cards.html").as_uri())
+        footer = page.locator(".content .brand-footer")
+        assert footer.count() == 1
+        assert footer.locator("img").count() == 1
+        positions = page.evaluate("""() => {
+            const body = document.querySelector('.content .body');
+            const footer = document.querySelector('.content .brand-footer');
+            return {bodyBottom: body.getBoundingClientRect().bottom,
+                    footerTop: footer.getBoundingClientRect().top,
+                    overflow: body.dataset.overflow};
+        }""")
+        assert positions["bodyBottom"] <= positions["footerTop"]
+        assert positions["overflow"] == "0"
+        browser.close()
