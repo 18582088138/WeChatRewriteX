@@ -105,7 +105,7 @@ def init_db() -> None:
     data_dir().mkdir(parents=True, exist_ok=True)
     with connect() as conn:
         previous = conn.execute("PRAGMA user_version").fetchone()[0]
-        if previous > 4:
+        if previous > 5:
             raise RuntimeError("数据库来自更新版本，拒绝降级写入；请使用匹配程序或完整备份恢复")
         if previous < 3 and conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='articles'").fetchone():
             backups = data_dir() / "backups"
@@ -144,6 +144,8 @@ def init_db() -> None:
     from ..services import team
     if previous >= 4 or team.enabled():
         team.migrate()
+        from ..services import human_review
+        human_review.migrate()
 
 
 def _init_fts(conn: sqlite3.Connection) -> None:

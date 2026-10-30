@@ -51,6 +51,9 @@ async def authorize(request, member):
     if path in ADMIN or path.startswith("/api/auth/members"):
         team.admin()
         return ("admin", "manage")
+    if path == "/api/team/settings" and method not in ("GET", "HEAD"):
+        team.admin()
+        return ("admin", "manage")
     if path.startswith("/api/auth/") or path in ("/api/session", "/api/sse", "/api/capabilities", "/api/team/work", "/api/team/settings"):
         return None
     if path == "/api/ready":
@@ -118,6 +121,12 @@ async def authorize(request, member):
         if suffix == "access/adopt-jobs":
             team.admin()
             return ("admin", "manage")
+    if suffix.startswith("human-review") and method not in ("GET", "HEAD"):
+        if method == "PUT" and suffix.count("/") == 1:
+            body = await request.json()
+            capability = "review" if body.get("status") in ("approved", "returned") else "write"
+        elif suffix.endswith("/comments"):
+            capability = "review"
     team.require(aid, capability)
     if not dao.get_article(aid):
         raise HTTPException(404, "项目不存在")
