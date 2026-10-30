@@ -24,6 +24,13 @@ class AddUrl(BaseModel):
 
 
 def _with_abs(m: dict) -> dict:
+    m = dict(m)
+    from ..services import team
+    if team.enabled() and team.actor.get():
+        source = dao.get_material(m.get("source_material_id")) if m.get("source_material_id") else None
+        if source and not team.material_allowed(team.actor.get(), source):
+            m["source_material_id"] = None
+        m["shared"] = bool(db.query_one("SELECT material_id FROM shared_materials WHERE material_id=?", (m["id"],)))
     p = library.material_abs_path(m.get("path"))
     m["url"] = f"/files/{m['path']}" if m.get("path") else None
     m["exists"] = bool(p and p.exists()) if m.get("path") else None

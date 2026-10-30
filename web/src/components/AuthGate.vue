@@ -44,7 +44,7 @@ async function logout() { try { await api.post('/api/auth/logout') } finally { l
     <nav v-if="mode" class="flex gap-4 flex-wrap p-3 border-b text-sm">
       <span>{{ member.name }} · {{ {admin:'管理员',maintainer:'维护负责人',member:'普通成员'}[member.role as 'admin'] }}</span>
       <a href="/articles">项目</a><a href="/work">我的工作</a><a v-if="member.role==='admin'" href="/team">成员管理</a>
-      <a v-if="member.role==='admin'" href="/settings">系统设置</a><button @click="changing=!changing">更改密码</button><button @click="logout">退出</button>
+      <a v-if="member.role==='admin'" href="/settings">系统设置</a><a v-if="member.role==='admin'" href="/shared">公共素材</a><button @click="changing=!changing">更改密码</button><button @click="logout">退出</button>
     </nav>
     <form v-if="mode && (member.must_change || changing)" @submit.prevent="changePassword" class="mx-auto p-6 flex flex-col gap-3" style="max-width:420px">
       <h2>{{ member.must_change ? '请先更改初始或重置密码' : '更改密码后需重新登录' }}</h2>

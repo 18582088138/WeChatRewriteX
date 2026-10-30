@@ -153,6 +153,8 @@ def create_app(start_worker: bool = True, llm=None) -> FastAPI:
     app.include_router(ops.router)
     from .api import team as team_api
     app.include_router(team_api.router)
+    from .api import collaboration
+    app.include_router(collaboration.router)
 
     # 素材与导出文件（图片预览 / 下载）
     @app.get("/files/{relative:path}", include_in_schema=False)
