@@ -40,9 +40,9 @@ python -m app                 # → http://127.0.0.1:8000
 **方式三：pip 本地安装 / Docker**
 
 ```powershell
-pip install dist/wenshu-1.16.0.tar.gz; wenshu            # 源码包安装（交付 sdist）
-docker build -t wenshu-studio:1.16.0 .                   # 容器化（服务器批量部署，本版未预构建）
-docker run -d --env-file .env -p 8000:8000 wenshu-studio:1.16.0
+pip install dist/wenshu-1.18.0.tar.gz; wenshu            # 源码包安装（交付 sdist）
+docker build -t wenshu-studio:1.18.0 .                   # 容器化（服务器批量部署，本版未预构建）
+docker run -d --env-file .env -p 8000:8000 wenshu-studio:1.18.0
 ```
 
 发布包产物与部署细节见 [docs/release/ARTIFACTS.md](docs/release/ARTIFACTS.md) 与
@@ -101,3 +101,7 @@ X 提供逐条 `post-NN.txt`、合并预览 `thread.txt` 和媒体/回复顺序 
 # V1.16 更新
 
 设置页支持保存 `.env` 后点击“刷新环境变量”；创作/审稿内容在任务完成后自动更新，小红书卡片大图支持 ←/→ 翻页。绿色包改为 exe + `_internal/`，升级时请整体替换程序目录并保留自己的配置与数据。详见 [V1.16 说明](docs/release/V1.16.md)。
+
+## V1.18 更新
+
+宽屏侧窗收起后可悬停/点击重新展开；小红书整组卡片正文字号一致；审稿页恢复图片与视频，保留删除按钮。旧 PNG 需重新生成才能应用新排版。详见 [V1.18 说明](docs/release/V1.18.md)。

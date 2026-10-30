@@ -156,3 +156,91 @@ test('Settings reload reports success and refreshes service availability', async
   await reload.click()
   await expect(page.getByText('环境变量刷新失败', { exact: false })).toBeVisible()
 })
+
+test('collapsed side panels can be reopened with the mouse in wide and narrow layouts', async ({ page, request }) => {
+  const aid = await prepared(request)
+  await page.goto(`/articles/${aid}`)
+  const left = page.locator('.left-panel')
+  const right = page.locator('.right-panel')
+  await expect(left).toBeVisible()
+  await left.getByRole('button', { name: '收起', exact: true }).click()
+  await right.getByRole('button', { name: '收起', exact: true }).click()
+  await page.getByRole('button', { name: '展开创作素材窗口', exact: true }).hover()
+  await expect(left).toBeVisible()
+  await page.getByRole('button', { name: '展开 AI 与版本窗口', exact: true }).hover()
+  await expect(right).toBeVisible()
+  await page.locator('.doc-title').hover()
+  await expect(left).toBeVisible()
+  await expect(right).toBeVisible() // wide panels stay open on mouse leave
+  await right.getByRole('button', { name: '收起', exact: true }).click()
+  await page.getByRole('button', { name: '展开 AI 与版本窗口', exact: true }).click()
+  await expect(right).toBeVisible()
+  await page.setViewportSize({ width: 1000, height: 900 })
+  await expect(left).toBeHidden()
+  await page.getByRole('button', { name: '展开创作素材窗口', exact: true }).hover()
+  await expect(left).toBeVisible()
+  await left.hover()
+  await page.locator('.doc-title').hover()
+  await expect(left).toBeHidden() // narrow auto-close behavior remains
+})
+
+test('review renders image and playable video alongside independent remove controls', async ({ page, request }) => {
+  const aid = await prepared(request)
+  await page.goto(`/articles/${aid}`)
+  const media = await page.evaluate(async () => {
+    const canvas = document.createElement('canvas')
+    canvas.width = canvas.height = 64
+    const context = canvas.getContext('2d')!
+    context.fillStyle = '#cc5544'
+    context.fillRect(0, 0, 64, 64)
+    const png = canvas.toDataURL('image/png').split(',')[1]!
+    const stream = canvas.captureStream(10)
+    const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8' })
+    const chunks: Blob[] = []
+    recorder.ondataavailable = event => chunks.push(event.data)
+    const stopped = new Promise<void>(resolve => { recorder.onstop = () => resolve() })
+    recorder.start()
+    let frame = 0
+    const timer = setInterval(() => {
+      context.fillStyle = frame++ % 2 ? '#cc5544' : '#4455cc'
+      context.fillRect(0, 0, 64, 64)
+    }, 50)
+    setTimeout(() => recorder.stop(), 400)
+    await stopped
+    clearInterval(timer)
+    stream.getTracks().forEach(track => track.stop())
+    return { png, video: Array.from(new Uint8Array(await new Blob(chunks).arrayBuffer())) }
+  })
+  const image = await (await request.post(`/api/articles/${aid}/materials/upload`, { multipart: {
+    file: { name: 'image.png', mimeType: 'image/png', buffer: Buffer.from(media.png, 'base64') },
+  } })).json()
+  const video = await (await request.post(`/api/articles/${aid}/materials/upload`, { multipart: {
+    file: { name: 'clip.webm', mimeType: 'video/webm', buffer: Buffer.from(media.video) },
+  } })).json()
+  const draft = (await (await request.get(`/api/articles/${aid}/draft`)).json()).draft
+  const edited = await request.put(`/api/drafts/${draft.id}/edit`, { data: {
+    expected_revision: draft.doc.edit_revision, ops: [
+      { op: 'insert_after', block_type: 'image', asset_id: image.material_id, caption: '审稿配图' },
+      { op: 'insert_after', block_type: 'video', asset_id: video.material_id, caption: '审稿视频' },
+    ],
+  } })
+  expect(edited.ok()).toBe(true)
+  await page.getByText('审稿', { exact: true }).click()
+  const readerImage = page.locator('.reader img')
+  const readerVideo = page.locator('.reader video')
+  await expect(readerImage).toBeVisible()
+  await expect.poll(() => readerImage.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(64)
+  await expect(readerVideo).toBeVisible()
+  await expect.poll(() => readerVideo.evaluate((video: HTMLVideoElement) => video.videoWidth)).toBe(64)
+  await readerVideo.evaluate((video: HTMLVideoElement) => video.play())
+  await expect.poll(() => readerVideo.evaluate((video: HTMLVideoElement) => video.currentTime)).toBeGreaterThan(0)
+  const videoBlock = page.locator('.reader-block').filter({ has: page.locator('video') })
+  await videoBlock.hover()
+  await videoBlock.getByTitle('删除该素材', { exact: true }).click()
+  await expect(readerVideo).toHaveCount(0)
+  await expect(readerImage).toBeVisible()
+  const head = (await (await request.get(`/api/articles/${aid}/draft`)).json()).draft
+  expect(head.version).toBe(1)
+  expect(head.doc.blocks.some((b: { type: string }) => b.type === 'image')).toBe(true)
+  expect(head.doc.blocks.some((b: { type: string }) => b.type === 'video')).toBe(false)
+})
