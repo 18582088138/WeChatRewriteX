@@ -77,6 +77,9 @@ def submit(aid, reviewer_id, version, revision):
         if reviewer_id == team.actor.get()["id"] and not self_review():
             raise HTTPException(403,"团队已禁用自审")
         view = assets.manifest(doc); digest = fingerprint(doc,view)
+        for material in view.values():
+            if not team.material_allowed(team.actor.get(), material) or (material['scope']=='article' and material['article_id']!=aid):
+                raise HTTPException(404,"快照包含未授权素材，请由管理员确认共享或复制到本项目后重新提交")
         old = db.query_one("SELECT * FROM human_submissions WHERE article_id=? AND status='pending' ORDER BY created_at DESC LIMIT 1",(aid,))
         if old and old["fingerprint"]==digest and old["reviewer_id"]==reviewer_id and old["version"]==version and old["edit_revision"]==revision:
             return old
@@ -134,8 +137,9 @@ def decide(aid,sid,status,reason,expected_revision,version,revision,reviewer_id=
 def approval(aid,doc,exception_reason=""):
     team.require(aid,"release")
     digest=fingerprint(doc)
-    row=db.query_one("SELECT * FROM human_submissions WHERE article_id=? AND version=? AND edit_revision=? AND fingerprint=? AND status='approved' ORDER BY decided_at DESC LIMIT 1",
-        (aid,doc.version,doc.edit_revision,digest))
+    row=db.query_one("SELECT * FROM human_submissions WHERE article_id=? ORDER BY created_at DESC LIMIT 1", (aid,))
+    if row and not (row['status']=='approved' and row['version']==doc.version and row['edit_revision']==doc.edit_revision and row['fingerprint']==digest):
+        row=None
     if exception_reason:
         team.admin()
         if len(exception_reason.strip()) < 5:

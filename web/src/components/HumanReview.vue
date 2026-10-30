@@ -25,7 +25,7 @@ onMounted(load);watch(()=>props.articleId,()=>{selected.value='';reviewer.value=
   <h2 class="text-lg">人工审核 · {{data.valid_approval?'当前内容已批准':'当前内容尚未批准或批准已过期'}}</h2>
   <p>人工审核与 AI/规则审稿分别记录。批准仅适用于所选快照；修改正文、标题、图片或引用素材后须重新提交。{{data.self_review?'允许自审，仍需显式确认。':'当前团队禁止自审。'}}</p>
   <p v-if="error" role="alert" class="text-red-700">{{error}}</p>
-  <label>审核者 <select v-model="reviewer" class="border rounded p-2"><option v-for="m in data.reviewers" :key="m.id" :value="m.id">{{m.name}}</option></select></label>
+  <label>审核者 <select aria-label="审核者" v-model="reviewer" class="border rounded p-2"><option v-for="m in data.reviewers" :key="m.id" :value="m.id">{{m.name}}</option></select></label>
   <button v-if="access.capabilities.write" @click="submit" :disabled="busy || !doc" class="border rounded p-2">提交当前 v{{doc?.version}} / revision {{doc?.edit_revision}} 快照</button>
   <label>历史提交 <select v-model="selected" class="border rounded p-2 max-w-full"><option v-for="s in data.submissions" :key="s.id" :value="s.id">v{{s.version}} / r{{s.edit_revision}} · {{labels[s.status]||s.status}} · {{new Date(s.created_at*1000).toLocaleString()}}</option></select></label>
   <template v-if="current()">

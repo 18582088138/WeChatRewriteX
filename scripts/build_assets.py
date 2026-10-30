@@ -29,6 +29,7 @@ def main() -> None:
     shutil.copytree(ROOT / "config", ASSETS / "config")
     shutil.copytree(ROOT / "web" / "dist", ASSETS / "web" / "dist")
     shutil.copy(ROOT / ".env.example", ASSETS / ".env.example")
+    shutil.copytree(ROOT / "packaging" / "deployment", ASSETS / "deployment")
     source_files = []
     for folder in (ROOT / "app", ROOT / "web" / "src", ROOT / "config"):
         source_files.extend(p for p in folder.rglob("*") if p.is_file()
@@ -38,6 +39,7 @@ def main() -> None:
                                          "web/package-lock.json", "web/index.html", "packaging/wenshu.spec",
                                          "packaging/launcher.py", "scripts/build_assets.py"))
     source_files.extend((ROOT / "web").glob("*.config.*"))
+    source_files.extend(p for p in (ROOT / "packaging" / "deployment").rglob("*") if p.is_file())
     source_files.extend((ROOT / "web").glob("tsconfig*.json"))
     hashes = {p.relative_to(ROOT).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
               for p in source_files if p.exists()}
