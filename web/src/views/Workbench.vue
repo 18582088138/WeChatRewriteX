@@ -11,6 +11,7 @@ import BlockEditor from '../components/BlockEditor.vue'
 import ReviewPanel from '../components/ReviewPanel.vue'
 import PublishPanel from '../components/PublishPanel.vue'
 import ProjectAccess from '../components/ProjectAccess.vue'
+import HumanReview from '../components/HumanReview.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -201,6 +202,7 @@ const logExpanded = ref(false)   // 默认收起；点击才展开（不再随�
 
       <NTabs v-model:value="tab" type="line" animated size="large">
         <NTabPane v-if="teamMode" name="access" tab="项目权限"><ProjectAccess :article-id="aid" /></NTabPane>
+        <NTabPane v-if="teamMode" name="human" tab="人工审核"><HumanReview :article-id="aid" /></NTabPane>
         <NTabPane name="materials" tab="素材库">
           <MaterialsPanel :article-id="aid" @insert-refs="onInsertRefs"
                           @import-create="onImportCreate" />
@@ -208,7 +210,7 @@ const logExpanded = ref(false)   // 默认收起；点击才展开（不再随�
         <NTabPane name="create" tab="创作">
           <BlockEditor ref="editorRef" :article-id="aid" @goto-review="onGotoReview" />
         </NTabPane>
-        <NTabPane name="review" tab="审稿">
+        <NTabPane name="review" :tab="teamMode ? 'AI/规则审稿' : '审稿'">
           <ReviewPanel :article-id="aid" @goto-publish="tab = 'publish'" />
         </NTabPane>
         <NTabPane name="publish" tab="发布">

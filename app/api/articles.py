@@ -29,6 +29,7 @@ class Finalize(BaseModel):
     expected_revision: int | None = None
     expected_version: int | None = None
     force: bool = False
+    exception_reason: str = ""
 
 
 def _shape(row: dict, progress: dict | None = None) -> dict:
@@ -178,7 +179,7 @@ class RevealExport(BaseModel):
 def finalize(aid: str, body: Finalize) -> dict:
     from ..services import workflow
     try:
-        return workflow.finalize(aid, body.force, body.expected_version, body.expected_revision)
+        return workflow.finalize(aid, body.force, body.expected_version, body.expected_revision, body.exception_reason)
     except ValueError as e:
         raise HTTPException(409, str(e))
 

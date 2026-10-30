@@ -81,9 +81,9 @@ assert d.put('/api/articles/'+q+'/selection',json={'material_ids':[mid]}).status
 db.execute('DELETE FROM project_members WHERE article_id=? AND member_id=?',(p,cm['id']))
 assert c.get('/files/'+material['path']).status_code == 404
 assert b.post('/api/articles/'+p+'/finalize',json={}).status_code == 404
-assert db.query_one('PRAGMA user_version')['user_version'] == 4
+assert db.query_one('PRAGMA user_version')['user_version'] == 5
 db.init_db()
-assert db.query_one('PRAGMA user_version')['user_version'] == 4
+assert db.query_one('PRAGMA user_version')['user_version'] == 5
 """)
 
 
@@ -139,4 +139,71 @@ assert c.put('/api/articles/'+p+'/selection',json={'material_ids':[]}).status_co
 assert a.put('/api/auth/members/'+cm['id'],json={'role':'maintainer','enabled':False}).status_code==409
 assert db.query_one("SELECT count(*) AS n FROM audit_events WHERE article_id=? AND action='project.access'",(p,))['n']==2
 db.init_db(); assert db.query_one('SELECT count(*) AS n FROM project_access')['n']==2
+""")
+
+
+def test_human_return_revision_approval_finalization_and_export(tmp_path):
+    scenario(tmp_path, """
+from app.core.models import DraftDoc,Block,ArticleStatus
+from app.services import draft_service
+p=b.post('/api/articles',json={'title':'human-flow','auto_collect':False}).json()['article']['id']
+acl=b.get('/api/articles/'+p+'/access').json()
+assert b.put('/api/articles/'+p+'/access',json={'expected_revision':0,'owner_id':bm['id'],'members':[{'member_id':cm['id'],'can_create':True,'can_review':True}]}).status_code==200
+doc=draft_service.save_new_version(DraftDoc(id=p+'-v0',article_id=p,version=0,blocks=[Block(id='h',type='heading',level=1,text='Human flow'),Block(id='b',type='paragraph',text='First draft')]),'create')
+dao.set_article_status(p,ArticleStatus.DRAFTED)
+def rev():
+    current=b.get('/api/articles/'+p+'/draft').json()['draft']['doc']
+    return {'expected_version':current['version'],'expected_revision':current['edit_revision']}
+def submit():
+    r=b.post('/api/articles/'+p+'/human-review',json={'reviewer_id':cm['id'],**rev()}); assert r.status_code==200,r.text; return r.json()
+def decide(client,s,status,reason=''):
+    return client.put('/api/articles/'+p+'/human-review/'+s['id'],json={'status':status,'reason':reason,'submission_revision':s['revision'],**rev()})
+s=submit(); assert submit()['id']==s['id']
+assert d.put('/api/articles/'+p+'/human-review/'+s['id'],json={'status':'approved','submission_revision':0,**rev()}).status_code==404
+assert decide(b,s,'approved').status_code==403
+co=c.post('/api/articles/'+p+'/human-review/'+s['id']+'/comments',json={'anchor':'b','message':'Improve clarity'})
+assert co.status_code==200,co.text
+assert decide(c,s,'returned','Please revise').status_code==200
+edited=b.put('/api/drafts/'+p+'-v1/edit',json={'expected_revision':rev()['expected_revision'],'ops':[{'op':'update','block_id':'b','text':'Revised draft'}]})
+assert edited.status_code==200,edited.text
+s=submit(); assert decide(c,s,'approved').status_code==200
+assert b.get('/api/articles/'+p+'/human-review').json()['valid_approval']
+# Discussion state never mutates the content token or the approval.
+assert b.put('/api/articles/'+p+'/human-review/'+s['id']+'/comments/'+co.json()['id'],json={'status':'resolved','expected_revision':0}).status_code==404
+assert b.post('/api/articles/'+p+'/finalize',json={'force':True,**rev()}).status_code==404
+final=c.post('/api/articles/'+p+'/finalize',json={'force':True,**rev()})
+assert final.status_code==200,final.text
+assert db.query_one('SELECT submission_id FROM human_finalizations WHERE snapshot_id=?',(p+'-v1',))['submission_id']==s['id']
+export=c.post('/api/articles/'+p+'/publish',json={'platforms':['weibo']})
+assert export.status_code==200,export.text
+assert b.post('/api/articles/'+p+'/publish',json={'platforms':['weibo']}).status_code==404
+assert b.put('/api/drafts/'+p+'-v1/edit',json={'expected_revision':rev()['expected_revision'],'ops':[{'op':'update','block_id':'b','text':'New version'}]}).status_code==200
+assert not b.get('/api/articles/'+p+'/human-review').json()['valid_approval']
+assert c.post('/api/articles/'+p+'/finalize',json={'force':True,**rev()}).status_code==409
+s=submit(); old=rev()
+assert b.put('/api/drafts/'+p+'-v2/edit',json={'expected_revision':old['expected_revision'],'ops':[{'op':'update','block_id':'b','text':'Late edit'}]}).status_code==200
+assert decide(c,s,'approved').status_code==409
+assert a.post('/api/articles/'+p+'/finalize',json={'force':True,'exception_reason':'Emergency documented release',**rev()}).status_code==200
+""")
+
+
+def test_human_self_review_setting_material_change_and_comment_state(tmp_path):
+    scenario(tmp_path, """
+from app.core.models import DraftDoc,Block,ArticleStatus
+from app.services import draft_service
+p=b.post('/api/articles',json={'title':'self-review','auto_collect':False}).json()['article']['id']
+mid=b.post('/api/articles/'+p+'/materials/upload-batch',files={'files':('source.md',b'evidence','text/markdown')}).json()['ok'][0]['material_id']
+doc=draft_service.save_new_version(DraftDoc(id=p+'-v0',article_id=p,version=0,blocks=[Block(id='b',type='paragraph',text='test',citations=[mid])]),'create');dao.set_article_status(p,ArticleStatus.DRAFTED)
+r={'expected_version':1,'expected_revision':doc.edit_revision}
+s=b.post('/api/articles/'+p+'/human-review',json={'reviewer_id':bm['id'],**r}).json()
+comment=b.post('/api/articles/'+p+'/human-review/'+s['id']+'/comments',json={'message':'self comment'}).json()
+assert b.put('/api/articles/'+p+'/human-review/'+s['id'],json={'status':'approved','submission_revision':0,**r}).status_code==200
+assert b.put('/api/articles/'+p+'/human-review/'+s['id']+'/comments/'+comment['id'],json={'status':'resolved','expected_revision':0}).status_code==200
+assert b.get('/api/articles/'+p+'/human-review').json()['valid_approval']
+assert a.put('/api/team/settings',json={'self_review':False}).status_code==200
+assert b.post('/api/articles/'+p+'/human-review',json={'reviewer_id':bm['id'],**r}).status_code==403
+# Material metadata is part of approval, including citations.
+assert b.patch('/api/materials/'+mid,json={'title':'new evidence title'}).status_code==200
+assert not b.get('/api/articles/'+p+'/human-review').json()['valid_approval']
+assert b.put('/api/team/settings',json={'self_review':True}).status_code==403
 """)

@@ -140,6 +140,8 @@ def retry_publish(aid: str, body: RetryPublish) -> dict:
         snapshot = dao.get_draft_by_id(payload.get("snapshot_id", ""))
         if not snapshot or snapshot["article_id"] != aid or snapshot["status"] != "finalized":
             raise HTTPException(409, "原定稿快照不存在")
+        from ..services import human_review
+        human_review.export_approval(aid, snapshot)
         payload["platforms"] = [body.platform] if body.platform else platforms
         payload["retry_of"] = job["id"]
         job_id = queue.enqueue("publish", aid, payload)
@@ -165,8 +167,10 @@ def publish(aid: str, body: Publish) -> dict:
         if not draft or draft["status"] != "finalized" or current["status"] not in ("FINALIZED", "DONE", "PUBLISHING"):
             raise HTTPException(409, "当前内容尚未定稿")
         doc = DraftDoc.model_validate_json(draft["doc_json"])
+        from ..services import human_review
+        approved_assets = human_review.export_approval(aid, draft)
         job_id = queue.enqueue("publish", aid, {"platforms": list(dict.fromkeys(platforms)),
-                           "snapshot_id": draft["id"], "assets": assets.manifest(doc),
+                           "snapshot_id": draft["id"], "assets": approved_assets if approved_assets is not None else assets.manifest(doc),
                            "settings": config.all_settings()})
     return {"job_id": job_id, "platforms": platforms}
 
