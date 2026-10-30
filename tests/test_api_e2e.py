@@ -53,6 +53,19 @@ def test_full_flow_degraded(app_client):
     assert r.status_code == 200, r.text
     assert r.json()["version"] == 1
 
+    # 大幅编辑可能排队复审；等待任务完成后定稿，避免与 REVIEWING 状态竞争。
+    if r.json()["recheck_enqueued"]:
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            reviews = [j for j in dao.list_jobs(aid) if j["type"] == "review"]
+            if reviews and all(j["status"] not in {"pending", "running"} for j in reviews):
+                assert all(j["status"] == "done" for j in reviews), reviews
+                break
+            time.sleep(0.1)
+        else:
+            raise AssertionError("编辑后的复审任务未完成")
+        _wait_status(app_client, aid, {"EDITING", "REVIEWED"})
+
     # 6. 定稿（降级稿与原文有重合，可能撞 blocker：先尝试，不行则强制定稿并留痕）
     r = app_client.post(f"/api/articles/{aid}/finalize", json={"force": False})
     if r.status_code == 409:
