@@ -204,6 +204,9 @@ def main() -> None:
         win_dir = ver_dir / f"文枢-v{ver}-windows-x64"
         clear_package(win_dir)
         copy_frozen_bundle(bundle, win_dir, "文枢.exe")
+        # Ship the current SPA at its runtime path so an in-place upgrade does
+        # not keep serving the old seeded web/dist (including the UI bugs).
+        shutil.copytree(ROOT / "web" / "dist", win_dir / "web" / "dist")
         shutil.copy(ROOT / "scripts" / "start_windows.bat", win_dir / "启动文枢.bat")
         shutil.copy(ROOT / "scripts" / "start_windows.ps1", win_dir / "启动文枢.ps1")
         copy_docs(win_dir)
@@ -226,6 +229,7 @@ def main() -> None:
             linux_dir = ver_dir / f"文枢-v{ver}-linux-x64"
             clear_package(linux_dir)
             copy_frozen_bundle(linux_bundle, linux_dir, "文枢")
+            shutil.copytree(ROOT / "web" / "dist", linux_dir / "web" / "dist")
             (linux_dir / "文枢").chmod(0o755)
             shutil.copy(ROOT / "scripts" / "start_linux.sh", linux_dir / "start_linux.sh")
             (linux_dir / "start_linux.sh").chmod(0o755)
