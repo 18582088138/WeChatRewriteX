@@ -25,7 +25,7 @@
                   margin-bottom: 44px; }
   .cover h1 { font-size: 92px; line-height: 1.18; font-weight: 800;
               letter-spacing: -0.02em; max-height: 4.72em; overflow: hidden; }
-  .cover .one-liner { font-size: 36px; line-height: 1.7; color: #B9B4A9;
+  .cover .one-liner { font-size: var(--body-font-px, {{BODY}}px); line-height: 1.7; color: #B9B4A9;
                       margin-top: 44px; max-width: 90%; }
   .cover-bottom { display: flex; justify-content: space-between; align-items: flex-end;
                   border-top: 1px solid #3A382F; padding-top: 32px; }
@@ -42,10 +42,10 @@
   .sec-title { font-size: 56px; font-weight: 800; color: {{INK}}; line-height: 1.3;
                letter-spacing: -0.01em; max-height: 2.7em; overflow: hidden; }
   .body { flex: 1; overflow: hidden; }
-  .body p { font-size: {{BODY}}px; line-height: 1.9; color: #2A2926;
+  .body p { font-size: var(--body-font-px, {{BODY}}px); line-height: 1.9; color: #2A2926;
             margin-bottom: 1.15em; text-align: justify; }
   .body p.quote { border-left: 8px solid {{ACCENT}}; padding-left: 28px;
-                  color: #4A463D; font-size: {{BODY}}px; }
+                  color: #4A463D; }
   .foot { display: flex; justify-content: space-between; align-items: center;
           border-top: 1px solid #E5E1D8; padding-top: 24px; margin-top: 24px; }
   .foot .logo { font-size: 24px; color: #8A8577; letter-spacing: 1px; }
@@ -81,15 +81,26 @@
 <body>
 {{PAGES}}
 <script>
-// 溢出自动适配：正文逐页缩字号；封面标题超长时降字号保 4 行内完整显示
-(function () {
+// V1.18: wait for actual font/image dimensions, then fit the whole set at one
+// shared body size. Titles/footers keep their own visual hierarchy.
+window.__cardsReady = Promise.all([
+  document.fonts.ready,
+  Promise.all(Array.from(document.images, function (image) {
+    return image.decode().catch(function () {});
+  }))
+]).then(function () {
   var minFont = {{MINFONT}};
-  document.querySelectorAll('.page.content .body').forEach(function (body) {
-    var size = {{BODY}};
-    while (body.scrollHeight > body.clientHeight && size > minFont) {
-      size -= 2;
-      body.querySelectorAll('p').forEach(function (p) { p.style.fontSize = size + 'px'; });
-    }
+  var size = {{BODY}};
+  var bodies = Array.from(document.querySelectorAll('.page.content .body'));
+  function overflowing() {
+    return bodies.some(function (body) { return body.scrollHeight > body.clientHeight; });
+  }
+  document.documentElement.style.setProperty('--body-font-px', size + 'px');
+  while (overflowing() && size > minFont) {
+    size = Math.max(minFont, size - 2);
+    document.documentElement.style.setProperty('--body-font-px', size + 'px');
+  }
+  bodies.forEach(function (body) {
     body.dataset.fontPx = size;
     body.dataset.overflow = (body.scrollHeight > body.clientHeight) ? '1' : '0';
   });
@@ -101,7 +112,8 @@
       h1.style.fontSize = t + 'px';
     }
   }
-})();
+  return size;
+});
 </script>
 </body>
 </html>

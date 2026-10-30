@@ -1,7 +1,7 @@
 """卡片组图渲染：DraftDoc.xhs_pages → HTML 模板 → Playwright 逐页截图 PNG。
 
 管线：构建页面数据 → 注入主题模板 → 无头浏览器打开 → 读取 JS 溢出校验结果
-→ 逐 .page 截图。模板内 JS 自动缩字号防溢出（下限 min_font_px）。
+→ 逐 .page 截图。整组卡片统一缩正文的字号防溢出（下限 min_font_px）。
 主题为「编辑部快报」平面风格：纯色域、大字号、无渐变无阴影。
 """
 from __future__ import annotations
@@ -88,7 +88,7 @@ def _img_html(asset_id: str, caption: str = "") -> str:
         p = library.material_abs_path(m.get("path"))
     if not (p and p.exists()):
         return ""
-    uri = "file:///" + str(p).replace("\\", "/")
+    uri = p.resolve().as_uri()
     return f'<figure class="fig"><img src="{uri}"></figure>'
 
 
@@ -106,7 +106,7 @@ def _page_html(page, doc: DraftDoc, idx: int, total: int, last: bool = False) ->
         rel = (m or {}).get("path")
         p = library.material_abs_path(rel) if rel else None
         if p and p.exists():
-            uri = "file:///" + str(p).replace("\\", "/")
+            uri = p.resolve().as_uri()
             credit_src = (m.get("note") or m.get("source_url") or "素材库")
             credit = f'图源：{esc(credit_src[:60])}'
             cap = esc(page.title) if page.title else ""
@@ -195,8 +195,8 @@ def _screenshot(html_path: Path, out_dir: Path, size: dict) -> list[Path]:
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
         page = browser.new_page(viewport={"width": size["width"], "height": size["height"]})
-        page.goto("file:///" + str(html_path).replace("\\", "/"))
-        page.wait_for_timeout(300)
+        page.goto(html_path.resolve().as_uri())
+        page.evaluate("() => window.__cardsReady")
         overflow = page.evaluate(
             "Array.from(document.querySelectorAll('.page.content .body'))"
             ".map(b => b.dataset.overflow || '0')")
