@@ -35,6 +35,12 @@ def migrate():
                 finally:
                     target.close()
             conn.executescript("BEGIN IMMEDIATE;" + SCHEMA + "INSERT OR IGNORE INTO schema_migrations(version) VALUES(5); PRAGMA user_version=5; COMMIT;")
+        if previous < 6:
+            conn.executescript("""BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS edit_leases(article_id TEXT PRIMARY KEY,member_id TEXT NOT NULL,client_id TEXT NOT NULL,expires REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS job_activity(job_id TEXT PRIMARY KEY,member_id TEXT,started_at REAL,finished_at REAL);
+INSERT OR IGNORE INTO schema_migrations(version) VALUES(6); PRAGMA user_version=6; COMMIT;
+""")
 
 
 def fingerprint(doc, view=None):

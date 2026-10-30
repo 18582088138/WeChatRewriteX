@@ -18,6 +18,7 @@ lock = threading.RLock()
 RESTART_KEYS = frozenset({"WENSHU_DATA_DIR", "WRA_DATA_DIR", "WENSHU_CORS_ORIGINS",
                           "PLAYWRIGHT_BROWSERS_PATH", "WENSHU_LOG_DIR", "WENSHU_RUNTIME_DIR",
                           "WENSHU_MIN_FREE_MB", "PATH", "PYTHONPATH"})
+RESTART_KEYS = RESTART_KEYS | {"WENSHU_TEAM_MODE"}
 
 
 class _Scope(dict):

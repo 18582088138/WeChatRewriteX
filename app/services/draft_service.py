@@ -27,6 +27,10 @@ def content_hash(doc: DraftDoc) -> str:
 
 
 def resolve_head_row(draft_id: str, expected_revision: int | None = None) -> dict | None:
+    from . import team
+    if team.enabled() and team.actor.get() and expected_revision is None:
+        from fastapi import HTTPException
+        raise HTTPException(428, "需携带当前文稿 revision")
     if "-v" not in draft_id:
         return None
     aid, version = draft_id.rsplit("-v", 1)
@@ -42,6 +46,10 @@ def resolve_head_row(draft_id: str, expected_revision: int | None = None) -> dic
 
 
 def check_revision(doc: DraftDoc, expected_revision: int | None) -> None:
+    from . import team
+    if team.enabled() and team.actor.get() and expected_revision is None:
+        from fastapi import HTTPException
+        raise HTTPException(428, "需携带当前文稿 revision")
     if expected_revision is not None and expected_revision != doc.edit_revision:
         raise VersionConflict("当前版本的内容已更新，请刷新后重试")
 
@@ -139,6 +147,9 @@ def save_new_version(doc: DraftDoc, origin: str, checkpoint: bool = False,
         doc.id = f"{doc.article_id}-v{doc.version}"
         doc.edit_revision = (old.edit_revision + 1) if old else 1
         dao.save_workspace(doc, origin, note)
+        if team.enabled() and not team.write_guard.get():
+            db.execute("UPDATE project_access SET revision=revision+1 WHERE article_id=?", (doc.article_id,))
+        team.audit("draft." + origin, doc.id, doc.article_id, {"version": doc.version, "revision": doc.edit_revision})
         if old and (content_hash(old) != content_hash(doc) or origin == "rollback"):
             # Every mutation path shares this rule, including AI repair and rollback.
             art = dao.get_article(doc.article_id)

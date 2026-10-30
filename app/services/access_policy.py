@@ -51,6 +51,9 @@ async def authorize(request, member):
     if path in ADMIN or path.startswith("/api/auth/members"):
         team.admin()
         return ("admin", "manage")
+    if path == "/api/team/audit":
+        team.admin()
+        return ("admin", "manage")
     if path == "/api/team/settings" and method not in ("GET", "HEAD"):
         team.admin()
         return ("admin", "manage")

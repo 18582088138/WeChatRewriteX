@@ -206,7 +206,17 @@ def list_jobs(article_id: str | None = None, limit: int = 50) -> dict:
             clause += " AND article_id=?"
             params = (*params, article_id)
         rows = db.query("SELECT * FROM jobs WHERE " + clause + " ORDER BY created_at DESC,rowid DESC LIMIT ?", (*params, min(max(limit,1),200)))
-        return {"jobs": [{k: v for k, v in row.items() if k not in ("payload_json", "result_json")} for row in rows]}
+        import json, time
+        shaped=[]
+        for row in rows:
+            out={k:v for k,v in row.items() if k not in ("payload_json","result_json")}
+            mid=json.loads(row.get("payload_json") or "{}").get("_member_id")
+            person=db.query_one("SELECT name FROM members WHERE id=?",(mid,))
+            activity=db.query_one("SELECT * FROM job_activity WHERE job_id=?",(row["id"],))
+            out['initiator']=person['name'] if person else '旧任务（待确认责任）'
+            out['duration_seconds']=round((activity['finished_at'] or time.time())-activity['started_at'],2) if activity and activity['started_at'] else None
+            shaped.append(out)
+        return {"jobs":shaped}
     return {"jobs": dao.list_jobs(article_id, limit)}
 
 

@@ -12,6 +12,7 @@ import ReviewPanel from '../components/ReviewPanel.vue'
 import PublishPanel from '../components/PublishPanel.vue'
 import ProjectAccess from '../components/ProjectAccess.vue'
 import HumanReview from '../components/HumanReview.vue'
+import CollaborationStatus from '../components/CollaborationStatus.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -203,6 +204,7 @@ const logExpanded = ref(false)   // 默认收起；点击才展开（不再随�
       <NTabs v-model:value="tab" type="line" animated size="large">
         <NTabPane v-if="teamMode" name="access" tab="项目权限"><ProjectAccess :article-id="aid" /></NTabPane>
         <NTabPane v-if="teamMode" name="human" tab="人工审核"><HumanReview :article-id="aid" /></NTabPane>
+        <NTabPane v-if="teamMode" name="collaboration" tab="协作记录"><CollaborationStatus :article-id="aid" /></NTabPane>
         <NTabPane name="materials" tab="素材库">
           <MaterialsPanel :article-id="aid" @insert-refs="onInsertRefs"
                           @import-create="onImportCreate" />

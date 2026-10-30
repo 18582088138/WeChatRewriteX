@@ -1,11 +1,63 @@
 """Project membership and explicit sharing; team roles never grant implicit projects."""
 import json
+import time
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from ..storage import db, dao
 from ..services import team
 
 router = APIRouter(prefix="/api", tags=["collaboration"])
+
+
+@router.get("/articles/{aid}/audit")
+def project_audit(aid:str):
+    team.require(aid)
+    return {"events": db.query("SELECT a.*,m.name FROM audit_events a LEFT JOIN members m ON m.id=a.member_id WHERE article_id=? ORDER BY a.id DESC LIMIT 200",(aid,))}
+
+
+@router.get("/team/audit")
+def team_audit():
+    team.admin()
+    return {"events": db.query("SELECT a.*,m.name FROM audit_events a LEFT JOIN members m ON m.id=a.member_id ORDER BY a.id DESC LIMIT 200")}
+
+
+@router.get("/team/work")
+def work():
+    member=team.actor.get(); clause,params=team.visibility("s.article_id")
+    review=db.query("SELECT s.id,s.article_id,s.version,s.edit_revision,s.status,a.title FROM human_submissions s JOIN articles a ON a.id=s.article_id WHERE "+clause+" AND s.reviewer_id=? AND s.status='pending' ORDER BY s.created_at DESC",(*params,member['id']))
+    returned=db.query("SELECT s.id,s.article_id,s.reason,a.title FROM human_submissions s JOIN articles a ON a.id=s.article_id WHERE "+clause+" AND s.submitter_id=? AND s.status='returned' AND s.id=(SELECT id FROM human_submissions WHERE article_id=s.article_id ORDER BY created_at DESC LIMIT 1)",(*params,member['id']))
+    from .articles import list_jobs
+    jobs=list_jobs(limit=200)['jobs']
+    return {'review':review,'returned':returned,'failed':[j for j in jobs if j['status']=='failed']}
+
+
+class Lease(BaseModel):
+    client_id: str = Field(min_length=8,max_length=100)
+
+
+@router.get("/articles/{aid}/lease")
+def lease(aid:str):
+    team.require(aid)
+    return {"lease":db.query_one("SELECT l.*,m.name FROM edit_leases l JOIN members m ON m.id=l.member_id WHERE l.article_id=? AND l.expires>? AND m.enabled=1",(aid,time.time()))}
+
+
+@router.post("/articles/{aid}/lease")
+def occupy(aid:str,body:Lease):
+    with db.transaction():
+        team.require(aid,'write')
+        old=lease(aid)['lease']
+        if old and (old['member_id']!=team.actor.get()['id'] or old['client_id']!=body.client_id):
+            return {'lease':old,'acquired':False}
+        db.execute("INSERT INTO edit_leases VALUES(?,?,?,?) ON CONFLICT(article_id) DO UPDATE SET member_id=excluded.member_id,client_id=excluded.client_id,expires=excluded.expires",(aid,team.actor.get()['id'],body.client_id,time.time()+60))
+    return {**lease(aid),'acquired':True}
+
+
+@router.delete("/articles/{aid}/lease/{client_id}")
+def release_lease(aid:str,client_id:str):
+    with db.transaction():
+        team.require(aid,'write')
+        db.execute('DELETE FROM edit_leases WHERE article_id=? AND member_id=? AND client_id=?',(aid,team.actor.get()['id'],client_id))
+    return {'ok':True}
 
 
 class Grant(BaseModel):
