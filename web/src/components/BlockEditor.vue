@@ -30,17 +30,24 @@ let openTimer: ReturnType<typeof setTimeout> | null = null
 let closeTimer: ReturnType<typeof setTimeout> | null = null
 
 function onMq(e: MediaQueryListEvent) {
+  edgeLeave()
+  panelEnter()
   wide.value = e.matches
   leftOpen.value = e.matches
   rightOpen.value = e.matches
 }
 function edgeHover(side: 'left' | 'right') {
-  if (wide.value) return
-  if (closeTimer) clearTimeout(closeTimer)
+  edgeLeave()
+  panelEnter()
   openTimer = setTimeout(() => {               // 0.5s 防抖弹出
-    if (side === 'left') leftOpen.value = true
-    else rightOpen.value = true
+    openPanel(side)
   }, 500)
+}
+function openPanel(side: 'left' | 'right') {
+  edgeLeave()
+  panelEnter()
+  if (side === 'left') leftOpen.value = true
+  else rightOpen.value = true
 }
 function edgeLeave() {
   if (openTimer) { clearTimeout(openTimer); openTimer = null }
@@ -518,9 +525,11 @@ async function runInsert() {
 
 <template>
   <div class="create-wb" :class="{ narrow: !wide }" @click="onClickOutside">
-    <!-- 左边缘标记（窄屏收起态的视觉提示） -->
-    <div v-if="!leftOpen" class="edge-marker left" @mouseenter="edgeHover('left')" @mouseleave="edgeLeave" />
-    <div v-if="!rightOpen" class="edge-marker right" @mouseenter="edgeHover('right')" @mouseleave="edgeLeave" />
+    <!-- 手动收起后，宽屏与窄屏都可通过边缘悬停、点击或键盘唤出。 -->
+    <button v-if="!leftOpen" class="edge-marker left" aria-label="展开创作素材窗口"
+            title="展开创作素材窗口" @mouseenter="edgeHover('left')" @mouseleave="edgeLeave" @click.stop="openPanel('left')" />
+    <button v-if="!rightOpen" class="edge-marker right" aria-label="展开 AI 与版本窗口"
+            title="展开 AI 与版本窗口" @mouseenter="edgeHover('right')" @mouseleave="edgeLeave" @click.stop="openPanel('right')" />
 
     <!-- ============ 左侧【创作素材】窗口 ============ -->
     <aside class="side-panel left-panel panel" :class="{ hidden: !leftOpen }"
