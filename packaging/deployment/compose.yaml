@@ -2,7 +2,7 @@
 # Build on the development machine, then transfer the image with docker save/load.
 services:
   wenshu:
-    image: ${WENSHU_IMAGE:-wenshu:s1-local}
+    image: ${WENSHU_IMAGE:-wenshu:1.1.0-rc.1}
     restart: unless-stopped
     stop_grace_period: 60s
     init: true
@@ -11,6 +11,7 @@ services:
     env_file:
       - ./runtime/.env
     environment:
+      WENSHU_TEAM_MODE: "1"
       WENSHU_RUNTIME_DIR: /app/state
       WENSHU_DATA_DIR: /app/state/resource
       WENSHU_LOG_DIR: /app/state/log

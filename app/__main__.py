@@ -28,6 +28,7 @@ def main() -> None:
     maintenance.add_argument("--backup", metavar="DESTINATION", help="停服务后完整备份数据、配置与 .env 到全新外部目录")
     maintenance.add_argument("--restore", metavar="BACKUP", help="校验并恢复完整备份，--runtime-dir 必须为全新目录")
     maintenance.add_argument("--init-admin", metavar="LOGIN", help="停服务后初始化团队管理员（密码交互输入，不写命令行）")
+    maintenance.add_argument("--recover-admin", metavar="LOGIN", help="停服务后恢复已有管理员账号；交互重置密码、撤销会话并强制改密")
     parser.add_argument("--install-browser", action="store_true",
                         help="安装小红书卡片渲染所需的 Chromium（首次使用卡片功能前执行一次）")
     args = parser.parse_args()
@@ -62,7 +63,7 @@ def main() -> None:
         return
 
     from .core import config
-    if args.init_admin:
+    if args.init_admin or args.recover_admin:
         import getpass
         from .services import team
         from .pipeline.runtime_lock import RuntimeLock
@@ -71,8 +72,13 @@ def main() -> None:
         guard = RuntimeLock(config.data_dir()).acquire()
         try:
             db.init_db()
-            team.initialize_admin(args.init_admin, args.init_admin, getpass.getpass("管理员密码（至少10字符）："))
-            print("管理员初始化完成；请启动服务并使用成员账号登录")
+            password = getpass.getpass("管理员密码（至少10字符）：")
+            if args.recover_admin:
+                team.recover_admin(args.recover_admin, password)
+                print("管理员恢复完成；原会话已撤销，启动后登录并再次更改密码")
+            else:
+                team.initialize_admin(args.init_admin, args.init_admin, password)
+                print("管理员初始化完成；请启动服务并使用成员账号登录")
         finally:
             guard.close()
         return
