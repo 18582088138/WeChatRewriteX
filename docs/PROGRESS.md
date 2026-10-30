@@ -46,6 +46,16 @@ Vue 严格类型检查和生产构建通过。Docker 本机未安装，镜像运
 - 数据根 `resource/`（gitignore）；日志 `log/wenshu.log`（gitignore，常驻持久化）
 - 一键打包：`python tools/pack_release.py`（默认全平台，产物进 release/）
 
+## V1.17.1 回归修复（2026-10-29）
+
+- **Workbench.load() 插值事故**：V1.17 把 aid 改为 computed 后，模板字符串里插值
+  ComputedRef 对象会产出 `[object Object]` URL（`/api/articles/[object Object]` → 404），
+  导致文章加载失败、动作按钮消失、默认 tab 错误。已全部改 aid.value（含无尾斜杠的 load()）。
+- **去审稿不触发任务**：原条件仅 DRAFTED 且未等加载——放宽为 DRAFTED/EDITING
+  （EDITING 支持复审）并先 `await load()` 再判断，加载途中点击也能触发。
+- 素材库加载验证通过（文章 6/图片 21/视频 8）；动作按钮恢复（开始创作/补充收集/开始审稿）。
+- 版本 1.17.1。
+
 ## V1.17 状态同步与素材删除/卡片修复（2026-10-29）
 
 1. **首次进入状态同步**：Workbench 的 aid 改为 computed + watch（路由切换即重载），

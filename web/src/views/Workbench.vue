@@ -27,6 +27,19 @@ const tab = ref('create')
 const busy = ref(false)
 const editorRef = ref<InstanceType<typeof BlockEditor> | null>(null)
 
+/** 去审稿：跳到审稿页；若尚未审稿（DRAFTED）则同时触发审稿任务 */
+async function onGotoReview() {
+  tab.value = 'review'
+  await load()          // 先确保文章加载完成（V1.17.1：加载途中点击也能触发审稿）
+  if (['DRAFTED', 'EDITING'].includes(article.value?.status || '')) {
+    try {
+      await api.post(`/api/articles/${aid.value}/advance`, { stage: 'review' })
+      message.success('审稿任务已提交')
+      setTimeout(load, 1500)
+    } catch (e: any) { message.error(e.message) }
+  }
+}
+
 async function onInsertRefs(ids: string[]) {
   tab.value = 'create'
   await nextTick()
@@ -47,7 +60,7 @@ async function onImportCreate(ids: string[]) {
 }
 
 async function load() {
-  article.value = await api.get(`/api/articles/${aid}`)
+  article.value = await api.get(`/api/articles/${aid.value}`)
   if (store.devMode) {
     try { totalCosts.value = await api.get(`/api/articles/${aid.value}/costs`) } catch { /* ignore */ }
   }
@@ -189,7 +202,7 @@ const logExpanded = ref(false)   // 默认收起；点击才展开（不再随�
                           @import-create="onImportCreate" />
         </NTabPane>
         <NTabPane name="create" tab="创作">
-          <BlockEditor ref="editorRef" :article-id="aid" @goto-review="tab = 'review'" />
+          <BlockEditor ref="editorRef" :article-id="aid" @goto-review="onGotoReview" />
         </NTabPane>
         <NTabPane name="review" tab="审稿">
           <ReviewPanel :article-id="aid" @goto-publish="tab = 'publish'" />
