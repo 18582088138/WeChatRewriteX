@@ -1,5 +1,6 @@
 """Cold Windows executable test in disposable runtime; only local HTTP and fixture data."""
 import argparse
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -87,14 +88,14 @@ def main():
         subprocess.run([str(binary),'--runtime-dir',str(runtime),'--data-dir',str(runtime/'resource'),'--backup',str(backup)],env=env,cwd=binary.parent,check=True,capture_output=True,timeout=45)
         backup_seconds=time.perf_counter()-started
         subprocess.run([str(binary),'--runtime-dir',str(restored),'--restore',str(backup)],env=env,cwd=binary.parent,check=True,capture_output=True,timeout=45)
-        with sqlite3.connect(restored/'resource/app.db') as conn:
+        with closing(sqlite3.connect(restored/'resource/app.db')) as conn:
             assert conn.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
             assert conn.execute('SELECT count(*) FROM members').fetchone()[0]==4
             assert conn.execute('SELECT count(*) FROM human_finalizations').fetchone()[0]==1
             assert conn.execute("SELECT count(*) FROM publish_jobs WHERE status='done'").fetchone()[0]==4
         report={'binary':str(binary),'version_output':version,'build':build,'members':4,'exports':len(files),'backup_seconds':round(backup_seconds,3),'scope':'cold local Windows executable; disposable runtime, not home host deployment'}
         (output/'exe-smoke.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
-        print('Cold executable team flow and isolated CLI restore passed')
+    print('Cold executable team flow and isolated CLI restore passed')
 
 
 if __name__=='__main__':main()
