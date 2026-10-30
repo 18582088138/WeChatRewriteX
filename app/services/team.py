@@ -109,6 +109,19 @@ def initialize_admin(login, name, password):
         return member
 
 
+def recover_admin(login, password):
+    """Offline CLI only; caller must own the OS runtime lock. No HTTP equivalent."""
+    login = unicodedata.normalize("NFKC", login).strip().casefold()
+    hashed = password_hash(password)
+    with db.transaction():
+        member = db.query_one("SELECT id FROM members WHERE login=?", (login,))
+        if not member:
+            raise ValueError("恢复账号不存在；新实例请使用 --init-admin")
+        db.execute("UPDATE members SET password_hash=?,role='admin',enabled=1,must_change=1,session_version=session_version+1 WHERE id=?",(hashed,member['id']))
+        db.execute("DELETE FROM member_sessions WHERE member_id=?",(member['id'],))
+        audit("member.offline-recovery",member['id'])
+
+
 def claim_legacy(mid):
     db.execute("INSERT OR IGNORE INTO project_access(article_id,owner_id) SELECT id,? FROM articles", (mid,))
 

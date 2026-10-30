@@ -276,3 +276,39 @@ assert b.get('/api/team/work').status_code==200
 audit=b.get('/api/articles/'+p+'/audit').text
 assert 'password_hash' not in audit and 'csrf' not in audit and 'writer-password' not in audit
 """)
+
+
+def test_offline_admin_recovery_and_full_team_backup_restore(tmp_path):
+    scenario(tmp_path, """
+import os,subprocess,sqlite3,json
+from pathlib import Path
+from app.pipeline.runtime_lock import RuntimeLock
+from app.core import config
+from app.services.instance_backup import backup_instance,restore_instance
+p=b.post('/api/articles',json={'title':'recover-project','auto_collect':False}).json()['article']['id']
+mid=b.post('/api/articles/'+p+'/materials/upload-batch',files={'files':('source.md',b'restore evidence','text/markdown')}).json()['ok'][0]['material_id']
+script="import getpass,sys; getpass.getpass=lambda *args:'recovery-password'; sys.argv=['wenshu','--recover-admin','admin']; from app.__main__ import main; main()"
+guard=RuntimeLock(config.data_dir()).acquire()
+try:
+    blocked=subprocess.run([sys.executable,'-X','utf8','-c',script],capture_output=True)
+    assert blocked.returncode!=0
+finally:guard.close()
+result=subprocess.run([sys.executable,'-X','utf8','-c',script],capture_output=True)
+assert result.returncode==0,result.stderr
+assert a.get('/api/auth/me').status_code==401
+sign(a,'admin','recovery-password')
+assert a.get('/api/articles').status_code==403
+assert a.post('/api/auth/password',json={'old_password':'recovery-password','password':'final-admin-password'}).status_code==200
+sign(a,'admin','final-admin-password')
+assert a.get('/api/articles/'+p).status_code==200
+stack.close()
+backup=config.RUNTIME_ROOT/'offline-copy';restored=config.RUNTIME_ROOT/'restored-copy'
+backup_instance(config.RUNTIME_ROOT,config.data_dir(),backup);restore_instance(backup,restored)
+with sqlite3.connect(restored/'resource'/'app.db') as con:
+    assert con.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
+    assert con.execute('SELECT count(*) FROM members').fetchone()[0]==4
+    assert con.execute('SELECT owner_id FROM project_access WHERE article_id=?',(p,)).fetchone()[0]==bm['id']
+    assert con.execute("SELECT count(*) FROM audit_events WHERE action='member.offline-recovery'").fetchone()[0]==1
+    path=con.execute('SELECT path FROM materials WHERE id=?',(mid,)).fetchone()[0]
+assert (restored/'resource'/path).is_file()
+""")
