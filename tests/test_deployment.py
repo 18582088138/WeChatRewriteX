@@ -78,6 +78,22 @@ def test_ready_rejects_full_disk_and_unwritable_storage(app_client, monkeypatch)
     assert app_client.get("/api/ready").status_code == 503
 
 
+def test_frozen_browser_stays_with_package_when_runtime_is_relocated(tmp_path, monkeypatch):
+    from app.core import config
+    package = tmp_path / "program"
+    browser = package / "playwright-browsers"
+    browser.mkdir(parents=True)
+    monkeypatch.setattr(config, "_is_frozen", lambda: True)
+    monkeypatch.setattr(config.sys, "executable", str(package / "文枢.exe"))
+    monkeypatch.setattr(config, "RUNTIME_ROOT", tmp_path / "separate-state")
+    monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
+    config.setup_playwright_browsers()
+    assert Path(os.environ["PLAYWRIGHT_BROWSERS_PATH"]) == browser
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path / "custom-browser"))
+    config.setup_playwright_browsers()
+    assert Path(os.environ["PLAYWRIGHT_BROWSERS_PATH"]) == tmp_path / "custom-browser"
+
+
 @pytest.mark.parametrize("invalid", ["../escaped", "C:/outside", ".", ""])
 def test_restore_rejects_manifest_paths_before_creating_destination(tmp_path, invalid):
     from app.services.instance_backup import restore_instance

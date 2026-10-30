@@ -23,6 +23,8 @@ def main():
         env=dict(os.environ)
         for key in list(env):
             if key.endswith(('_API_KEY','_SEARCH_KEY')) or key in ('APP_ACCESS_TOKEN','PYTHONPATH'):env[key]=''
+        # Exercise automatic bundled-browser discovery with a separate runtime.
+        env.pop('PLAYWRIGHT_BROWSERS_PATH',None)
         bootstrap=secrets.token_urlsafe(32)
         env.update(WENSHU_TEAM_MODE='1',WENSHU_BOOTSTRAP_TOKEN=bootstrap,WENSHU_MIN_FREE_MB='1',WENSHU_RUNTIME_DIR=str(runtime),WENSHU_DATA_DIR=str(runtime/'resource'),WENSHU_LOG_DIR=str(runtime/'log'))
         with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
