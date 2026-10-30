@@ -258,11 +258,9 @@ async function finalize(force = false) {
             <h2 v-else-if="b.type === 'heading'" @dblclick="dblclickBlock(b)">{{ b.text }}</h2>
             <p v-else-if="b.type === 'paragraph'" @dblclick="dblclickBlock(b)">{{ b.text }}</p>
             <blockquote v-else-if="b.type === 'quote'" @dblclick="dblclickBlock(b)">{{ b.text }}</blockquote>
-            <button v-if="['image','video'].includes(b.type)"
-                    class="rv-remove" title="删除该素材" @click.stop="removeMedia(b)">×</button>
             <div v-else-if="b.type === 'image'" class="my-3">
               <img v-if="b.asset_id" :src="api.absUrl(`/api/materials/${b.asset_id}/file`)"
-                   class="rounded-md max-w-full" />
+                   :alt="b.caption || '文章配图'" class="rounded-md max-w-full" />
             </div>
             <div v-else-if="b.type === 'video'" class="my-3">
               <video v-if="b.asset_id" :src="api.absUrl(`/api/materials/${b.asset_id}/file`)"
@@ -271,6 +269,8 @@ async function finalize(force = false) {
               <div v-if="b.caption" class="text-xs text-center mt-1"
                    style="color: var(--faint);">{{ b.caption }}</div>
             </div>
+            <button v-if="['image','video'].includes(b.type)"
+                    class="rv-remove" title="删除该素材" @click.stop="removeMedia(b)">×</button>
           </template>
         </div>
         <div class="text-center text-xs mt-6" style="color: var(--faint);">
