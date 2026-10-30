@@ -86,7 +86,8 @@ def test_frozen_browser_stays_with_package_when_runtime_is_relocated(tmp_path, m
     monkeypatch.setattr(config, "_is_frozen", lambda: True)
     monkeypatch.setattr(config.sys, "executable", str(package / "文枢.exe"))
     monkeypatch.setattr(config, "RUNTIME_ROOT", tmp_path / "separate-state")
-    monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
+    # Register restoration even if the variable did not exist before this test.
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", "")
     config.setup_playwright_browsers()
     assert Path(os.environ["PLAYWRIGHT_BROWSERS_PATH"]) == browser
     monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path / "custom-browser"))
