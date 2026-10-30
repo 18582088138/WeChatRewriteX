@@ -117,6 +117,14 @@ def save_new_version(doc: DraftDoc, origin: str, checkpoint: bool = False,
                                      int(config.get("cards.image_char_cost", 150)),
                                      int((config.get("variants.xhs.pages") or [3, 9])[1]))
     with db.transaction():
+        from . import team
+        if team.enabled() and team.actor.get():
+            team.require(doc.article_id, "write")
+            for block in doc.blocks:
+                for mid in ([block.asset_id] if block.asset_id else []) + list(block.citations or []):
+                    material = dao.get_material(mid)
+                    if not team.material_allowed(team.actor.get(), material) or (material["scope"] == "article" and material["article_id"] != doc.article_id):
+                        raise ValueError("文稿素材不属于当前项目或获准公共范围")
         head = dao.latest_draft(doc.article_id)
         current = head["version"] if head else 0
         if expected != current:

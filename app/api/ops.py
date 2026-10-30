@@ -266,15 +266,23 @@ def reload_env(request: Request) -> dict:
     return result
 
 @router.get("/sse")
-def sse():
+def sse(request: Request):
     q = events.bus.subscribe()
+    from ..services import team
+    member_token = request.cookies.get("wenshu_member", "")
+    team_mode = team.enabled()
 
     def stream():
         try:
             yield ": connected\n\n"
             while True:
+                member = team.session(member_token) if team_mode else None
+                if team_mode and not member:
+                    return
                 try:
-                    msg = q.get(timeout=15)
+                    msg = q.get(timeout=1 if team_mode else 15)
+                    if team_mode and not (team.allowed(member, msg.get("article_id")) if msg.get("article_id") else member["role"] == "admin"):
+                        continue
                     yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
                 except queue_mod.Empty:
                     yield ": heartbeat\n\n"
@@ -287,6 +295,14 @@ def sse():
 @router.get("/health")
 def health() -> dict:
     return {"ok": True}
+
+
+@router.get("/capabilities")
+def capabilities():
+    from ..services import team
+    from ..services.llm import router as llm_router
+    return {"team_mode": team.enabled(), "member": team.public(team.actor.get()) if team.actor.get() else None,
+            "create_available": llm_router.available("create"), "review_available": llm_router.available("review")}
 
 
 @router.get("/ready")

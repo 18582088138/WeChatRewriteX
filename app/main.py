@@ -10,7 +10,7 @@ import time
 import ipaddress
 import os
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
@@ -75,13 +75,32 @@ def create_app(start_worker: bool = True, llm=None) -> FastAPI:
 
     # 本地工具默认可跨域（开发期 Vite 端口不同）
     app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in os.environ.get("WENSHU_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if origin.strip() != "*"], allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-                       allow_headers=["Authorization", "Content-Type"], allow_credentials=True)
+                       allow_headers=["Authorization", "Content-Type", "X-Wenshu-CSRF"], allow_credentials=True)
 
     @app.middleware("http")
     async def token_guard(request: Request, call_next):
         from .core.execution import context
         request_id = uuid.uuid4().hex
         ctx = context.set({"request_id": request_id})
+        from .services import team
+        if team.enabled():
+            from .services.access_policy import authorize
+            member = team.session(request.cookies.get("wenshu_member", ""))
+            member_token = team.actor.set(member)
+            op_token = None
+            try:
+                op_token = team.operation.set(await authorize(request, member))
+                result = await call_next(request)
+                result.headers["X-Request-ID"] = request_id
+                result.headers["Cache-Control"] = "no-store"
+                return result
+            except HTTPException as exc:
+                return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+            finally:
+                if op_token is not None:
+                    team.operation.reset(op_token)
+                team.actor.reset(member_token)
+                context.reset(ctx)
         token = config.get_env("APP_ACCESS_TOKEN")
         path = request.url.path
         protected = path.startswith(("/api/", "/files/")) or path in ("/docs", "/redoc", "/openapi.json")
@@ -132,6 +151,8 @@ def create_app(start_worker: bool = True, llm=None) -> FastAPI:
     app.include_router(drafts.router)
     app.include_router(materials.router)
     app.include_router(ops.router)
+    from .api import team as team_api
+    app.include_router(team_api.router)
 
     # 素材与导出文件（图片预览 / 下载）
     @app.get("/files/{relative:path}", include_in_schema=False)

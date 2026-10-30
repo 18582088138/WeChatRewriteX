@@ -197,6 +197,15 @@ def reopen(aid: str) -> dict:
 
 @jobs_router.get("")
 def list_jobs(article_id: str | None = None, limit: int = 50) -> dict:
+    from ..services import team
+    member = team.actor.get()
+    if team.enabled() and member:
+        clause, params = team.visibility("article_id")
+        if article_id:
+            clause += " AND article_id=?"
+            params = (*params, article_id)
+        rows = db.query("SELECT * FROM jobs WHERE " + clause + " ORDER BY created_at DESC,rowid DESC LIMIT ?", (*params, min(max(limit,1),200)))
+        return {"jobs": [{k: v for k, v in row.items() if k not in ("payload_json", "result_json")} for row in rows]}
     return {"jobs": dao.list_jobs(article_id, limit)}
 
 

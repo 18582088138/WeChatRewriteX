@@ -68,6 +68,9 @@ def transaction(write: bool = True):
         conn.execute("BEGIN IMMEDIATE" if write else "BEGIN")
         _local.connection, _local.callbacks, _local.depth = conn, callbacks, 0
         try:
+            if write:
+                from ..services import team
+                team.recheck()
             yield conn
             conn.commit()
         except BaseException:
@@ -102,6 +105,8 @@ def init_db() -> None:
     data_dir().mkdir(parents=True, exist_ok=True)
     with connect() as conn:
         previous = conn.execute("PRAGMA user_version").fetchone()[0]
+        if previous > 4:
+            raise RuntimeError("数据库来自更新版本，拒绝降级写入；请使用匹配程序或完整备份恢复")
         if previous < 3 and conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='articles'").fetchone():
             backups = data_dir() / "backups"
             backups.mkdir(parents=True, exist_ok=True)
@@ -134,7 +139,11 @@ def init_db() -> None:
         _init_fts(conn)
         conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT DEFAULT CURRENT_TIMESTAMP)")
         conn.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(3)")
-        conn.execute("PRAGMA user_version=3")
+        if previous < 3:
+            conn.execute("PRAGMA user_version=3")
+    from ..services import team
+    if previous >= 4 or team.enabled():
+        team.migrate()
 
 
 def _init_fts(conn: sqlite3.Connection) -> None:
@@ -165,5 +174,9 @@ def query_one(sql: str, params: tuple = ()) -> dict | None:
 
 
 def execute(sql: str, params: tuple = ()) -> int:
+    from ..services import team
+    if team.actor.get() and getattr(_local, "connection", None) is None:
+        with transaction() as conn:
+            return conn.execute(sql, params).rowcount
     with connect() as conn:
         return conn.execute(sql, params).rowcount

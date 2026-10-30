@@ -1,14 +1,15 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
+import { onUnmounted } from 'vue'
 import { NConfigProvider, NMessageProvider, NDialogProvider, zhCN, dateZhCN } from 'naive-ui'
 import { useAppStore } from './stores/app'
+import AuthGate from './components/AuthGate.vue'
 
 const store = useAppStore()
-onMounted(() => {
+function ready() {
   store.refreshArticles()
   store.startSse()
   store.loadDevMode()
-})
+}
 
 onUnmounted(() => store.stopSse())
 
@@ -33,7 +34,7 @@ const themeOverrides = {
   <NConfigProvider :locale="zhCN" :date-locale="dateZhCN" :theme-overrides="themeOverrides">
     <NMessageProvider>
       <NDialogProvider>
-        <RouterView />
+        <AuthGate @ready="ready"><RouterView /></AuthGate>
       </NDialogProvider>
     </NMessageProvider>
   </NConfigProvider>
