@@ -10,10 +10,11 @@ recursive-include config *.yaml *.j2 *.md *.txt *.png
 recursive-include docs *.md *.json
 recursive-include scripts *.py *.bat *.ps1 *.sh
 recursive-include tools *.py
-recursive-include packaging *.spec *.sh *.ps1 *.yaml *.service
+recursive-include packaging *.spec *.sh *.ps1 *.yaml *.service *.conf *.example
 recursive-include tests *.py *.md *.txt *.json *.png *.html
 recursive-include web/src *
 recursive-include web/e2e *.ts
+recursive-include web/team-e2e *.ts
 include web/package.json web/package-lock.json web/index.html web/*.config.* web/tsconfig*.json
 recursive-include .github/workflows *.yml
 global-exclude __pycache__ *.pyc
