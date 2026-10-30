@@ -9,6 +9,13 @@ from ..services import human_review as human, team
 router=APIRouter(prefix="/api",tags=["human review"])
 
 
+def public_submission(row):
+    result=dict(row)
+    result.pop('assets_json',None)
+    if 'doc_json' in result:result['doc']=json.loads(result.pop('doc_json'))
+    return result
+
+
 class Submit(BaseModel):
     reviewer_id: str
     expected_version: int
@@ -39,18 +46,22 @@ def history(aid:str):
     except ValueError: pass
     reviewer_rows=db.query("SELECT id,name,login,role,enabled FROM members WHERE enabled=1")
     reviewers=[{k:v for k,v in m.items() if k!='enabled'} for m in reviewer_rows if team.allowed(m,aid,"review")]
-    valid=bool(doc and any(r["status"]=='approved' and r["version"]==doc.version and r["edit_revision"]==doc.edit_revision and r["fingerprint"]==human.fingerprint(doc) for r in rows))
+    latest=rows[0] if rows else None
+    valid=bool(doc and latest and latest["status"]=='approved' and latest["version"]==doc.version and latest["edit_revision"]==doc.edit_revision and latest["fingerprint"]==human.fingerprint(doc))
+    finalized=db.query_one("SELECT * FROM human_finalizations WHERE snapshot_id=?",(doc.id,)) if doc else None
+    if doc and finalized and finalized['fingerprint']==human.fingerprint(doc):
+        valid=True
     return {"submissions":rows,"reviewers":reviewers,"self_review":human.self_review(),"valid_approval":valid,"member_id":team.actor.get()["id"]}
 
 
 @router.post("/articles/{aid}/human-review")
 def submit(aid:str,body:Submit):
-    return human.submit(aid,body.reviewer_id,body.expected_version,body.expected_revision)
+    return public_submission(human.submit(aid,body.reviewer_id,body.expected_version,body.expected_revision))
 
 
 @router.put("/articles/{aid}/human-review/{sid}")
 def decision(aid:str,sid:str,body:Decision):
-    return human.decide(aid,sid,body.status,body.reason,body.submission_revision,body.expected_version,body.expected_revision,body.reviewer_id)
+    return public_submission(human.decide(aid,sid,body.status,body.reason,body.submission_revision,body.expected_version,body.expected_revision,body.reviewer_id))
 
 
 class Comment(BaseModel):

@@ -166,7 +166,8 @@ def allowed(member, aid, capability="read"):
     if not member or not member.get("enabled"):
         return False
     if member["role"] == "admin":
-        return True
+        access = db.query_one("SELECT archived FROM project_access WHERE article_id=?", (aid,))
+        return capability in ("read", "manage") or bool(access and not access["archived"])
     access = db.query_one("SELECT * FROM project_access WHERE article_id=?", (aid,))
     grant = db.query_one("SELECT * FROM project_members WHERE article_id=? AND member_id=?", (aid, member["id"]))
     owner = bool(access and access["owner_id"] == member["id"])

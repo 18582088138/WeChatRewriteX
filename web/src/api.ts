@@ -40,6 +40,7 @@ function remember(resp:Response,result:any){
   const doc=result.draft?.doc || result.draft?.draft?.doc
   if(doc)objectProjects.set(doc.id,doc.article_id)
   for(const i of result.items||[])if(aid)objectProjects.set(i.id,aid)
+  for(const i of result.review?.items||[])if(aid)objectProjects.set(i.id,aid)
   return result
 }
 

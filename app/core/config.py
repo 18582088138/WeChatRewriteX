@@ -91,7 +91,9 @@ def setup_playwright_browsers() -> None:
     实现卡片渲染开箱可用（免 playwright install）。"""
     if not _is_frozen() or os.environ.get("PLAYWRIGHT_BROWSERS_PATH"):
         return
-    bundled = RUNTIME_ROOT / "playwright-browsers"
+    # Chromium belongs to the replaceable executable package, even when
+    # writable state is relocated with --runtime-dir.
+    bundled = Path(sys.executable).resolve().parent / "playwright-browsers"
     if bundled.is_dir():
         os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(bundled)
 

@@ -44,7 +44,7 @@ for client in (a,b,c,d):
                     elif kind=='drafts': aid=oid.rsplit('-v',1)[0]
             row=db.query_one('SELECT revision FROM project_access WHERE article_id=?',(aid,)) if aid else None
             if row:headers['X-Wenshu-Project-Revision']=str(row['revision'])
-        return _original(method,url,headers=headers,**kwargs)
+        return _original(method,str(url).replace(chr(92),'/'),headers=headers,**kwargs)
     client.request=guarded
 """
 
@@ -95,7 +95,8 @@ assert d.get('/api/articles/'+p).status_code == 404
 assert d.get('/api/articles?q=private-keyword').json()['total'] == 0
 assert d.get('/api/materials/'+mid+'/text').status_code == 404
 assert d.get('/files/'+material['path']).status_code == 404
-assert b.get('/files/'+material['path']).status_code == 200
+file_response=b.get('/files/'+material['path'])
+assert file_response.status_code == 200,(file_response.status_code,file_response.text,file_response.url)
 db.execute('INSERT INTO project_members VALUES(?,?,1,1)',(p,cm['id']))
 assert c.get('/api/articles/'+p).status_code == 200
 q = d.post('/api/articles',json={'title':'other','auto_collect':False}).json()['article']['id']
@@ -152,12 +153,14 @@ dest=dao.get_material(copied.json()['material_id']); source=dao.get_material(mid
 assert dest['path'] != source['path'] and dest['source_material_id']==mid
 assert a.put('/api/materials/'+mid+'/sharing',json={'shared':False}).status_code==200
 assert b.get('/files/'+source['path']).status_code==404
-assert b.get('/files/'+dest['path']).status_code==200
+file_response=b.get('/files/'+dest['path'])
+assert file_response.status_code==200,(file_response.status_code,file_response.text,file_response.url)
 body.update(expected_revision=b.get('/api/articles/'+p+'/access').json()['revision'],owner_id=cm['id'],archived=True,members=[])
 assert b.put('/api/articles/'+p+'/access',json=body).status_code==200
 assert b.get('/api/articles/'+p).status_code==404
 assert c.get('/api/articles/'+p).status_code==200
 assert c.put('/api/articles/'+p+'/selection',json={'material_ids':[]}).status_code==404
+assert a.put('/api/articles/'+p+'/selection',json={'material_ids':[]}).status_code==404
 assert a.put('/api/auth/members/'+cm['id'],json={'role':'maintainer','enabled':False}).status_code==409
 assert db.query_one("SELECT count(*) AS n FROM audit_events WHERE article_id=? AND action='project.access'",(p,))['n']==2
 db.init_db(); assert db.query_one('SELECT count(*) AS n FROM project_access')['n']==2
@@ -222,6 +225,10 @@ comment=b.post('/api/articles/'+p+'/human-review/'+s['id']+'/comments',json={'me
 assert b.put('/api/articles/'+p+'/human-review/'+s['id'],json={'status':'approved','submission_revision':0,**r}).status_code==200
 assert b.put('/api/articles/'+p+'/human-review/'+s['id']+'/comments/'+comment['id'],json={'status':'resolved','expected_revision':0}).status_code==200
 assert b.get('/api/articles/'+p+'/human-review').json()['valid_approval']
+s2=b.post('/api/articles/'+p+'/human-review',json={'reviewer_id':bm['id'],**r}).json()
+assert s2['id']!=s['id'] and 'assets_json' not in s2
+assert not b.get('/api/articles/'+p+'/human-review').json()['valid_approval']
+assert b.put('/api/articles/'+p+'/human-review/'+s2['id'],json={'status':'approved','submission_revision':0,**r}).status_code==200
 assert a.put('/api/team/settings',json={'self_review':False}).status_code==200
 assert b.post('/api/articles/'+p+'/human-review',json={'reviewer_id':bm['id'],**r}).status_code==403
 # Material metadata is part of approval, including citations.
@@ -287,6 +294,14 @@ from app.core import config
 from app.services.instance_backup import backup_instance,restore_instance
 p=b.post('/api/articles',json={'title':'recover-project','auto_collect':False}).json()['article']['id']
 mid=b.post('/api/articles/'+p+'/materials/upload-batch',files={'files':('source.md',b'restore evidence','text/markdown')}).json()['ok'][0]['material_id']
+from app.core.models import DraftDoc,Block,ArticleStatus
+from app.services import draft_service
+doc=draft_service.save_new_version(DraftDoc(id=p+'-v0',article_id=p,version=0,blocks=[Block(id='b',type='paragraph',text='Restore human snapshot',citations=[mid])]),'create');dao.set_article_status(p,ArticleStatus.DRAFTED)
+r={'expected_version':doc.version,'expected_revision':doc.edit_revision}
+s=b.post('/api/articles/'+p+'/human-review',json={'reviewer_id':bm['id'],**r}).json()
+comment=b.post('/api/articles/'+p+'/human-review/'+s['id']+'/comments',json={'message':'backup human history'}).json()
+assert b.put('/api/articles/'+p+'/human-review/'+s['id'],json={'status':'approved','submission_revision':0,**r}).status_code==200
+assert a.post('/api/articles/'+p+'/finalize',json={'force':True,**r}).status_code==200
 script="import getpass,sys; getpass.getpass=lambda *args:'recovery-password'; sys.argv=['wenshu','--recover-admin','admin']; from app.__main__ import main; main()"
 guard=RuntimeLock(config.data_dir()).acquire()
 try:
@@ -309,6 +324,42 @@ with sqlite3.connect(restored/'resource'/'app.db') as con:
     assert con.execute('SELECT count(*) FROM members').fetchone()[0]==4
     assert con.execute('SELECT owner_id FROM project_access WHERE article_id=?',(p,)).fetchone()[0]==bm['id']
     assert con.execute("SELECT count(*) FROM audit_events WHERE action='member.offline-recovery'").fetchone()[0]==1
+    assert con.execute('SELECT submission_id FROM human_finalizations WHERE snapshot_id=?',(p+'-v1',)).fetchone()[0]==s['id']
+    assert con.execute('SELECT message FROM human_comments WHERE id=?',(comment['id'],)).fetchone()[0]=='backup human history'
     path=con.execute('SELECT path FROM materials WHERE id=?',(mid,)).fetchone()[0]
 assert (restored/'resource'/path).is_file()
+""")
+
+
+def test_twenty_project_parallel_read_fixture(tmp_path):
+    scenario(tmp_path, """
+import concurrent.futures,time,json,statistics
+from pathlib import Path
+from app.storage import library
+projects=[]
+for i in range(20):
+    p=dao.create_article('local://fixture-'+str(i),title='fixture-'+str(i))['id'];projects.append(p)
+    if i%4 in (0,1):
+        db.execute('UPDATE project_access SET owner_id=? WHERE article_id=?',(bm['id'],p))
+        db.execute('INSERT INTO project_members VALUES(?,?,1,1)',(p,cm['id']))
+    elif i%4==2:
+        db.execute('INSERT INTO project_members VALUES(?,?,1,1)',(p,bm['id']))
+        db.execute('INSERT INTO project_members VALUES(?,?,1,1)',(p,dm['id']))
+    library.ingest_text('Fixed evidence for topic '+str(i),'Topic '+str(i),'article',p)
+db.execute('UPDATE project_access SET archived=1 WHERE article_id=?',(projects[-1],))
+def browse(client,count):
+    samples=[]
+    for i in range(15):
+        for path in ('/api/articles','/api/jobs','/api/team/work'):
+            start=time.perf_counter();response=client.get(path);samples.append((time.perf_counter()-start)*1000)
+            assert response.status_code==200,response.text
+            if path=='/api/articles':assert response.json()['total']==count
+    return samples
+with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+    results=list(pool.map(lambda args:browse(*args),[(b,15),(c,10),(d,5)]))
+samples=sorted(x for group in results for x in group)
+report={'projects':20,'identities':3,'requests':len(samples),'median_ms':round(statistics.median(samples),2),'p95_ms':round(samples[int(len(samples)*.95)-1],2),'transport':'in-process ASGI TestClient; not host/network benchmark'}
+output=Path('build/s7-validation');output.mkdir(parents=True,exist_ok=True)
+(output/'parallel-read.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
+assert db.query_one('SELECT count(*) AS n FROM project_access')['n']==20
 """)

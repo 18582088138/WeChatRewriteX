@@ -1,4 +1,15 @@
-# 产物清单（文枢 - 自媒体 Studio 1.0.0 / v1.0）
+# 产物清单（文枢 - 自媒体 Studio）
+
+## V1.0+ 本地候选：1.1.0-rc.1（2026-10-31）
+
+- 目录 `release/v1.1.0-rc.1/`：Windows x64 zip、`wenshu-1.1.0rc1-py3-none-any.whl`、`wenshu-1.1.0rc1.tar.gz`、`SHA256SUMS.txt`。本地交付，没有正式GitHub Release；正式v1.0附件保持原状。
+- 运行源码构建提交 `cf40afa502121233d0290b5a996cfd1b4706a339`，版本 `1.1.0-rc.1`，schema6，Python3.12.13/SQLite3.53.1/Node24.13.0/Playwright1.64.1。SemVer与PEP440文件名分别按各自规范。
+- Windows包含exe/_internal、当前SPA、Chromium headless shell1248、启动脚本、团队部署模板与完整文档。wheel带内置部署资产；sdist带团队代理/环境模板、前端源码与team-e2e。文档/验收脚本收尾后更新sdist及外置文档，三种产物内嵌manifest保持实际运行源码提交。
+- 最终120后端、7旧浏览器、3团队浏览器通过；独立安装wheel团队/旧模式、Windows独立runtime冷启动四平台/权限/完整备份恢复、实际v1.0升级/旧程序回退通过。详情与失败修复见[S7验收记录](../v1-plus/S7-acceptance.md)。
+- SHA256以目录内最终SHA256SUMS.txt为准；本机额外字节数/溯源清单在 `build/s7-validation/artifact-inventory.json`。候选源码固定标签 `v1.1.0-rc.1`；最终验收文档在dev/v1-plus。
+- Linux二进制、Docker/真实服务安装、家庭主机/手机实机/外地成员、异地备份与3～7日试运行未验收。远端GitHub Actions状态因连接重置/API限流未确认。Python依赖锁文件不存在，未验证完全锁依赖重现。
+
+## 正式v1.0产物与历史记录
 
 版本以 app/__init__.py 为单一来源。本次将开发迭代 V1.18 的最新 main 正式定为 v1.0，程序版本 1.0.0；范围与兼容说明见 [V1.0](V1.0.md)。下面 V1.15～V1.18 验收章节保留历史记录。
 

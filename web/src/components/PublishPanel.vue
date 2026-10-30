@@ -5,7 +5,7 @@ import { api } from '../api'
 import { useAppStore } from '../stores/app'
 import type { PublishJob } from '../types'
 
-const props = defineProps<{ articleId: string }>()
+const props = defineProps<{ articleId: string; teamMode?: boolean; canRelease?: boolean }>()
 const message = useMessage()
 const store = useAppStore()
 
@@ -139,8 +139,7 @@ function jobMessage(j: PublishJob): string {
       <div class="panel p-5">
         <div class="font-semibold mb-1">选择平台，生成发布包</div>
         <div class="text-xs mb-4" style="color: var(--faint);">
-          一阶段统一导出到本地发布包（文章素材文件夹 exports/ 各平台固定目录，成功后替换），由你在各平台手动发布；
-          自动推送草稿箱为二阶段能力。
+          生成已定稿内容的发布包，由维护负责人或管理员在平台手动发布。获授权成员可以下载既有发布包。
         </div>
         <div class="space-y-2">
           <div v-for="p in PLATFORMS" :key="p.key"
@@ -160,17 +159,17 @@ function jobMessage(j: PublishJob): string {
                 <span class="num"> · {{ latestByPlatform[p.key].created_at.slice(5, 16) }}</span>
               </div>
             </div>
-            <NButton v-if="latestByPlatform[p.key]?.status === 'failed'" size="tiny"
+            <NButton v-if="latestByPlatform[p.key]?.status === 'failed' && (!props.teamMode || props.canRelease)" size="tiny"
                      :loading="retrying.includes(p.key)"
                      @click="retryPlatform(p.key)">重试</NButton>
-            <button v-if="exportFiles.some(f => f.includes(`/exports/${p.key}/`))"
+            <button v-if="!props.teamMode && exportFiles.some(f => f.includes(`/exports/${p.key}/`))"
                     class="text-xs shrink-0 px-2 py-1 rounded hover:bg-[var(--surface)]"
                     style="color: var(--accent-ink); border: 1px solid var(--border);"
                     title="打开该平台发布包文件夹"
                     @click.stop="openPlatformDir(p.key)">打开文件夹</button>
           </div>
         </div>
-        <NButton block type="primary" class="mt-4" :loading="busy" @click="publish">
+        <NButton v-if="!props.teamMode || props.canRelease" block type="primary" class="mt-4" :loading="busy" @click="publish">
           生成发布包
         </NButton>
       </div>
@@ -229,7 +228,7 @@ function jobMessage(j: PublishJob): string {
         <div class="flex items-center mb-3 shrink-0">
           <div class="font-semibold">小红书卡片预览</div>
           <div class="flex-1"></div>
-          <NButton size="small" :loading="cardsBusy" @click="genCards">重新生成卡片</NButton>
+          <NButton v-if="!props.teamMode || props.canRelease" size="small" :loading="cardsBusy" @click="genCards">重新生成卡片</NButton>
         </div>
         <div v-if="cardFiles.length" class="grid grid-cols-3 gap-2 overflow-y-auto flex-1 min-h-0">
           <img v-for="f in cardFiles" :key="f" :src="api.fileUrl(f)"
