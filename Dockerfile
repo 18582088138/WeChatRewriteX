@@ -11,8 +11,8 @@ ENV PYTHONUNBUFFERED=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     WENSHU_DATA_DIR=/app/resource \
     WENSHU_LOG_DIR=/app/log
-COPY requirements.lock ./
-RUN pip install --no-cache-dir --require-hashes -r requirements.lock \
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt \
     && python -m playwright install --with-deps chromium \
     && useradd --uid 10001 --create-home wenshu \
     && mkdir -p /app/resource /app/log \
