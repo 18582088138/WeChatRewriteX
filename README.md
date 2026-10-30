@@ -7,6 +7,10 @@
 
 架构优化及升级注意事项见 [架构与升级说明](docs/ARCHITECTURE.md)。
 
+**当前正式版：v1.0（程序版本 1.0.0）**，完成图文内容创作基础功能，汇总开发迭代 V1.18 的成果。
+下载：[GitHub Release](https://github.com/18582088138/WeChatRewriteX/releases/tag/v1.0)；
+范围与升级说明：[v1.0 发布说明](docs/release/V1.0.md)。旧 V1.1～V1.18 为开发编号，正式版本从 v1.0 起重新建立序列。
+
 ## 快速开始
 
 **方式一：绿色执行包（无需 Python 环境，推荐）**
@@ -40,9 +44,9 @@ python -m app                 # → http://127.0.0.1:8000
 **方式三：pip 本地安装 / Docker**
 
 ```powershell
-pip install dist/wenshu-1.18.0.tar.gz; wenshu            # 源码包安装（交付 sdist）
-docker build -t wenshu-studio:1.18.0 .                   # 容器化（服务器批量部署，本版未预构建）
-docker run -d --env-file .env -p 8000:8000 wenshu-studio:1.18.0
+pip install dist/wenshu-1.0.0.tar.gz; wenshu            # 源码包安装（交付 sdist）
+docker build -t wenshu-studio:1.0.0 .                   # 容器化（服务器批量部署，本版未预构建）
+docker run -d --env-file .env -p 8000:8000 wenshu-studio:1.0.0
 ```
 
 发布包产物与部署细节见 [docs/release/ARTIFACTS.md](docs/release/ARTIFACTS.md) 与

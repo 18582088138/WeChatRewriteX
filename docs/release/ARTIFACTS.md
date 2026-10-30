@@ -1,13 +1,14 @@
-# 产物清单（文枢 - 自媒体 Studio 1.18.0）
+# 产物清单（文枢 - 自媒体 Studio 1.0.0 / v1.0）
 
-版本以 app/__init__.py 为单一来源。本轮基于 V1.17.1，详细修复和兼容说明见 [V1.18](V1.18.md)。
+版本以 app/__init__.py 为单一来源。本次将开发迭代 V1.18 的最新 main 正式定为 v1.0，程序版本 1.0.0；范围与兼容说明见 [V1.0](V1.0.md)。下面 V1.15～V1.18 验收章节保留历史记录。
 
 ## 当前交付状态
 
-- `release/v1.18.0/文枢-v1.18.0-windows-x64.zip`：exe + `_internal/`、启动脚本、Chromium 和完整文档；已重新构建，实际 exe 四平台隔离验收通过。
-- `release/v1.18.0/wenshu-1.18.0-py3-none-any.whl`、`wenshu-1.18.0.tar.gz`：已构建，独立 wheel 安装验收通过。
+- `release/v1.0.0/文枢-v1.0.0-windows-x64.zip`：exe + `_internal/`、当前前端、启动脚本、Chromium 和完整文档。
+- `release/v1.0.0/wenshu-1.0.0-py3-none-any.whl`、`wenshu-1.0.0.tar.gz`：Python 安装包及源码分发包。
 - Linux 独立二进制与 Docker：本轮未在本机构建/运行；工程中保留对应脚本。
 - `SHA256SUMS.txt`：最终覆盖 Windows zip、sdist 和 wheel。
+- GitHub 标签 `v1.0`，发布分支 `codex/release-v1.0`；下载页见 [GitHub Release](https://github.com/18582088138/WeChatRewriteX/releases/tag/v1.0)。附件完成构建与验收后才正式发布。
 
 ## 输出目录约定（V1.16）
 
@@ -70,7 +71,7 @@ Python/SQLite/Node/Playwright 信息。`--reuse-exe` 只有在内嵌版本及源
 
 V1.15 验收：87 项后端回归与 2 项真实浏览器流程通过（含四平台导出、定稿后自动开版和历史视图回滚），Vue 类型检查及生产构建通过。Windows exe、sdist、wheel 已生成；exe 与 wheel 隔离验收通过，未使用原项目数据库。exe 输出管道的中文编码问题已修复，内置 Chromium revision 为 1248。业务提交 436e27d 的 GitHub CI 已全部通过（Windows/Linux Python 3.10/3.12、浏览器与安装包、Docker）。
 
-冻结程序复验：`python scripts/frozen_smoke.py release/v1.18.0/文枢-v1.18.0-windows-x64`。该脚本使用临时空数据目录并屏蔽真实模型/搜索密钥。运行后只结束自己启动的 exe 进程树。
+冻结程序复验：`python scripts/frozen_smoke.py release/v1.0.0/文枢-v1.0.0-windows-x64`。该脚本使用临时空数据目录并屏蔽真实模型/搜索密钥。运行后只结束自己启动的 exe 进程树。
 
 ## V1.16 验收（2026-10-29）
 
