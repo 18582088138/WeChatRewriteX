@@ -3,14 +3,14 @@ recursive-include app/storage *.sql
 recursive-include app/services/cards/themes *.yaml *.html
 include README.md
 include .env.example
-include pyproject.toml requirements.lock requirements-dev.lock CHANGELOG.md Dockerfile .dockerignore
+include pyproject.toml requirements.txt requirements.lock requirements-dev.lock CHANGELOG.md Dockerfile .dockerignore
 include requirements-build.lock
 include .gitattributes
 recursive-include config *.yaml *.j2 *.md *.txt *.png
 recursive-include docs *.md *.json
 recursive-include scripts *.py *.bat *.ps1 *.sh
 recursive-include tools *.py
-recursive-include packaging *.spec *.sh
+recursive-include packaging *.spec *.sh *.ps1 *.yaml *.service
 recursive-include tests *.py *.md *.txt *.json *.png *.html
 recursive-include web/src *
 recursive-include web/e2e *.ts

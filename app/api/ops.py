@@ -303,9 +303,16 @@ def ready(request: Request) -> dict:
     workers_ok = not request.app.state.worker_enabled or bool(runtime and runtime.healthy())
     if not request.app.state.ready or not workers_ok:
         raise HTTPException(503, "服务未就绪")
+    from ..services.readiness import storage_status
+    from .. import logging_setup
+    try:
+        storage = storage_status({"data": config.data_dir(), "config": config.CONFIG_DIR,
+                                  "logs": logging_setup.log_dir()})
+    except (OSError, ValueError):
+        raise HTTPException(503, "持久存储不可写或可用空间不足")
     return {"ok": True, "workers": len(runtime.threads) if runtime else 0,
             "queue": {r["status"]: r["count"] for r in queue_counts},
-            "disk_free_mb": shutil.disk_usage(config.data_dir()).free // (1024 * 1024),
+            "disk_free_mb": storage["data"]["free_mb"], "storage": storage,
             "event_sequence": events.bus.sequence, "event_dropped": events.bus.dropped}
 
 

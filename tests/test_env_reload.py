@@ -67,6 +67,16 @@ def test_restart_only_settings_and_remote_token_are_guarded(env_file):
         config.reload_env()
 
 
+@pytest.mark.parametrize("key,value", [("WENSHU_RUNTIME_DIR", "new-root"), ("WENSHU_MIN_FREE_MB", "2")])
+def test_deployment_settings_cannot_hot_switch(env_file, key, value):
+    path, manager = env_file
+    path.write_text(f"DEEPSEEK_API_KEY=new\n{key}={value}", encoding="utf-8")
+    with pytest.raises(ValueError, match="重启"):
+        config.reload_env()
+    assert not config.get_env("DEEPSEEK_API_KEY")
+    assert manager.generation == 0
+
+
 def test_reload_api_immediately_changes_actual_model_authorization(env_file, app_client, monkeypatch):
     from app.services.llm import router
     path, _ = env_file

@@ -37,9 +37,27 @@ else:                                       # pip 安装态：包内资产 → �
     RUNTIME_ROOT = Path.cwd()
     BUNDLE_ROOT = Path(__file__).resolve().parent.parent / "_assets"
 
+# Select this before importing config (CLI --runtime-dir or process environment).
+# Writable state stays outside the replaceable source/image/executable directory.
+_runtime_override = os.environ.get("WENSHU_RUNTIME_DIR")
+if _runtime_override:
+    RUNTIME_ROOT = Path(_runtime_override).expanduser().resolve()
+
 PROJECT_ROOT = RUNTIME_ROOT                 # 兼容旧引用（可写运行根）
 CONFIG_DIR = RUNTIME_ROOT / "config"
 DATA_DIR = RUNTIME_ROOT / "data"
+WEB_ROOT = (BUNDLE_ROOT if _runtime_override else RUNTIME_ROOT) / "web" / "dist"
+
+
+def _seed_file(source: Path, destination: Path) -> None:
+    """Create missing defaults only; never overwrite a user file on upgrade."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    content = source.read_bytes()
+    try:
+        with destination.open("xb") as stream:
+            stream.write(content)
+    except FileExistsError:
+        pass
 
 
 def ensure_runtime_assets() -> None:
@@ -51,16 +69,20 @@ def ensure_runtime_assets() -> None:
         return
     try:
         src_cfg = BUNDLE_ROOT / "config"
-        if src_cfg.is_dir() and not (CONFIG_DIR / "settings.yaml").exists():
-            shutil.copytree(src_cfg, CONFIG_DIR, dirs_exist_ok=True)
+        if src_cfg.is_dir():
+            for source in src_cfg.rglob("*"):
+                if source.is_file():
+                    _seed_file(source, CONFIG_DIR / source.relative_to(src_cfg))
         src_web = BUNDLE_ROOT / "web" / "dist"
         dst_web = RUNTIME_ROOT / "web" / "dist"
-        if src_web.is_dir() and not (dst_web / "index.html").exists():
+        if not _runtime_override and src_web.is_dir() and not (dst_web / "index.html").exists():
             shutil.copytree(src_web, dst_web, dirs_exist_ok=True)
         src_env = BUNDLE_ROOT / ".env.example"
         if src_env.is_file() and not (RUNTIME_ROOT / ".env").exists():
-            shutil.copy(src_env, RUNTIME_ROOT / ".env")
+            _seed_file(src_env, RUNTIME_ROOT / ".env")
     except OSError:
+        if _runtime_override:
+            raise RuntimeError("无法初始化持久运行目录，请检查目录权限和可用空间")
         pass        # 播种失败不致命：默认值兜底，界面首启再提示
 
 
@@ -244,7 +266,8 @@ def data_dir() -> Path:
     # 测试/便携模式可覆盖数据目录；旧名 WRA_DATA_DIR 仅作兼容回退
     env = os.environ.get("WENSHU_DATA_DIR") or os.environ.get("WRA_DATA_DIR")
     if env:
-        return Path(env)
+        d = Path(env).expanduser()
+        return d if d.is_absolute() else RUNTIME_ROOT / d
     d = Path(get("storage.data_dir", "data"))
     return d if d.is_absolute() else RUNTIME_ROOT / d
 

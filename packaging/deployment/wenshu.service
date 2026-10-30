@@ -1,0 +1,22 @@
+# Template: replace /opt/wenshu/current and /srv/wenshu, create user wenshu first.
+[Unit]
+Description=Wenshu single-instance application
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=wenshu
+Group=wenshu
+WorkingDirectory=/srv/wenshu
+ExecStart=/opt/wenshu/current/venv/bin/python -m app --runtime-dir /srv/wenshu --data-dir /srv/wenshu/resource --log-dir /srv/wenshu/log --host 127.0.0.1 --no-browser
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=60
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

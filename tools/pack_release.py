@@ -116,6 +116,7 @@ def bundle_browsers(pkg_dir: Path) -> None:
 def copy_docs(dst: Path) -> None:
     # Preserve repository-relative links, including deployment -> architecture.
     shutil.copytree(ROOT / "docs", dst / "docs", dirs_exist_ok=True)
+    shutil.copytree(ROOT / "packaging" / "deployment", dst / "packaging" / "deployment", dirs_exist_ok=True)
     for name in ("README.md", "CHANGELOG.md"):
         shutil.copy(ROOT / name, dst / name)
     # Keep the entry points used by older release packages.

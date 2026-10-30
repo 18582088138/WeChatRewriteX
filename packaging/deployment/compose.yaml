@@ -1,0 +1,21 @@
+# Run with an external project directory: docker compose --project-directory <deployment> -f <this-file> up -d
+# Build on the development machine, then transfer the image with docker save/load.
+services:
+  wenshu:
+    image: ${WENSHU_IMAGE:-wenshu:s1-local}
+    restart: unless-stopped
+    stop_grace_period: 60s
+    init: true
+    ports:
+      - "${WENSHU_BIND_IP:-127.0.0.1}:${WENSHU_PORT:-8000}:8000"
+    env_file:
+      - ./runtime/.env
+    environment:
+      WENSHU_RUNTIME_DIR: /app/state
+      WENSHU_DATA_DIR: /app/state/resource
+      WENSHU_LOG_DIR: /app/state/log
+    volumes:
+      - ./runtime:/app/state
+      - ./backups:/backups
+    security_opt:
+      - no-new-privileges:true
