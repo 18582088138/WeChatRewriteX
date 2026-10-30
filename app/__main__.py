@@ -27,6 +27,7 @@ def main() -> None:
     maintenance = parser.add_mutually_exclusive_group()
     maintenance.add_argument("--backup", metavar="DESTINATION", help="停服务后完整备份数据、配置与 .env 到全新外部目录")
     maintenance.add_argument("--restore", metavar="BACKUP", help="校验并恢复完整备份，--runtime-dir 必须为全新目录")
+    maintenance.add_argument("--init-admin", metavar="LOGIN", help="停服务后初始化团队管理员（密码交互输入，不写命令行）")
     parser.add_argument("--install-browser", action="store_true",
                         help="安装小红书卡片渲染所需的 Chromium（首次使用卡片功能前执行一次）")
     args = parser.parse_args()
@@ -61,6 +62,20 @@ def main() -> None:
         return
 
     from .core import config
+    if args.init_admin:
+        import getpass
+        from .services import team
+        from .pipeline.runtime_lock import RuntimeLock
+        from .storage import db
+        os.environ["WENSHU_TEAM_MODE"] = "1"
+        guard = RuntimeLock(config.data_dir()).acquire()
+        try:
+            db.init_db()
+            team.initialize_admin(args.init_admin, args.init_admin, getpass.getpass("管理员密码（至少10字符）："))
+            print("管理员初始化完成；请启动服务并使用成员账号登录")
+        finally:
+            guard.close()
+        return
     if args.backup:
         from .services.instance_backup import backup_instance
         backup_instance(config.RUNTIME_ROOT, config.data_dir(), Path(args.backup))
@@ -70,9 +85,10 @@ def main() -> None:
         loopback = ipaddress.ip_address(args.host).is_loopback
     except ValueError:
         loopback = args.host == "localhost"
-    if not loopback and not config.get_env("APP_ACCESS_TOKEN"):
+    from .services import team
+    if not loopback and not config.get_env("APP_ACCESS_TOKEN") and not team.enabled():
         parser.error("远程绑定必须设置 APP_ACCESS_TOKEN")
-    config.environment.require_token = not loopback
+    config.environment.require_token = not loopback and not team.enabled()
     import uvicorn
     print(f"{APP_FULL_NAME} v{APP_VERSION}  →  http://{args.host}:{args.port}")
     if not args.no_browser and not args.reload:

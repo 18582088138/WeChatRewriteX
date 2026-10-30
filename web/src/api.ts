@@ -14,8 +14,11 @@ function authHeaders(json = false): Record<string, string> {
   const headers: Record<string, string> = json ? { 'Content-Type': 'application/json' } : {}
   const token = getToken()
   if (token) headers.Authorization = 'Bearer ' + token
+  if (memberCsrf) headers['X-Wenshu-CSRF'] = memberCsrf
   return headers
 }
+
+let memberCsrf = ''
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number, readonly code?: string) { super(message) }
@@ -35,7 +38,9 @@ async function request<T = any>(method: string, url: string, body?: unknown, sig
     } catch { /* ignore */ }
     throw new ApiError(detail, resp.status)
   }
-  return resp.json() as Promise<T>
+  const result = await resp.json()
+  if (result.csrf) memberCsrf = result.csrf
+  return result as T
 }
 
 export const api = {

@@ -6,7 +6,7 @@ import time
 
 from ..core import events
 from ..core.models import ArticleStatus
-from ..storage import dao
+from ..storage import dao, db
 from . import orchestrator
 
 _handlers: dict[str, callable] = {}
@@ -110,6 +110,9 @@ def _run_publish(article_id: str, payload: dict) -> dict:
 
 
 def enqueue(job_type: str, article_id: str | None = None, payload: dict | None = None) -> str:
+    from ..services import team
+    if team.enabled() and team.actor.get():
+        payload = {**(payload or {}), "_member_id": team.actor.get()["id"]}
     jid = dao.enqueue_job(job_type, article_id, payload)
     from ..storage import db
     db.after_commit(lambda: events.bus.publish("job.enqueued", article_id, job_id=jid, job_type=job_type))
@@ -117,7 +120,12 @@ def enqueue(job_type: str, article_id: str | None = None, payload: dict | None =
 
 
 def _loop(runtime: WorkerRuntime, lane_types: tuple[str, ...]) -> None:
+    from ..storage import db
     while not runtime.stop_event.is_set():
+        from ..services import team
+        if team.enabled() and not db.query_one("SELECT id FROM members WHERE enabled=1 AND role='admin' LIMIT 1"):
+            runtime.stop_event.wait(1)
+            continue
         job = None
         try:
             job = dao.claim_job(lane_types)
@@ -129,8 +137,24 @@ def _loop(runtime: WorkerRuntime, lane_types: tuple[str, ...]) -> None:
         if job is None:
             runtime.stop_event.wait(0.5)
             continue
+        from ..services import team
+        import json
+        payload = json.loads(job.get("payload_json") or "{}")
+        member = None
+        member_ctx = op_ctx = None
+        if team.enabled():
+            member = db.query_one(
+                "SELECT * FROM members WHERE id=? AND enabled=1", (payload.get("_member_id"),))
+            if not member or (job["article_id"] and not team.allowed(member, job["article_id"], "release" if job["type"] == "publish" else "write")):
+                dao.fail_job(job["id"], "成员权限已撤销或旧任务尚未确认责任")
+                continue
+            member_ctx = team.actor.set(member)
+            op_ctx = team.operation.set((job["article_id"], "release" if job["type"] == "publish" else "write"))
         handler = runtime.handlers.get(job["type"])
         if not handler:
+            if member_ctx is not None:
+                team.operation.reset(op_ctx)
+                team.actor.reset(member_ctx)
             dao.fail_job(job["id"], f"无处理器: {job['type']}")
             continue
         from .. import logging_setup
@@ -154,6 +178,10 @@ def _loop(runtime: WorkerRuntime, lane_types: tuple[str, ...]) -> None:
                               "任务执行结束 %s (article=%s, result=%s)", job["type"], job["article_id"],
                               result.get("status", "done") if isinstance(result, dict) else "done")
         except Exception as e:
+            if member_ctx is not None:
+                team.operation.reset(op_ctx)
+                team.actor.reset(member_ctx)
+                member_ctx = None
             from ..services.draft_service import VersionConflict
             from ..core.statemachine import InvalidTransition
             requeue = job["attempts"] < MAX_ATTEMPTS and not isinstance(e, (ValueError, VersionConflict, InvalidTransition))
@@ -166,6 +194,9 @@ def _loop(runtime: WorkerRuntime, lane_types: tuple[str, ...]) -> None:
                     orchestrator.mark_failed(job["article_id"], str(e))
         finally:
             context.reset(ctx_token)
+            if member_ctx is not None:
+                team.operation.reset(op_ctx)
+                team.actor.reset(member_ctx)
 
 
 def recover_interrupted() -> None:
