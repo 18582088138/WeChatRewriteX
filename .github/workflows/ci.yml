@@ -50,6 +50,12 @@ jobs:
           mkdir -p build/smoke-cwd
           cd build/smoke-cwd
           ../smoke-env/bin/python ../../scripts/package_smoke.py
+      - name: Installed team wheel collaboration and restore
+        shell: bash
+        run: |
+          mkdir -p build/team-smoke-cwd
+          cd build/team-smoke-cwd
+          ../smoke-env/bin/python ../../scripts/team_package_smoke.py
       - uses: actions/upload-artifact@v4
         with:
           name: distribution
