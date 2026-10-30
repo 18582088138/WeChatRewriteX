@@ -16,7 +16,8 @@ from dotenv.variables import parse_variables
 
 lock = threading.RLock()
 RESTART_KEYS = frozenset({"WENSHU_DATA_DIR", "WRA_DATA_DIR", "WENSHU_CORS_ORIGINS",
-                          "PLAYWRIGHT_BROWSERS_PATH", "WENSHU_LOG_DIR", "PATH", "PYTHONPATH"})
+                          "PLAYWRIGHT_BROWSERS_PATH", "WENSHU_LOG_DIR", "WENSHU_RUNTIME_DIR",
+                          "WENSHU_MIN_FREE_MB", "PATH", "PYTHONPATH"})
 
 
 class _Scope(dict):
@@ -57,6 +58,8 @@ class Environment:
             if startup:
                 target.update({key: self.baseline[key] for key in touched if key in self.baseline})
             changes = {key for key in touched if os.environ.get(key) != target[key]}
+            if startup and "WENSHU_RUNTIME_DIR" in changes:
+                raise ValueError("WENSHU_RUNTIME_DIR 必须通过启动参数或进程环境设置，不能从 .env 切换运行目录")
             if not startup and changes & RESTART_KEYS:
                 raise ValueError("以下环境变量变更需要重启，未应用任何改动：" + ", ".join(sorted(changes & RESTART_KEYS)))
             # A remotely bound process must never lose its authentication guard.

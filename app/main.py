@@ -21,7 +21,7 @@ from .core.config import RUNTIME_ROOT, data_dir
 from .pipeline import hooks, queue
 from .storage import dao, db
 
-WEB_DIST = RUNTIME_ROOT / "web" / "dist"
+WEB_DIST = config.WEB_ROOT
 
 
 def create_app(start_worker: bool = True, llm=None) -> FastAPI:
@@ -31,6 +31,8 @@ def create_app(start_worker: bool = True, llm=None) -> FastAPI:
         app.state.import_watcher = False
         startup_started = time.perf_counter()
         try:
+            from .services.readiness import minimum_free_mb
+            minimum_free_mb()
             app.state.runtime = queue.start(llm) if start_worker else None
             if not start_worker:
                 db.init_db()

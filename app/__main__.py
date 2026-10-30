@@ -8,6 +8,11 @@ from . import APP_FULL_NAME, APP_ID, APP_VERSION
 
 
 def main() -> None:
+    # Scheduled/background Windows processes may use an ASCII/cp1252 pipe.
+    # Startup/version/maintenance diagnostics must not crash on Chinese text.
+    for stream in (sys.stdout, sys.stderr):
+        if stream is not None and hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(prog=APP_ID, description=APP_FULL_NAME)
     parser.add_argument("--version", action="version", version=f"{APP_FULL_NAME} {APP_VERSION}")
     parser.add_argument("--build-info", action="store_true", help="显示内嵌构建溯源信息后退出")
@@ -16,6 +21,12 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--reload", action="store_true", help="开发模式（仅源码运行可用）")
     parser.add_argument("--no-browser", action="store_true", help="启动后不自动打开浏览器")
+    parser.add_argument("--runtime-dir", help="独立持久运行目录（配置、.env、数据、日志），不随程序升级替换")
+    parser.add_argument("--data-dir", help="显式数据根，优先于持久 .env 和 settings.yaml")
+    parser.add_argument("--log-dir", help="显式日志目录，优先于持久 .env 和 settings.yaml")
+    maintenance = parser.add_mutually_exclusive_group()
+    maintenance.add_argument("--backup", metavar="DESTINATION", help="停服务后完整备份数据、配置与 .env 到全新外部目录")
+    maintenance.add_argument("--restore", metavar="BACKUP", help="校验并恢复完整备份，--runtime-dir 必须为全新目录")
     parser.add_argument("--install-browser", action="store_true",
                         help="安装小红书卡片渲染所需的 Chromium（首次使用卡片功能前执行一次）")
     args = parser.parse_args()
@@ -28,11 +39,32 @@ def main() -> None:
         print(manifest.read_text(encoding="utf-8") if manifest.exists() else json.dumps({"version": APP_VERSION}))
         return
 
+    import os
+    from pathlib import Path
+    if args.runtime_dir:
+        os.environ["WENSHU_RUNTIME_DIR"] = str(Path(args.runtime_dir).expanduser().resolve())
+    if args.data_dir:
+        os.environ["WENSHU_DATA_DIR"] = str(Path(args.data_dir).expanduser().resolve())
+    if args.log_dir:
+        os.environ["WENSHU_LOG_DIR"] = str(Path(args.log_dir).expanduser().resolve())
+    if args.restore:
+        from .services.instance_backup import restore_instance
+        target = args.runtime_dir or os.environ.get("WENSHU_RUNTIME_DIR")
+        if not target:
+            parser.error("恢复必须明确指定 --runtime-dir 或 WENSHU_RUNTIME_DIR，且目标目录不得已存在")
+        restore_instance(Path(args.restore), Path(target))
+        return
+
     if args.install_browser:
+        from .core import config  # Configure the bundled browser path as on normal startup.
         _install_browser()
         return
 
     from .core import config
+    if args.backup:
+        from .services.instance_backup import backup_instance
+        backup_instance(config.RUNTIME_ROOT, config.data_dir(), Path(args.backup))
+        return
     import ipaddress
     try:
         loopback = ipaddress.ip_address(args.host).is_loopback
