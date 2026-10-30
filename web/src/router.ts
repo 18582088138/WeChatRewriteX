@@ -9,11 +9,12 @@ export const router = createRouter({
     { path: '/articles/:id', name: 'workbench', component: () => import('./views/Workbench.vue') },
     { path: '/settings', name: 'settings', component: () => import('./views/Settings.vue') },
     { path: '/team', name: 'team', component: () => import('./views/TeamAdmin.vue') },
+    { path: '/shared', name: 'shared', component: () => import('./views/SharedMaterials.vue') },
   ],
 })
 
 router.beforeEach(async to => {
-  if (!['settings','team'].includes(String(to.name))) return true
+  if (!['settings','team','shared'].includes(String(to.name))) return true
   try {
     const status = await api.get('/api/auth/status')
     if (status.team_mode && (await api.get('/api/auth/me')).member.role !== 'admin') return '/articles'

@@ -10,6 +10,7 @@ import MaterialsPanel from '../components/MaterialsPanel.vue'
 import BlockEditor from '../components/BlockEditor.vue'
 import ReviewPanel from '../components/ReviewPanel.vue'
 import PublishPanel from '../components/PublishPanel.vue'
+import ProjectAccess from '../components/ProjectAccess.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -25,6 +26,8 @@ store.invalidateArticle(aid.value)
 const article = ref<Article | null>(null)
 const tab = ref('create')
 const busy = ref(false)
+const teamMode = ref(false)
+onMounted(async () => { teamMode.value = (await api.get('/api/auth/status')).team_mode })
 const editorRef = ref<InstanceType<typeof BlockEditor> | null>(null)
 
 /** 去审稿：跳到审稿页；若尚未审稿（DRAFTED）则同时触发审稿任务 */
@@ -197,6 +200,7 @@ const logExpanded = ref(false)   // 默认收起；点击才展开（不再随�
       </div>
 
       <NTabs v-model:value="tab" type="line" animated size="large">
+        <NTabPane v-if="teamMode" name="access" tab="项目权限"><ProjectAccess :article-id="aid" /></NTabPane>
         <NTabPane name="materials" tab="素材库">
           <MaterialsPanel :article-id="aid" @insert-refs="onInsertRefs"
                           @import-create="onImportCreate" />

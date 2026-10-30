@@ -115,6 +115,9 @@ async def authorize(request, member):
         capability = "release"
     if suffix.startswith("access"):
         capability = "read" if method in ("GET", "HEAD") else "manage"
+        if suffix == "access/adopt-jobs":
+            team.admin()
+            return ("admin", "manage")
     team.require(aid, capability)
     if not dao.get_article(aid):
         raise HTTPException(404, "项目不存在")
