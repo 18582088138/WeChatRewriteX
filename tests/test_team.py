@@ -44,7 +44,7 @@ for client in (a,b,c,d):
                     elif kind=='drafts': aid=oid.rsplit('-v',1)[0]
             row=db.query_one('SELECT revision FROM project_access WHERE article_id=?',(aid,)) if aid else None
             if row:headers['X-Wenshu-Project-Revision']=str(row['revision'])
-        return _original(method,url,headers=headers,**kwargs)
+        return _original(method,str(url).replace(chr(92),'/'),headers=headers,**kwargs)
     client.request=guarded
 """
 
@@ -95,7 +95,8 @@ assert d.get('/api/articles/'+p).status_code == 404
 assert d.get('/api/articles?q=private-keyword').json()['total'] == 0
 assert d.get('/api/materials/'+mid+'/text').status_code == 404
 assert d.get('/files/'+material['path']).status_code == 404
-assert b.get('/files/'+material['path']).status_code == 200
+file_response=b.get('/files/'+material['path'])
+assert file_response.status_code == 200,(file_response.status_code,file_response.text,file_response.url)
 db.execute('INSERT INTO project_members VALUES(?,?,1,1)',(p,cm['id']))
 assert c.get('/api/articles/'+p).status_code == 200
 q = d.post('/api/articles',json={'title':'other','auto_collect':False}).json()['article']['id']
@@ -152,7 +153,8 @@ dest=dao.get_material(copied.json()['material_id']); source=dao.get_material(mid
 assert dest['path'] != source['path'] and dest['source_material_id']==mid
 assert a.put('/api/materials/'+mid+'/sharing',json={'shared':False}).status_code==200
 assert b.get('/files/'+source['path']).status_code==404
-assert b.get('/files/'+dest['path']).status_code==200
+file_response=b.get('/files/'+dest['path'])
+assert file_response.status_code==200,(file_response.status_code,file_response.text,file_response.url)
 body.update(expected_revision=b.get('/api/articles/'+p+'/access').json()['revision'],owner_id=cm['id'],archived=True,members=[])
 assert b.put('/api/articles/'+p+'/access',json=body).status_code==200
 assert b.get('/api/articles/'+p).status_code==404
