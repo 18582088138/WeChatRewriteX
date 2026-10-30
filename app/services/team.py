@@ -13,6 +13,7 @@ from ..storage import db
 
 actor = ContextVar("member", default=None)
 operation = ContextVar("authorized_operation", default=None)
+write_guard = ContextVar("project_write_guard", default=None)
 _active = False
 
 SCHEMA = """
@@ -196,6 +197,19 @@ def recheck():
                 raise HTTPException(403, "管理权限已撤销")
         elif op[0]:
             require(op[0], op[1], current)
+    guard = write_guard.get()
+    if guard:
+        row = db.query_one("SELECT revision FROM project_access WHERE article_id=?", (guard["aid"],))
+        if not row or row["revision"] != guard["revision"]:
+            raise HTTPException(409, "项目已被其他成员更新；保留本地输入，刷新核对后重试")
+
+
+def advance_guard():
+    guard = write_guard.get()
+    if guard:
+        db.execute("UPDATE project_access SET revision=revision+1 WHERE article_id=?", (guard["aid"],))
+        return guard["revision"] + 1
+    return None
 
 
 def visibility(column="id"):

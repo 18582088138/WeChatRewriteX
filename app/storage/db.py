@@ -72,7 +72,10 @@ def transaction(write: bool = True):
                 from ..services import team
                 team.recheck()
             yield conn
+            next_revision = team.advance_guard() if write else None
             conn.commit()
+            if next_revision is not None:
+                team.write_guard.get()["revision"] = next_revision
         except BaseException:
             conn.rollback()
             raise
@@ -105,7 +108,7 @@ def init_db() -> None:
     data_dir().mkdir(parents=True, exist_ok=True)
     with connect() as conn:
         previous = conn.execute("PRAGMA user_version").fetchone()[0]
-        if previous > 5:
+        if previous > 6:
             raise RuntimeError("数据库来自更新版本，拒绝降级写入；请使用匹配程序或完整备份恢复")
         if previous < 3 and conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='articles'").fetchone():
             backups = data_dir() / "backups"

@@ -145,6 +145,8 @@ def retry_publish(aid: str, body: RetryPublish) -> dict:
         payload["platforms"] = [body.platform] if body.platform else platforms
         payload["retry_of"] = job["id"]
         job_id = queue.enqueue("publish", aid, payload)
+        from ..services import team
+        team.audit("export.retry", job_id, aid, {"snapshot_id": snapshot["id"], "platforms": payload["platforms"]})
         return {"job_id": job_id, "platforms": payload["platforms"], "snapshot_id": snapshot["id"]}
 
 
@@ -172,6 +174,8 @@ def publish(aid: str, body: Publish) -> dict:
         job_id = queue.enqueue("publish", aid, {"platforms": list(dict.fromkeys(platforms)),
                            "snapshot_id": draft["id"], "assets": approved_assets if approved_assets is not None else assets.manifest(doc),
                            "settings": config.all_settings()})
+        from ..services import team
+        team.audit("export.enqueue", job_id, aid, {"snapshot_id": draft["id"], "platforms": platforms})
     return {"job_id": job_id, "platforms": platforms}
 
 

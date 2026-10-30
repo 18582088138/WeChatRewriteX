@@ -11,6 +11,8 @@ from fastapi.testclient import TestClient
 from app.main import create_app
 from app.storage import db, dao
 from app.services import team
+import sys,traceback
+sys.excepthook=lambda *args: traceback.print_exception(*args,file=sys.__stdout__)
 stack = ExitStack()
 a = stack.enter_context(TestClient(create_app(start_worker=False)))
 admin = team.initialize_admin('admin', '管理员', 'admin-password')
@@ -25,6 +27,25 @@ def sign(client, login, password):
     assert result.status_code == 200, result.text
     client.headers['X-Wenshu-CSRF'] = result.json()['csrf']
 sign(a,'admin','admin-password'); sign(b,'writer','writer-password'); sign(c,'maintainer','maintainer-password'); sign(d,'outsider','outsider-password')
+import re
+for client in (a,b,c,d):
+    original = client.request
+    def guarded(method,url,*,_original=original,**kwargs):
+        headers=dict(kwargs.pop('headers',{}) or {})
+        if method.upper() not in ('GET','HEAD','OPTIONS') and 'X-Wenshu-Project-Revision' not in headers:
+            match=re.search('/api/articles/([^/]+)',str(url)); aid=match.group(1) if match else None
+            if not aid:
+                match=re.search('/api/(drafts|materials|review-items)/([^/]+)',str(url))
+                if match:
+                    kind,oid=match.groups()
+                    if kind=='materials':
+                        m=dao.get_material(oid);aid=m['article_id'] if m else None
+                        aid=(kwargs.get('json') or {}).get('article_id',aid)
+                    elif kind=='drafts': aid=oid.rsplit('-v',1)[0]
+            row=db.query_one('SELECT revision FROM project_access WHERE article_id=?',(aid,)) if aid else None
+            if row:headers['X-Wenshu-Project-Revision']=str(row['revision'])
+        return _original(method,url,headers=headers,**kwargs)
+    client.request=guarded
 """
 
 
@@ -37,7 +58,8 @@ def scenario(tmp_path, code):
             env[key] = ""
     result = subprocess.run([sys.executable, "-X", "utf8", "-c", PREFIX + code + "\nstack.close()"],
         cwd=ROOT, env=env, capture_output=True, text=True, encoding="utf-8", timeout=60)
-    assert result.returncode == 0, result.stdout + result.stderr
+    logs = tmp_path / "logs" / "wenshu.log"
+    assert result.returncode == 0, result.stdout + result.stderr + (logs.read_text(encoding="utf-8")[-4000:] if logs.exists() else "")
 
 
 def test_member_sessions_csrf_and_last_administrator(tmp_path):
@@ -81,9 +103,9 @@ assert d.put('/api/articles/'+q+'/selection',json={'material_ids':[mid]}).status
 db.execute('DELETE FROM project_members WHERE article_id=? AND member_id=?',(p,cm['id']))
 assert c.get('/files/'+material['path']).status_code == 404
 assert b.post('/api/articles/'+p+'/finalize',json={}).status_code == 404
-assert db.query_one('PRAGMA user_version')['user_version'] == 5
+assert db.query_one('PRAGMA user_version')['user_version'] == 6
 db.init_db()
-assert db.query_one('PRAGMA user_version')['user_version'] == 5
+assert db.query_one('PRAGMA user_version')['user_version'] == 6
 """)
 
 
@@ -131,7 +153,7 @@ assert dest['path'] != source['path'] and dest['source_material_id']==mid
 assert a.put('/api/materials/'+mid+'/sharing',json={'shared':False}).status_code==200
 assert b.get('/files/'+source['path']).status_code==404
 assert b.get('/files/'+dest['path']).status_code==200
-body.update(expected_revision=1,owner_id=cm['id'],archived=True,members=[])
+body.update(expected_revision=b.get('/api/articles/'+p+'/access').json()['revision'],owner_id=cm['id'],archived=True,members=[])
 assert b.put('/api/articles/'+p+'/access',json=body).status_code==200
 assert b.get('/api/articles/'+p).status_code==404
 assert c.get('/api/articles/'+p).status_code==200
@@ -206,4 +228,51 @@ assert b.post('/api/articles/'+p+'/human-review',json={'reviewer_id':bm['id'],**
 assert b.patch('/api/materials/'+mid,json={'title':'new evidence title'}).status_code==200
 assert not b.get('/api/articles/'+p+'/human-review').json()['valid_approval']
 assert b.put('/api/team/settings',json={'self_review':True}).status_code==403
+""")
+
+
+def test_concurrent_guards_late_ai_revocation_and_expiring_lease(tmp_path):
+    scenario(tmp_path, """
+import threading,time
+from app.core.models import DraftDoc,Block,ArticleStatus
+from app.services import draft_service
+from app.agents.creator import CreatorAgent
+p=b.post('/api/articles',json={'title':'race','auto_collect':False}).json()['article']['id']
+assert b.put('/api/articles/'+p+'/access',json={'expected_revision':0,'owner_id':bm['id'],'members':[{'member_id':cm['id'],'can_create':True,'can_review':True}]}).status_code==200
+doc=draft_service.save_new_version(DraftDoc(id=p+'-v0',article_id=p,version=0,blocks=[Block(id='b',type='paragraph',text='Original')]),'create');dao.set_article_status(p,ArticleStatus.DRAFTED)
+token=b.get('/api/articles/'+p).headers['X-Wenshu-Project-Revision']
+body={'expected_revision':doc.edit_revision,'ops':[{'op':'update','block_id':'b','text':'B saved'}]}
+assert b.put('/api/drafts/'+p+'-v1/edit',json=body,headers={'X-Wenshu-Project-Revision':token}).status_code==200
+body['ops'][0]['text']='C local input'
+assert c.put('/api/drafts/'+p+'-v1/edit',json=body,headers={'X-Wenshu-Project-Revision':token}).status_code==409
+assert c.put('/api/drafts/'+p+'-v1/edit',json=body,headers={'X-Wenshu-Project-Revision':''}).status_code==428
+assert draft_service.get_doc(p)[0].blocks[0].text=='B saved'
+def revision(): return draft_service.get_doc(p)[0].edit_revision
+started=threading.Event();release=threading.Event()
+CreatorAgent.llm_available=lambda self:True
+def fake(self,aid,new,bids,instruction):
+    started.set();assert release.wait(10);new.blocks[0].text='Late AI';return new
+CreatorAgent.regenerate_blocks=fake
+out=[]
+t=threading.Thread(target=lambda:out.append(c.post('/api/drafts/'+p+'-v1/regenerate',json={'expected_revision':revision(),'block_ids':['b']})))
+t.start();assert started.wait(10)
+assert b.put('/api/drafts/'+p+'-v1/edit',json={'expected_revision':revision(),'ops':[{'op':'update','block_id':'b','text':'Human wins'}]}).status_code==200
+release.set();t.join(10);assert out[0].status_code==409,out[0].text
+assert draft_service.get_doc(p)[0].blocks[0].text=='Human wins'
+started.clear();release.clear();out.clear()
+t=threading.Thread(target=lambda:out.append(c.post('/api/drafts/'+p+'-v1/regenerate',json={'expected_revision':revision(),'block_ids':['b']})))
+t.start();assert started.wait(10)
+access=b.get('/api/articles/'+p+'/access').json()
+assert b.put('/api/articles/'+p+'/access',json={'expected_revision':access['revision'],'owner_id':bm['id'],'members':[]}).status_code==200
+release.set();t.join(10);assert out[0].status_code==404,out[0].text
+assert draft_service.get_doc(p)[0].blocks[0].text=='Human wins'
+lease=b.post('/api/articles/'+p+'/lease',json={'client_id':'browser-one'});assert lease.json()['acquired']
+assert not b.post('/api/articles/'+p+'/lease',json={'client_id':'browser-two'}).json()['acquired']
+db.execute('UPDATE edit_leases SET expires=?',(time.time()-1,))
+assert b.post('/api/articles/'+p+'/lease',json={'client_id':'browser-two'}).json()['acquired']
+assert d.get('/api/articles/'+p+'/audit').status_code==404
+assert b.get('/api/team/audit').status_code==403
+assert b.get('/api/team/work').status_code==200
+audit=b.get('/api/articles/'+p+'/audit').text
+assert 'password_hash' not in audit and 'csrf' not in audit and 'writer-password' not in audit
 """)

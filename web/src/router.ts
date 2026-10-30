@@ -10,6 +10,7 @@ export const router = createRouter({
     { path: '/settings', name: 'settings', component: () => import('./views/Settings.vue') },
     { path: '/team', name: 'team', component: () => import('./views/TeamAdmin.vue') },
     { path: '/shared', name: 'shared', component: () => import('./views/SharedMaterials.vue') },
+    { path: '/work', name: 'work', component: () => import('./views/WorkStation.vue') },
   ],
 })
 
