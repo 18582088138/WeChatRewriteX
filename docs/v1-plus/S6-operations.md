@@ -1,14 +1,16 @@
 # 团队主机安装与维护
 
-当前为公司开发机；家庭主机系统/架构/容量/网络/访问条件待查，未安装服务、Docker、代理或组网软件。
-下列流程是可执行材料；实际选择须以现有系统和网络为准，不要求重装系统。main/v1.0保持原状，候选程序替换与持久目录分开。
+2026-10-31部署目标已确认：使用当前家庭开发机Intel NUC8i5BEH，不再等待另一台小主机。系统为Windows11家庭版10.0.26300，i5-8259U（4核8线程），31.9GB内存；检查时C盘总475.2GB、可用32.1GB，当前业务resource约12MB。
+本机20项目/3身份/135次并行读取中位26.69ms、P95 58.73ms，Windows执行包冷启动、四平台导出、权限、人工批准和备份恢复已通过；满足3人、单实例、SQLite的本地部署准入。该指标包含进程内ASGI测试，不是跨网络性能承诺。
+目标路线为下方Windows绿色执行包+独立持久runtime+Windows计划任务，不要求Docker、Linux或重装系统。当前交流电下自动睡眠已设为从不；机器使用Wi-Fi，长期运行建议优先有线网络。
+尚未正式安装服务、注册计划任务、配置代理/组网或迁移真实数据。下列流程是可执行材料；实际选择须以现有系统和网络为准。main/v1.0保持原状，候选程序替换与持久目录分开。
 
 ## Windows / Python 或执行包
 
 1. 获取候选构建并校验SHA256；Python路线使用独立环境安装wheel，执行包路线解压新目录，旧程序留存。
-2. 创建持久目录（例如 `D:\Wenshu\runtime`）和另一备份目录。复制 `packaging/deployment/team.env.example` 到持久目录 `.env`，保留 `WENSHU_TEAM_MODE=1`；不要把密钥放入Git。
-3. 停服务执行 `python -m app --runtime-dir D:\Wenshu\runtime --init-admin admin`，交互输入密码。执行包使用同样参数。
-4. 执行 `python -m app --runtime-dir D:\Wenshu\runtime --host 127.0.0.1 --port 8000 --no-browser`，管理员创建成员，成员首次登录改密。
+2. 创建持久目录（例如 `C:\Wenshu\runtime`）和另一备份目录。复制 `packaging/deployment/team.env.example` 到持久目录 `.env`，保留 `WENSHU_TEAM_MODE=1`；不要把密钥放入Git。
+3. 停服务执行 `python -m app --runtime-dir C:\Wenshu\runtime --init-admin admin`，交互输入密码。执行包使用同样参数。
+4. 执行 `python -m app --runtime-dir C:\Wenshu\runtime --host 127.0.0.1 --port 8000 --no-browser`，管理员创建成员，成员首次登录改密。
 5. 本机完整验证后，按S1手册运行 `register_windows_task.ps1` 注册已有用户的启动任务。实际系统未验证前不可承诺开机恢复；检查用户S4U网络能力和休眠策略。
 6. 卡片功能需Chromium；在可联网环境安装/构建后随包提供，或按既有 `--install-browser` 流程安装。公司网络限制需记录，不从不明镜像安装。
 
@@ -30,7 +32,7 @@ Docker镜像在开发/构建环境构建、`docker save` 转移、主机 `docker
 5. 手机安装组网客户端并连接后用浏览器打开同一HTTPS入口。完成登录、图片预览、工作列表、退回/批准。通过手机蜂窝和外地网络分别记录成功/失败、首次加载、图片/下载时间与SSE重连。
 6. 若客户端不适合成员，重新评估受身份保护通道；有公网条件时可用HTTPS入口，但应用账号/项目授权始终保留。第三方组网账号不等于文枢成员身份。
 
-上述网络、手机、TLS代理均未真实执行。真实设备信息与访问方式确认后再落实。
+上述网络、手机、TLS代理均未真实执行。部署设备已确认，但家庭上行、组网、证书和成员访问条件仍需确认后落实。
 
 ## 备份、恢复与升级
 
