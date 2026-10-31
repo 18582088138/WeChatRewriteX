@@ -49,7 +49,7 @@ for client in (a,b,c,d):
 """
 
 
-def scenario(tmp_path, code):
+def scenario(tmp_path, code, timeout=60):
     env = dict(os.environ)
     env.update(WENSHU_TEAM_MODE="1", WENSHU_RUNTIME_DIR=str(tmp_path), WENSHU_DATA_DIR=str(tmp_path / "resource"),
                WENSHU_LOG_DIR=str(tmp_path / "logs"), APP_ACCESS_TOKEN="", WENSHU_BOOTSTRAP_TOKEN="x"*32)
@@ -57,7 +57,7 @@ def scenario(tmp_path, code):
         if key.endswith(("_API_KEY", "_SEARCH_KEY")):
             env[key] = ""
     result = subprocess.run([sys.executable, "-X", "utf8", "-c", PREFIX + code + "\nstack.close()"],
-        cwd=ROOT, env=env, capture_output=True, text=True, encoding="utf-8", timeout=60)
+        cwd=ROOT, env=env, capture_output=True, text=True, encoding="utf-8", timeout=timeout)
     logs = tmp_path / "logs" / "wenshu.log"
     assert result.returncode == 0, result.stdout + result.stderr + (logs.read_text(encoding="utf-8")[-4000:] if logs.exists() else "")
 
@@ -82,6 +82,73 @@ assert b.get('/api/articles').status_code == 401
 assert db.query_one('SELECT password_hash FROM members WHERE id=?',(bm['id'],))['password_hash'].startswith('scrypt$')
 assert 'writer-password' not in a.get('/api/auth/members').text
 """)
+
+
+def test_role_project_and_archive_http_matrix(tmp_path):
+    scenario(tmp_path, """
+from app.core.models import DraftDoc,Block,ArticleStatus
+from app.services import draft_service
+cases=0
+for client,person,role in ((a,admin,'admin'),(b,bm,'member'),(c,cm,'maintainer')):
+    for grant in ('none','read','create','review','both','owner'):
+        for archived in (False,True):
+            p=a.post('/api/articles',json={'title':f'matrix-{role}-{grant}-{archived}','auto_collect':False}).json()['article']['id']
+            upload=a.post('/api/articles/'+p+'/materials/upload-batch',files={'files':('matrix.txt',b'Private matrix evidence','text/plain')})
+            assert upload.status_code==200,upload.text
+            mid=upload.json()['ok'][0]['material_id']; material=dao.get_material(mid)
+            draft_service.save_new_version(DraftDoc(id='',article_id=p,version=0,blocks=[Block(id='b',type='paragraph',text='Explicit human snapshot')]),'agent')
+            dao.set_article_status(p,ArticleStatus.DRAFTED)
+            doc=draft_service.get_doc(p)[0]
+            revision={'expected_version':doc.version,'expected_revision':doc.edit_revision}
+            submitted=a.post('/api/articles/'+p+'/human-review',json={'reviewer_id':admin['id'],**revision})
+            assert submitted.status_code==200,submitted.text
+            assert a.put('/api/articles/'+p+'/human-review/'+submitted.json()['id'],json={'status':'approved','submission_revision':0,**revision}).status_code==200
+            assert a.post('/api/articles/'+p+'/finalize',json={'force':True,**revision}).status_code==200
+            members=[] if grant in ('none','owner') else [{'member_id':person['id'],'can_create':grant in ('create','both'),'can_review':grant in ('review','both')}]
+            access={'expected_revision':a.get('/api/articles/'+p+'/access').json()['revision'],'owner_id':person['id'] if grant=='owner' else dm['id'],'archived':archived,'members':members}
+            result=a.put('/api/articles/'+p+'/access',json=access)
+            assert result.status_code==200,result.text
+            readable=role=='admin' or grant!='none'
+            writable=not archived and (role=='admin' or grant in ('owner','create','both'))
+            releasable=writable and role in ('admin','maintainer')
+            manageable=role=='admin' or grant=='owner'
+            context=(role,grant,archived)
+            for path in (f'/api/articles/{p}',f'/api/articles/{p}/draft',f'/api/articles/{p}/audit',f'/api/articles/{p}/human-review',f'/api/articles/{p}/exports',f'/api/jobs?article_id={p}',f'/api/materials/{mid}/text','/files/'+material['path']):
+                response=client.get(path)
+                assert response.status_code==(200 if readable else 404),(context,path,response.status_code,response.text)
+            doc=draft_service.get_doc(p)[0]
+            revision={'expected_version':doc.version,'expected_revision':doc.edit_revision}
+            response=client.post('/api/articles/'+p+'/finalize',json={'force':True,**revision})
+            assert response.status_code==(200 if releasable else 404),(context,'finalize',response.text)
+            response=client.post('/api/articles/'+p+'/publish',json={'platforms':['x']})
+            assert response.status_code==(200 if releasable else 404),(context,'publish',response.text)
+            before=db.query_one('SELECT revision FROM project_access WHERE article_id=?',(p,))['revision']
+            response=client.put('/api/articles/'+p+'/selection',json={'material_ids':[]})
+            assert response.status_code==(200 if writable else 404),(context,'selection',response.text)
+            if not writable: assert db.query_one('SELECT revision FROM project_access WHERE article_id=?',(p,))['revision']==before
+            response=client.post('/api/articles/'+p+'/lease',json={'client_id':'matrix-client'})
+            assert response.status_code==(200 if writable else 404),(context,'lease',response.text)
+            access['expected_revision']=db.query_one('SELECT revision FROM project_access WHERE article_id=?',(p,))['revision']
+            response=client.put('/api/articles/'+p+'/access',json=access)
+            assert response.status_code==(200 if manageable else 404),(context,'access',response.text)
+            cases+=1
+    for path in ('/api/settings','/api/auth/members','/api/team/audit','/openapi.json'):
+        response=client.get(path)
+        assert response.status_code==(200 if role=='admin' else 403),(role,path,response.text)
+fresh=stack.enter_context(TestClient(a.app))
+reset=a.post('/api/auth/members',json={'login':'reset-check','name':'Reset','password':'reset-password','role':'maintainer'})
+assert reset.status_code==200,reset.text
+sign(fresh,'reset-check','reset-password')
+assert fresh.get('/api/articles').status_code==403
+assert fresh.get('/api/auth/me').status_code==200
+assert fresh.post('/api/auth/password',json={'old_password':'reset-password','password':'changed-password'}).status_code==200
+assert fresh.get('/api/articles').status_code==401
+sign(fresh,'reset-check','changed-password')
+assert fresh.get('/api/articles').status_code==200
+assert fresh.post('/api/auth/logout').status_code==200
+assert fresh.get('/api/articles').status_code==401
+print(f'HTTP role/project/archive matrix: {cases} combinations plus system and session boundaries')
+""", timeout=120)
 
 
 def test_project_lists_files_and_foreign_material_ids_are_protected(tmp_path):

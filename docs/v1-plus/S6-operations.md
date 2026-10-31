@@ -19,7 +19,7 @@
 systemd使用已有独立用户与 `wenshu.service` 模板；路径/用户须替换，先安装wheel到独立环境。模板设置一个进程与团队模式。
 Docker镜像在开发/构建环境构建、`docker save` 转移、主机 `docker load`；compose默认loopback映射与独立runtime。
 执行 `docker compose --project-directory <部署目录> -f <compose模板> up -d` 前先准备runtime/.env和目录权限。
-本轮没有Docker/Linux，不把模板写为运行通过。SQLite和素材禁止网盘同步运行，不启动多ASGI worker。
+NUC有Docker CLI28.1.1，但复验时守护进程未运行，Compose/Linux/Nginx仍未实际验证；Windows目标路线不要求它们。SQLite和素材禁止网盘同步运行，不启动多ASGI worker。
 
 ## 私有跨网络访问与手机
 
@@ -37,7 +37,9 @@ Docker镜像在开发/构建环境构建、`docker save` 转移、主机 `docker
 ## 备份、恢复与升级
 
 每日维护窗口：告知成员停止新操作，管理员确认队列已结束/可恢复，再停服务。外部请求重跑可能额外计费。
-执行S1离线 `--backup <全新目录>`；Windows任务可使用 `backup_windows_task.ps1`，该脚本不能代替维护前确认队列。
+执行S1离线 `--backup <全新目录>`；Windows任务可使用更新后的 `backup_windows_task.ps1 -ExecutablePath <文枢.exe> -RuntimeDirectory <runtime> -BackupDirectory <全新目录>`，Python路线使用 `-PythonPath <python>`。脚本等待任务停止、执行离线备份并恢复原先运行的任务，但不能代替维护前确认队列；旧候选内置模板不会自动获得新增参数，应使用当前仓库脚本。
+
+针对当前NUC的采集命令、任务实际运行/重启、维护恢复、容量与手机外地验收完成条件见[NUC后续复验](NUC-validation-followup-2026-10-31.md)。
 完整备份包含DB、素材、历史定稿/导出、成员/ACL/人工历史、配置/.env，带哈希清单。权限仅主机维护者，密钥备份受同等限制。
 本地备份是当前已确认策略；另一设备/异地副本尚未落实，主机或磁盘损坏仍可能全部丢失。不得将本地副本称完整容灾。
 先保留7份每日副本，按真实磁盘测量调整；删除只能人工核对清单后执行。定时任务仅在主机确认后注册。
