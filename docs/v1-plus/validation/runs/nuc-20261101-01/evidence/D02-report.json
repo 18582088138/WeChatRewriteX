@@ -1,0 +1,25 @@
+{
+  "port": 52928,
+  "checks": {
+    "four_accounts_password_changed": 4,
+    "fallback_creation_jobs": 1,
+    "edit_invalidates_approval": true,
+    "maintainer_finalized": true,
+    "export_files": 20,
+    "outsider_file_rejected": true,
+    "self_review_setting_and_approval": true,
+    "admin_exception_audit": true,
+    "acceptance_projects_archived": 2,
+    "ready": "ok"
+  },
+  "http_status": {
+    "member_finalize": 404,
+    "member_publish": 404,
+    "concurrent_edit_conflict": 409
+  },
+  "project_ids": {
+    "main": "art_d8241db20210",
+    "exception": "art_53dae23dea39"
+  },
+  "server_log": "C:\\Users\\75203\\Documents\\2026\\SelfProject\\WeChatRewriteX\\build\\nuc-acceptance\\nuc-20261101-01\\d02-report-attempt02.server.log"
+}

@@ -1,0 +1,30 @@
+{
+  "schema": 6,
+  "integrity": "ok",
+  "accounts": [
+    [
+      "admin",
+      1,
+      1
+    ],
+    [
+      "maintainer",
+      1,
+      1
+    ],
+    [
+      "member",
+      0,
+      1
+    ],
+    [
+      "member",
+      1,
+      1
+    ]
+  ],
+  "archived_acceptance_projects": 2,
+  "human_finalizations": 2,
+  "completed_platform_jobs": 4,
+  "self_review": "true"
+}

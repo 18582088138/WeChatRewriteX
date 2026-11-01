@@ -1,4 +1,12 @@
-# V1.0+ 当前交付：NUC验证工具包与双机证据同步（2026-11-01）
+# V1.0+ 当前NUC验收：run nuc-20261101-01已记录，待权限/修复与外部验收（2026-11-01）
+
+目标NUC已按[统一入口](v1-plus/validation/START-HERE.md)固定源码`91c9009`和实际exe完成所有当前可执行项并写入19项账本。隔离Vue构建、155后端（0失败/跳过）、7+3浏览器通过；真实schema3原件完整备份、隔离schema6迁移及实际v1.0回退通过；独立runtime三档账号和完整业务流程通过，原库实验前后哈希一致。
+B01/D03实际任务注册返回0x80070005，需主机维护者提升PowerShell；D06、注销/重启、交互密码HTTP、持续负载及外部项均有明确blocked负责人/下一步。L02为failed：归档checkbox刷新后与服务端状态不一致，自审开关无管理员UI，需前端Agent独立分支修复后新run复验。X01按Windows路线N/A。
+`check/report`结构错误为空，但local/remote/final gates均false，不能宣称正式验收完成。逐项证据见[当前STATUS](v1-plus/validation/STATUS.md)、[run报告](v1-plus/validation/runs/nuc-20261101-01/report.md)和[交接](v1-plus/validation/runs/nuc-20261101-01/evidence/handoff-20261101-01.md)。原始数据库、备份、日志和随机密码仅留NUC，不提交Git。
+
+---
+
+# V1.0+ 历史交付：NUC验证工具包与双机证据同步（2026-11-01）
 
 本轮分支`dev/v1-plus-s7-nuc-acceptance-kit`，基于集成提交`21cb648`。统一执行入口为[START-HERE](v1-plus/validation/START-HERE.md)，包含19项固定编号的[实验标准](v1-plus/validation/CASEBOOK.md)、证据模板、隔离回归运行器、真实HTTP探针、Windows资源采样及可复核账本。NUC逐项记录执行事实，公司机读取共享材料复核；reported与reviewed分别计门槛，结构校验通过不等于验收完成。
 

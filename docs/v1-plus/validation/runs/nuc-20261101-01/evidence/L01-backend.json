@@ -1,0 +1,25 @@
+{
+  "run_id": "nuc-20261101-01",
+  "suite": "backend",
+  "attempt": "01",
+  "command": [
+    "C:\\Users\\75203\\miniforge3\\envs\\xkd_env_py312\\python.exe",
+    "-X",
+    "utf8",
+    "-m",
+    "pytest",
+    "tests/",
+    "-q",
+    "--junitxml=C:\\Users\\75203\\Documents\\2026\\SelfProject\\WeChatRewriteX\\build\\nuc-acceptance\\nuc-20261101-01\\backend-01.xml"
+  ],
+  "source_commit": "91c90090515405f6235e31f70a47f64c1851631f",
+  "started_at_utc": "2026-11-01T08:39:02.316526+00:00",
+  "ended_at_utc": "2026-11-01T08:41:22.172745+00:00",
+  "elapsed_seconds": 139.86,
+  "exit_code": 0,
+  "suite_exit_code": 0,
+  "baseline_valid": true,
+  "python_version": "3.12.14",
+  "scope": "Fixture-only subprocess; fresh runtime/data/log, team mode off in parent, external keys blanked",
+  "does_not_mark_case_passed": true
+}

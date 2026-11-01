@@ -1,0 +1,11 @@
+{
+  "actual_v1_app_read": true,
+  "schema": 3,
+  "checks": {
+    "articles": 1,
+    "drafts": 1,
+    "materials": 13,
+    "export_lists": 1,
+    "export_files_read": 1
+  }
+}

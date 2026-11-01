@@ -1,0 +1,15 @@
+{
+  "schema": 6,
+  "http_checks": {
+    "articles": 1,
+    "drafts": 1,
+    "materials": 13,
+    "export_lists": 1,
+    "legacy_publish_rejected": 1
+  },
+  "legacy_projects_private_to_new_admin": 1,
+  "legacy_jobs": 4,
+  "legacy_job_activity_claims": 0,
+  "ready": 200,
+  "server_log": "C:\\Users\\75203\\Documents\\2026\\SelfProject\\WeChatRewriteX\\build\\nuc-acceptance\\nuc-20261101-01\\d01-migration.server.log"
+}

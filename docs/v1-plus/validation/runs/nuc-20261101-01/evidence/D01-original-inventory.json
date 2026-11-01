@@ -1,0 +1,21 @@
+{
+  "schema": 3,
+  "integrity": "ok",
+  "counts": {
+    "articles": 1,
+    "materials": 17,
+    "drafts": 1,
+    "jobs": 4,
+    "publish_jobs": 4
+  },
+  "doc_snapshots_sha256": "9e03f1d27222faffa248183d9bcb73d24044b6801e76d0331fcc3a8843681011",
+  "materials": {
+    "rows": 17,
+    "missing_files": 0,
+    "aggregate_sha256": "bde2696a6694c2554762b7488dae6746eace0838bb76320abab5a5608507d6a2"
+  },
+  "exports": {
+    "files": 39,
+    "aggregate_sha256": "e2b2917e92af7438442c8cd3ab5533e69151518c2b36a76bffa15e9bf0ba29fa"
+  }
+}

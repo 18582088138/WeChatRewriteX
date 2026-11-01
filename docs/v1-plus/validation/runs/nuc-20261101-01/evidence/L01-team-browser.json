@@ -1,0 +1,20 @@
+{
+  "run_id": "nuc-20261101-01",
+  "suite": "team-browser",
+  "attempt": "01",
+  "command": [
+    "C:\\Program Files\\nodejs\\npm.CMD",
+    "run",
+    "test:team"
+  ],
+  "source_commit": "91c90090515405f6235e31f70a47f64c1851631f",
+  "started_at_utc": "2026-11-01T08:43:06.149766+00:00",
+  "ended_at_utc": "2026-11-01T08:43:41.431628+00:00",
+  "elapsed_seconds": 35.281,
+  "exit_code": 0,
+  "suite_exit_code": 0,
+  "baseline_valid": true,
+  "python_version": "3.12.14",
+  "scope": "Fixture-only subprocess; fresh runtime/data/log, team mode off in parent, external keys blanked",
+  "does_not_mark_case_passed": true
+}
