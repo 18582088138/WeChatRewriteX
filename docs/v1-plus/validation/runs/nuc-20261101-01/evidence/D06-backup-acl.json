@@ -1,0 +1,8 @@
+{
+  "same_windows_identity_for_task_and_maintainer": true,
+  "non_elevated_backup_directory_read": "access_denied",
+  "elevated_backup_directory_read": "allowed",
+  "acl_principals": ["OWNER RIGHTS", "SYSTEM", "Administrators"],
+  "acl_changed_during_acceptance": false,
+  "scope": "Backup contains configuration and secrets; restore performed in elevated maintenance window"
+}

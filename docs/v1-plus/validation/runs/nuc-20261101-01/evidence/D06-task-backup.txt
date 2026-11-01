@@ -1,0 +1,11 @@
+Backup source: actual elevated backup_windows_task.ps1 attempt 02
+Before backup task state: Running
+Offline backup verified at C:\Wenshu\backups\acceptance-first
+After backup task state: Running
+Backup files: 52
+Backup bytes: 4867820
+Schema: 6
+SQLite integrity: ok
+Original authenticated readiness after isolated restore: 200
+Restored service stopped after verification: true
+Existing-target negative test: rejected before task action; task remained Running

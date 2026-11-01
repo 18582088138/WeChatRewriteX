@@ -1,6 +1,6 @@
 # NUC验收状态：nuc-20261101-01
 
-固定源码：`91c90090515405f6235e31f70a47f64c1851631f`；报告机器：`nuc`；生成时间UTC：2026-11-01T09:24:47.454095+00:00。
+固定源码：`91c90090515405f6235e31f70a47f64c1851631f`；报告机器：`nuc`；生成时间UTC：2026-11-01T11:21:25.291748+00:00。
 
 reported表示NUC记录；reviewed表示对共享材料的复核记录。工具校验结构和摘要，不会判断手工实验真实发生，也不会授权正式发布。
 
@@ -10,53 +10,49 @@ reported表示NUC记录；reviewed表示对共享材料的复核记录。工具�
 - remote_reviewed: false
 - final_reviewed: false
 
-- **B01 机器、权限、程序与Git基线**：blocked；复核：pending。NUC/磁盘/路径/原数据保护已核对；当前用户S4U任务注册实测0x80070005，服务注册权限缺条件
-  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/B01.md`，SHA256 `ad5af57ec5fe318ce2a0b3a9a8f42c5ab7e1aa6d4e1592ceee2613a51b803dc7`。
-  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/B01-probe.json`，SHA256 `e69b6302e6e72f7883287c2440eba4abb0575b6333fd00a27689d03193c40e58`。
-  缺项：主机维护者提供提升的管理员PowerShell操作窗口（约10分钟）；下一步：提升后重跑S4U/Limited权限探针并继续D03；保留本次0x80070005证据。
-- **B02 候选SHA256、版本及源码对应关系**：blocked；复核：pending。ZIP SHA/CRC、版本和build commit均实测通过；因B01前置未满足暂不判正式通过
-  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/B02.md`，SHA256 `635e782c5cb213656285be9ac8d81088d104ad6f6f4205fc864b35c9f3450ec7`。
-  缺项：先完成B01所需提升PowerShell权限确认；下一步：B01通过后以本证据重新record B02，无需重构建程序。
-- **L01 隔离后端、权限及部署工具回归**：blocked；复核：pending。实际build/155后端/7+3浏览器均通过且无跳过；B02前置未满足
+- **B01 机器、权限、程序与Git基线**：passed；复核：pending。B01权限条件已通过提升注册实际补齐
+  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/B01-attempt02.md`，SHA256 `8e72d3e424e61f5373487dd30eb9901d55d0fd1f0b6966cbec66d854d710b30d`。
+- **B02 候选SHA256、版本及源码对应关系**：passed；复核：pending。候选SHA/CRC/版本/源码对应关系及B01前置通过
+  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/B02-attempt02.md`，SHA256 `330f881e9958ea2e0cdf6a159c8dd84fb6b8c6fcf507edeb4a0fa3b258d97339`。
+- **L01 隔离后端、权限及部署工具回归**：passed；复核：pending。build/155后端/7+3浏览器实际通过，B02前置已补齐
   证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/L01.md`，SHA256 `fab2e346de170d3955e8a1ec32ede03e63400ba7e18421444c99d1a67d7ebbb2`。
-  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/L01-build.json`，SHA256 `2c3874088684611391d501b307b65323f7991a0655bbd9be2ec71a53a0ddd769`。
   证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/L01-backend.json`，SHA256 `1125c9acc22c5d3c6a3292c6d6146bd32297b22b3007659cb149bed114e5038f`。
-  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/L01-browser.json`，SHA256 `a94f5abb7109b68d449c3d3e2e9b451c8def0cc5d35ea1e9e1261d9f048af526`。
-  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/L01-team-browser.json`，SHA256 `694992b55b3ebdaaf5cf6a914f91e5dacb9a52b0fc0a0265e7739abbe8f23215`。
-  缺项：主机维护者完成B01提升权限确认；下一步：B01/B02补齐后复用本次runner JSON/XML重新record；基线变化则新run重跑。
+  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/prerequisites-resolved.md`，SHA256 `efd935b62f53c45fa3b88edbf06c1ef6402db2b29adf5b621b6e4c2527d5987e`。
 - **L02 团队真实浏览器闭环及冲突恢复**：failed；复核：pending。额外UI实测发现归档checkbox刷新后与服务端状态不一致，且自审开关无管理员UI
   证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/L02.md`，SHA256 `3d07692f93676cee3c233a461923566f006cf7df6ce897762e185965d52e97bc`。
   缺项：前端Agent修复ProjectAccess归档布尔绑定并补管理员自审开关及回归；下一步：独立分支修复并验证，合入后对新基线新建run；当前run保留failed。
-- **D01 真实旧数据完整备份与隔离迁移回退**：blocked；复核：pending。真实schema3原件完整备份、隔离schema6迁移和实际v1.0回退均通过；B02前置未满足
+- **D01 真实旧数据完整备份与隔离迁移回退**：passed；复核：pending。真实原件备份/隔离迁移/旧程序回退实际通过，B02前置已补齐
   证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D01.md`，SHA256 `b14bea1b929d3253e2075269fc54860e12a6a6aec3a88a2681fefb762128dc14`。
   证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D01-original-inventory.json`，SHA256 `4f98353f4cd3a46851b9d1213629fbc5730ca7b896ae1d34e30b039bc976472e`。
   证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D01-upgraded-inventory.json`，SHA256 `fa2b46522a66e57e1ac7b59834da80a316b2d041b752ec7d694afec58147eeac`。
-  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D01-migration.json`，SHA256 `6b780154e7e20d7ad598b035f785c0193fd4b7311678c061cdd0cd3db2720705`。
-  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D01-old-read.json`，SHA256 `59c01c69ce8eaddde34eca27a3cefe7b9d919da4c9341e0e36e1b453b4cc72b4`。
-  缺项：主机维护者完成B01/B02权限前置；下一步：补齐后以去敏inventory和回退证据重新record；正式数据切换仍需独立维护窗口。
-- **D02 独立runtime、三档实际成员和本机业务**：blocked；复核：pending。独立runtime三档账号和完整业务实测通过，项目已归档/额外账号已停用；D01前置未满足
+  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/prerequisites-resolved.md`，SHA256 `efd935b62f53c45fa3b88edbf06c1ef6402db2b29adf5b621b6e4c2527d5987e`。
+- **D02 独立runtime、三档实际成员和本机业务**：passed；复核：pending。独立runtime三档账号与完整业务实际通过，D01前置已补齐
   证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D02.md`，SHA256 `c52c20d38af2b2e663e6b6f6847c20baea76b095fc3ae93b63ae6b4f74389b3f`。
   证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D02-report.json`，SHA256 `08696b34b343eecebf7484aea6934e46285bcbf36d978f682087e1766ac1944f`。
   证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D02-database-summary.json`，SHA256 `950d555be4c23dd92cb680fb7dacdad1091a80883f7c3b34f021641168d16934`。
-  缺项：先完成B01/B02/D01账本前置；下一步：前置补齐后继续D03；P01密码输入完成后清理剩余验收账号。
-- **D03 Windows计划任务和目录权限**：blocked；复核：pending。实际注册脚本返回0x80070005，任务未创建
-  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D03.md`，SHA256 `6b76381da133ba19ebc97b4f5d643636bb00f7dca1ab0556256ddf3e3f44349e`。
-  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D03-register.txt`，SHA256 `63757bf1257b34dcb4eab840272b54e51315f0ae3bec99df05563ebe89c0715f`。
-  缺项：主机维护者提供提升的管理员PowerShell窗口（约10分钟）；下一步：提升后注册/启动任务并采集身份、路径、ready和导出证据。
+  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/prerequisites-resolved.md`，SHA256 `efd935b62f53c45fa3b88edbf06c1ef6402db2b29adf5b621b6e4c2527d5987e`。
+- **D03 Windows计划任务和目录权限**：passed；复核：pending。任务Running/S4U/ready/导出/单实例实际通过
+  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D03-attempt02.md`，SHA256 `14df34aaf6d50710acfc8479c34a34618342c4be361d59f0db09c78153c54507`。
+  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D03-task.json`，SHA256 `3e0765095a06120d0a39039548fb2089ce28bbec304416fee9194c040b05d2b7`。
+  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D03-after-start.json`，SHA256 `2fce485445f002d022a8503df465ea42c678896f58655252762f4a54215e9b0e`。
+  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D03-verify.json`，SHA256 `fbfd83ad0275dffeab56f24cd7ec30a3245dd84d2b85babdb822c18f040a425d`。
+  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D03-running-lock.txt`，SHA256 `5d52430c8a66088977f091dd6b853c0d3c1dbba5aa2191fdac8659255b749a8d`。
 - **D04 退出Windows登录会话后的服务可用性**：blocked；复核：pending。未实际注销，D03也未注册
   证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D04.md`，SHA256 `8b62358d31ea2c68cc128f8a8c005f4adc90d45f239c2c48782bfeacf4417ab3`。
   缺项：主机维护者完成D03并提供真实注销/再登录窗口（约10分钟）；下一步：按CASEBOOK运行注销后S4U probe并记录人工时间确认。
 - **D05 实际主机重启后的自启动和数据一致性**：blocked；复核：pending。未执行主机重启，D03/D06未完成
   证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D05.md`，SHA256 `bfdf88d8b7719c98904d17f899c8478f622efff8cc878a1a9fd8e638206da29c`。
   缺项：主机维护者提供受控重启窗口（约20分钟），先完成D03/D06；下一步：备份通过后记录running并同步，再由维护者重启并采集启动/数据一致性。
-- **D06 实际计划任务离线备份与隔离恢复**：blocked；复核：pending。实际备份脚本因Wenshu-SingleInstance不存在而停止，未开始备份
-  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D06.md`，SHA256 `a29f9204959b5473a6d3bbbeb8d6eaf0f855652f255c35dec43660fefa0c387a`。
-  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D06-backup.txt`，SHA256 `d80cb0a828fe7f496eb7ed14a76aa5c20ea6d9cd288c8502164de626ba3ed85a`。
-  缺项：主机维护者完成D03并提供15分钟离线维护窗口；下一步：任务Running后重跑备份脚本并做隔离恢复及故意失败检查。
-- **D07 合成任务异常退出、单实例与队列恢复**：blocked；复核：pending。L01同一后端实际执行两个D07子进程恢复测试并通过；B02前置未满足
+- **D06 实际计划任务离线备份与隔离恢复**：passed；复核：pending。实际任务停启备份52文件/4,867,820字节，隔离恢复三档登录/ACL/人工历史/素材/导出及故意失败均通过
+  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D06-attempt02.md`，SHA256 `e4aacc01445a21eb001326d736a7957b95c157c86af0749786167444169530f7`。
+  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D06-task-backup.txt`，SHA256 `ab59ed508667d96642a65c6ce4dfe34481c89f98125abc5a9ef3c27d2eda07dc`。
+  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D06-backup-acl.json`，SHA256 `e255b86f4c32d377a515b97f2678d039899c7f3e988f18234b8ce600eb467fa3`。
+  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D06-restore-verify.json`，SHA256 `2891dc36c59b7dde9d76d77d14f647897531d11d1090499b7f859a6d78306fc1`。
+  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D06-existing-target.txt`，SHA256 `08a54146bed52da1a00af0630419d3be75c8a5975ba8d5a21668cfdedeafadd9`。
+- **D07 合成任务异常退出、单实例与队列恢复**：passed；复核：pending。两个D07子进程恢复测试实际通过，B02前置已补齐
   证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D07.md`，SHA256 `d9b2ee93aa19fba17987fcbd533c7c4bee18d2361be1cc4db764c933afdcddae`。
   证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/L01-backend.json`，SHA256 `1125c9acc22c5d3c6a3292c6d6146bd32297b22b3007659cb149bed114e5038f`。
-  缺项：主机维护者完成B01/B02前置；下一步：前置补齐后复用JUnit XML和runner JSON重新record，不重复计数。
+  证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/prerequisites-resolved.md`，SHA256 `efd935b62f53c45fa3b88edbf06c1ef6402db2b29adf5b621b6e4c2527d5987e`。
 - **P01 三身份真实HTTP基线及资源采样**：blocked；复核：pending。未执行三身份交互密码HTTP探针和资源trace
   证据：shared，`docs/v1-plus/validation/runs/nuc-20261101-01/evidence/P01.md`，SHA256 `9e9dfff69d44daecf9d3f06dd295d89244430702256a3b4e654d6e029de2898a`。
   缺项：主机维护者在本机交互终端输入三档账号密码并运行60秒probe/trace（约5分钟）；下一步：启动独立实例后按CASEBOOK采集≥100成功读、P95和内存/CPU/磁盘。

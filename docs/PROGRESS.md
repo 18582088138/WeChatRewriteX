@@ -1,8 +1,8 @@
-# V1.0+ 当前NUC验收：run nuc-20261101-01已记录，待权限/修复与外部验收（2026-11-01）
+# V1.0+ 当前NUC验收：任务与备份已通过，待注销/重启、UI修复和外部验收（2026-11-01）
 
-目标NUC已按[统一入口](v1-plus/validation/START-HERE.md)固定源码`91c9009`和实际exe完成所有当前可执行项并写入19项账本。隔离Vue构建、155后端（0失败/跳过）、7+3浏览器通过；真实schema3原件完整备份、隔离schema6迁移及实际v1.0回退通过；独立runtime三档账号和完整业务流程通过，原库实验前后哈希一致。
-B01/D03实际任务注册返回0x80070005，需主机维护者提升PowerShell；D06、注销/重启、交互密码HTTP、持续负载及外部项均有明确blocked负责人/下一步。L02为failed：归档checkbox刷新后与服务端状态不一致，自审开关无管理员UI，需前端Agent独立分支修复后新run复验。X01按Windows路线N/A。
-`check/report`结构错误为空，但local/remote/final gates均false，不能宣称正式验收完成。逐项证据见[当前STATUS](v1-plus/validation/STATUS.md)、[run报告](v1-plus/validation/runs/nuc-20261101-01/report.md)和[交接](v1-plus/validation/runs/nuc-20261101-01/evidence/handoff-20261101-01.md)。原始数据库、备份、日志和随机密码仅留NUC，不提交Git。
+统一run`nuc-20261101-01`固定源码`91c9009`。提升权限后，B01/B02、L01、D01、D02、D03、D06、D07共8项已按真实证据记录passed：`Wenshu-SingleInstance`以S4U/Limited Running，已认证ready和任务中导出通过，单实例锁拒绝第二所有者；实际任务停启备份52文件/4,867,820字节，隔离恢复三档登录、ACL、人工历史、素材和导出通过，原任务保持Running。
+L02仍为failed：归档checkbox刷新后与服务端状态不一致，自审开关无管理员UI，需前端Agent独立分支修复后新run复验。D04真实注销、D05受控重启、P01交互密码HTTP、P02持续负载和R01～R05外部项共9项blocked，负责人/窗口已逐项写明；X01按Windows路线N/A。
+`check/report`结构错误为空，但local/remote/final gates均false，不能宣称正式验收完成。见[当前STATUS](v1-plus/validation/STATUS.md)、[run报告](v1-plus/validation/runs/nuc-20261101-01/report.md)和[最新交接](v1-plus/validation/runs/nuc-20261101-01/evidence/handoff-20261101-02.md)。原始数据库、备份、日志和随机密码仅留NUC，不提交Git。
 
 ---
 

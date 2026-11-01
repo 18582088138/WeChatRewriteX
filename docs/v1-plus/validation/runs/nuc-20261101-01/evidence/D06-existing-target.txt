@@ -1,0 +1,7 @@
+Backup target must be new.
+所在位置 C:\Users\75203\Documents\2026\SelfProject\WeChatRewriteX\packaging\deployment\backup_windows_task.ps1:15 字符:
+ 47
++ ...  -LiteralPath $backupResolved) { throw 'Backup target must be new.' }
++                                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (Backup target must be new.:String) [], RuntimeException
+    + FullyQualifiedErrorId : Backup target must be new.
