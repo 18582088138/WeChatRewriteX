@@ -1,4 +1,6 @@
-# V1.0+ 当前NUC验收：任务与备份已通过，待注销/重启、UI修复和外部验收（2026-11-01）
+# V1.0+ 当前NUC验收：8项范围复核接受，整体尚未通过（2026-11-01）
+
+公司机已接收c54006a/0099696并逐份复核共享材料，B01/B02、L01、D01/D02/D03/D06/D07共8项review=accepted；L02失败和9项blocked保留，X01按Windows路线N/A，所有整体gates仍false。已更新D04/D05/P01/R01/R04的当前缺项，D03/D06完成后的旧前置不再重复要求。范围及两处UI问题的代码核对见[公司复核](v1-plus/validation/runs/nuc-20261101-01/evidence/company-review-20261101.md)。本次只写验收/复核状态，没有修改业务代码或操作NUC。
 
 统一run`nuc-20261101-01`固定源码`91c9009`。提升权限后，B01/B02、L01、D01、D02、D03、D06、D07共8项已按真实证据记录passed：`Wenshu-SingleInstance`以S4U/Limited Running，已认证ready和任务中导出通过，单实例锁拒绝第二所有者；实际任务停启备份52文件/4,867,820字节，隔离恢复三档登录、ACL、人工历史、素材和导出通过，原任务保持Running。
 L02仍为failed：归档checkbox刷新后与服务端状态不一致，自审开关无管理员UI，需前端Agent独立分支修复后新run复验。D04真实注销、D05受控重启、P01交互密码HTTP、P02持续负载和R01～R05外部项共9项blocked，负责人/窗口已逐项写明；X01按Windows路线N/A。

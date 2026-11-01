@@ -16,7 +16,10 @@
     "needed_input": "",
     "next_action": "",
     "review": {
-      "verdict": "pending"
+      "verdict": "accepted",
+      "reviewer": "company-agent",
+      "summary": "已阅读原probe、权限补齐及任务运行材料，机器/路径/空间/服务注册条件满足；资源为瞬时值。",
+      "at_utc": "2026-11-01T11:36:38.453845+00:00"
     }
   },
   "B02": {
@@ -36,7 +39,10 @@
     "needed_input": "",
     "next_action": "",
     "review": {
-      "verdict": "pending"
+      "verdict": "accepted",
+      "reviewer": "company-agent",
+      "summary": "已阅读包SHA/CRC与build-info，并实际比较build到固定源码的业务文件无差异；外置工具从仓库使用。",
+      "at_utc": "2026-11-01T11:36:38.460855+00:00"
     }
   },
   "L01": {
@@ -70,7 +76,10 @@
     "needed_input": "",
     "next_action": "",
     "review": {
-      "verdict": "pending"
+      "verdict": "accepted",
+      "reviewer": "company-agent",
+      "summary": "四份runner JSON与155项无失败/跳过共享摘要相符；接受合成回归范围，原XML在NUC，L02另行失败。",
+      "at_utc": "2026-11-01T11:36:38.469914+00:00"
     }
   },
   "L02": {
@@ -131,7 +140,10 @@
     "needed_input": "",
     "next_action": "",
     "review": {
-      "verdict": "pending"
+      "verdict": "accepted",
+      "reviewer": "company-agent",
+      "summary": "原件与升级副本数量和文稿/素材/导出SHA一致，旧程序读取及迁移边界材料相符；接受现有真实原件隔离范围，不代表正式切换。",
+      "at_utc": "2026-11-01T11:36:38.479585+00:00"
     }
   },
   "D02": {
@@ -172,7 +184,10 @@
     "needed_input": "",
     "next_action": "",
     "review": {
-      "verdict": "pending"
+      "verdict": "accepted",
+      "reviewer": "company-agent",
+      "summary": "三档验收账号业务、权限/409/人审及导出摘要满足；接受正式独立runtime上的合成项目，不代表真实成员或模型质量验收。",
+      "at_utc": "2026-11-01T11:36:38.488701+00:00"
     }
   },
   "D03": {
@@ -220,45 +235,62 @@
     "needed_input": "",
     "next_action": "",
     "review": {
-      "verdict": "pending"
+      "verdict": "accepted",
+      "reviewer": "company-agent",
+      "summary": "S4U/Limited任务动作、Running、认证ready和导出/单实例拒绝材料对应；接受会话内任务运行，注销/重启未验收。",
+      "at_utc": "2026-11-01T11:36:38.498235+00:00"
     }
   },
   "D04": {
     "status": "blocked",
-    "summary": "未实际注销，D03也未注册",
-    "at_utc": "2026-11-01T09:20:19.574902+00:00",
+    "summary": "D03已Running；尚未执行真实注销/再登录及期间服务观察",
+    "at_utc": "2026-11-01T11:36:38.524262+00:00",
     "tested_commit": null,
     "evidence": [
       {
         "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D04.md",
         "visibility": "shared",
-        "bytes": 729,
+        "bytes": 736,
         "hash_kind": "utf8_lf",
         "sha256": "8b62358d31ea2c68cc128f8a8c005f4adc90d45f239c2c48782bfeacf4417ab3"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/company-review-20261101.md",
+        "visibility": "shared",
+        "bytes": 5216,
+        "hash_kind": "utf8_lf",
+        "sha256": "a62f9e01666b62b91609dc98d5a67c1d9d6600aeb6f6687420de8838af0a4faa"
       }
     ],
-    "needed_input": "主机维护者完成D03并提供真实注销/再登录窗口（约10分钟）",
-    "next_action": "按CASEBOOK运行注销后S4U probe并记录人工时间确认",
+    "needed_input": "主机维护者提供约10分钟真实注销/再登录窗口和人工时间确认",
+    "next_action": "按CASEBOOK准备注销后S4U probe并由维护者执行注销，保留期间观察和再登录业务核对。",
     "review": {
       "verdict": "pending"
     }
   },
   "D05": {
     "status": "blocked",
-    "summary": "未执行主机重启，D03/D06未完成",
-    "at_utc": "2026-11-01T09:20:19.737942+00:00",
+    "summary": "D03/D06已通过；尚未执行受控重启和无人登录时自启动观察",
+    "at_utc": "2026-11-01T11:36:38.532146+00:00",
     "tested_commit": null,
     "evidence": [
       {
         "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D05.md",
         "visibility": "shared",
-        "bytes": 661,
+        "bytes": 668,
         "hash_kind": "utf8_lf",
         "sha256": "bfdf88d8b7719c98904d17f899c8478f622efff8cc878a1a9fd8e638206da29c"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/company-review-20261101.md",
+        "visibility": "shared",
+        "bytes": 5216,
+        "hash_kind": "utf8_lf",
+        "sha256": "a62f9e01666b62b91609dc98d5a67c1d9d6600aeb6f6687420de8838af0a4faa"
       }
     ],
-    "needed_input": "主机维护者提供受控重启窗口（约20分钟），先完成D03/D06",
-    "next_action": "备份通过后记录running并同步，再由维护者重启并采集启动/数据一致性",
+    "needed_input": "主机维护者提供约20分钟受控重启窗口，先确认现有完整备份可用",
+    "next_action": "记录running并同步，由维护者重启，再记录登录前启动与数据一致性证据。",
     "review": {
       "verdict": "pending"
     }
@@ -308,7 +340,10 @@
     "needed_input": "",
     "next_action": "",
     "review": {
-      "verdict": "pending"
+      "verdict": "accepted",
+      "reviewer": "company-agent",
+      "summary": "实际任务停启备份52文件及隔离恢复/ACL/故意失败材料对应；接受4,867,820字节验收集恢复，另一设备与RPO/RTO待测。",
+      "at_utc": "2026-11-01T11:36:38.507897+00:00"
     }
   },
   "D07": {
@@ -342,25 +377,35 @@
     "needed_input": "",
     "next_action": "",
     "review": {
-      "verdict": "pending"
+      "verdict": "accepted",
+      "reviewer": "company-agent",
+      "summary": "与L01重叠的两个实际CLI异常恢复测试有共享摘要及原XML定位；接受该合成恢复范围，不另增加测试总数。",
+      "at_utc": "2026-11-01T11:36:38.517257+00:00"
     }
   },
   "P01": {
     "status": "blocked",
-    "summary": "未执行三身份交互密码HTTP探针和资源trace",
-    "at_utc": "2026-11-01T09:20:20.242768+00:00",
+    "summary": "实际计划任务已Running；尚未执行三身份交互密码HTTP探针与资源采样",
+    "at_utc": "2026-11-01T11:36:38.538235+00:00",
     "tested_commit": null,
     "evidence": [
       {
         "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/P01.md",
         "visibility": "shared",
-        "bytes": 893,
+        "bytes": 900,
         "hash_kind": "utf8_lf",
         "sha256": "9e9dfff69d44daecf9d3f06dd295d89244430702256a3b4e654d6e029de2898a"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/company-review-20261101.md",
+        "visibility": "shared",
+        "bytes": 5216,
+        "hash_kind": "utf8_lf",
+        "sha256": "a62f9e01666b62b91609dc98d5a67c1d9d6600aeb6f6687420de8838af0a4faa"
       }
     ],
-    "needed_input": "主机维护者在本机交互终端输入三档账号密码并运行60秒probe/trace（约5分钟）",
-    "next_action": "启动独立实例后按CASEBOOK采集≥100成功读、P95和内存/CPU/磁盘",
+    "needed_input": "主机维护者在本机交互终端输入三档验收账号密码，约5分钟",
+    "next_action": "使用现有运行实例按CASEBOOK执行60秒probe/trace，记录至少100成功读、P95和资源；不要重复启动同runtime。",
     "review": {
       "verdict": "pending"
     }
@@ -387,20 +432,27 @@
   },
   "R01": {
     "status": "blocked",
-    "summary": "未配置真实跨网络HTTPS/私有组网入口",
-    "at_utc": "2026-11-01T09:20:20.568567+00:00",
+    "summary": "D03已Running；尚未配置受保护跨网络HTTPS/私有组网入口",
+    "at_utc": "2026-11-01T11:36:38.545308+00:00",
     "tested_commit": null,
     "evidence": [
       {
         "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/R01.md",
         "visibility": "shared",
-        "bytes": 795,
+        "bytes": 802,
         "hash_kind": "utf8_lf",
         "sha256": "e0c3f41c032470f7b8dc7209f83c77acd418ed9c9db92c7cd0406b72200a26b3"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/company-review-20261101.md",
+        "visibility": "shared",
+        "bytes": 5216,
+        "hash_kind": "utf8_lf",
+        "sha256": "a62f9e01666b62b91609dc98d5a67c1d9d6600aeb6f6687420de8838af0a4faa"
       }
     ],
-    "needed_input": "网络/主机维护者提供上行/NAT/IP、组网/证书选择和另一独立网络，先完成D03",
-    "next_action": "配置受保护HTTPS并从独立网络验证Cookie/CSRF/SSE/下载/撤权",
+    "needed_input": "网络/主机维护者提供上行/NAT/IP、组网与证书选择及另一独立网络",
+    "next_action": "保持应用loopback，按CASEBOOK配置授权HTTPS并从独立网络验证Cookie/CSRF/SSE/下载/撤权。",
     "review": {
       "verdict": "pending"
     }
@@ -447,20 +499,27 @@
   },
   "R04": {
     "status": "blocked",
-    "summary": "仅本机同盘备份恢复，无另一物理设备副本或真实RTO/RPO",
-    "at_utc": "2026-11-01T09:20:21.092333+00:00",
+    "summary": "D06实际本机备份恢复已通过；尚无另一物理设备副本及实际RPO/RTO",
+    "at_utc": "2026-11-01T11:36:38.553076+00:00",
     "tested_commit": null,
     "evidence": [
       {
         "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/R04.md",
         "visibility": "shared",
-        "bytes": 820,
+        "bytes": 827,
         "hash_kind": "utf8_lf",
         "sha256": "a2969d3de28bf1a8697dde85f77f57268bba8f812b6c3d99870c495e65229216"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/company-review-20261101.md",
+        "visibility": "shared",
+        "bytes": 5216,
+        "hash_kind": "utf8_lf",
+        "sha256": "a62f9e01666b62b91609dc98d5a67c1d9d6600aeb6f6687420de8838af0a4faa"
       }
     ],
-    "needed_input": "备份维护者提供另一物理设备/异地位置，先完成D06并安排60分钟恢复窗口",
-    "next_action": "复制并校验真实备份，在独立目录恢复并记录数据量和业务可用时间线",
+    "needed_input": "备份维护者提供另一物理设备或异地位置及约60分钟恢复窗口",
+    "next_action": "复制并核对完整备份，在独立目录按真实数据量恢复，记录数据窗口/业务可用时间；同盘目录不替代另一设备。",
     "review": {
       "verdict": "pending"
     }
