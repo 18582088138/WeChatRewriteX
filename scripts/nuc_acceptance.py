@@ -241,7 +241,7 @@ def run_local(run_id, suite, attempt):
     _, meta, _ = load(run_id)
     if not re.fullmatch(r"[a-z0-9-]{1,30}", attempt):
         raise ValueError("Use a short attempt label")
-    code_paths = ("app", "scripts", "tests", "config", "web", "packaging", "pyproject.toml", "requirements.txt", "docs/v1-plus/validation/cases.json", "docs/v1-plus/validation/CASEBOOK.md")
+    code_paths = ("app", "scripts", "tests", "config", "web", "packaging", "pyproject.toml", "requirements.txt", ".env.example", "docs/v1-plus/validation/cases.json", "docs/v1-plus/validation/CASEBOOK.md")
     if git("diff", "--name-only", meta["source_commit"], "HEAD", "--", *code_paths) or git("diff", "--name-only", "HEAD", "--", *code_paths):
         raise ValueError("Test code/dependencies changed since pinned baseline; commit it and start a new run")
     raw = ROOT / "build/nuc-acceptance" / run_id
@@ -267,20 +267,31 @@ def run_local(run_id, suite, attempt):
         if key.endswith(("_API_KEY", "_SEARCH_KEY")):
             env[key] = ""
     with tempfile.TemporaryDirectory(prefix="wenshu-acceptance-fixtures-") as fixture:
+        # FixtureCrawler resolves tests/fixtures against PROJECT_ROOT, which
+        # follows runtime. Copy only the repository's synthetic input corpus.
+        corpus = ROOT / "tests/fixtures"
+        if corpus.is_dir():
+            shutil.copytree(corpus, Path(fixture) / "tests/fixtures")
         env.update(WENSHU_RUNTIME_DIR=fixture, WENSHU_DATA_DIR=str(Path(fixture) / "resource"),
                    WENSHU_LOG_DIR=str(Path(fixture) / "log"), WENSHU_TEAM_MODE="0", WENSHU_MIN_FREE_MB="1",
                    APP_ACCESS_TOKEN="", WENSHU_BOOTSTRAP_TOKEN="", PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
         env["WENSHU_TEST_PYTHON"] = sys.executable
         with log.open("w", encoding="utf-8") as output:
             completed = subprocess.run(command, cwd=cwd, env=env, stdout=output, stderr=subprocess.STDOUT)
+    baseline_valid = not (git("diff", "--name-only", meta["source_commit"], "HEAD", "--", *code_paths) or
+                          git("diff", "--name-only", "HEAD", "--", *code_paths))
+    exit_code = completed.returncode if baseline_valid else 1
     write(detail, {"run_id": run_id, "suite": suite, "attempt": attempt, "command": command,
                    "source_commit": meta["source_commit"], "started_at_utc": started_at, "ended_at_utc": now(),
-                   "elapsed_seconds": round(time.monotonic() - started, 3), "exit_code": completed.returncode,
+                   "elapsed_seconds": round(time.monotonic() - started, 3), "exit_code": exit_code,
+                   "suite_exit_code": completed.returncode, "baseline_valid": baseline_valid,
                    "python_version": sys.version.split()[0],
                    "scope": "Fixture-only subprocess; fresh runtime/data/log, team mode off in parent, external keys blanked",
                    "does_not_mark_case_passed": True})
     print(detail)
-    return completed.returncode
+    if not baseline_valid:
+        print("Code changed during verification; diagnostic output cannot pass the pinned baseline", file=sys.stderr)
+    return exit_code
 
 
 def main():

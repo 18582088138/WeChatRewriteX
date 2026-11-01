@@ -127,6 +127,9 @@ def test_run_path_cannot_escape_or_replace_an_existing_run(run):
 
 
 def test_fixture_runner_never_inherits_production_runtime_or_keys(run, tmp_path, monkeypatch):
+    corpus = tmp_path / "tests/fixtures"
+    corpus.mkdir(parents=True)
+    (corpus / "sample.md").write_text("Synthetic source input", encoding="utf-8")
     production = tmp_path / "production-runtime"
     production.mkdir()
     secret = production / ".env"
@@ -139,6 +142,8 @@ def test_fixture_runner_never_inherits_production_runtime_or_keys(run, tmp_path,
     captured = {}
     def execute(command, **kwargs):
         captured.update(kwargs["env"])
+        copied = Path(captured["WENSHU_RUNTIME_DIR"]) / "tests/fixtures/sample.md"
+        assert copied.read_text(encoding="utf-8") == "Synthetic source input"
         kwargs["stdout"].write("Synthetic runner fixture\n")
         return SimpleNamespace(returncode=0)
     monkeypatch.setattr(ledger.subprocess, "run", execute)
@@ -156,6 +161,19 @@ def test_runner_refuses_changed_test_source(run, monkeypatch):
     monkeypatch.setattr(ledger, "git", lambda *args: "scripts/changed.py" if args[0] == "diff" else COMMIT)
     with pytest.raises(ValueError, match="changed since pinned"):
         ledger.run_local("nuc-test-01", "backend", "01")
+
+
+def test_runner_rejects_code_changes_during_execution(run, monkeypatch):
+    changed = False
+    monkeypatch.setattr(ledger, "git", lambda *args: ("app/changed.py" if changed else "") if args[0] == "diff" else COMMIT)
+    def execute(command, **kwargs):
+        nonlocal changed
+        changed = True
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(ledger.subprocess, "run", execute)
+    assert ledger.run_local("nuc-test-01", "backend", "01") == 1
+    detail = json.loads((ledger.ROOT / "build/nuc-acceptance/nuc-test-01/backend-01.json").read_text(encoding="utf-8"))
+    assert not detail["baseline_valid"] and detail["suite_exit_code"] == 0
 
 
 def test_handbook_change_invalidates_existing_acceptance(run):

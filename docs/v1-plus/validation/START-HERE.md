@@ -51,6 +51,10 @@ Node/npm/Playwright依赖未就绪时先核实已有环境，记录安装版本/
 
 run-local执行期间使用异步终端会话，定期查看日志并汇报，不让Agent长时间阻塞等待。重复测试使用新attempt，保留旧失败。源码/依赖/标准改变后新建run，禁止用旧结果通过新基线。
 
+隔离runtime内复制仓库tests/fixtures合成素材，供旧fixture爬虫按PROJECT_ROOT读取；不复制生产resource或.env。运行期间禁止修改测试代码/标准；运行器结束时再次检查基线，变化会记录baseline_valid=false并返回非零，即使测试进程自身退出0也不能算通过。
+
+浏览器trace/截图仍写入web/test-results或web/team-test-results；首次失败后先复制这些原始材料到本机忽略的build/nuc-acceptance/<run-id>/<suite>-<attempt>-artifacts，再重跑，避免Playwright清理旧输出。它们可能含页面内容，不直接提交Git；共享材料使用已核对的去敏步骤/摘要。
+
 ## 记录、证据共享与复核
 
 原始日志、数据库、密钥、会话Cookie、备份、真实文章和模型响应留在NUC本地忽略目录。按EVIDENCE-TEMPLATE整理不含这些内容的事实证据到`runs/<run-id>/evidence/`；可分享已核对的主机probe、去标识的HTTP统计、资源CSV、测试摘要和故障时间线。共享报告只用`.md/.json/.csv/.txt`且≤5MiB。
