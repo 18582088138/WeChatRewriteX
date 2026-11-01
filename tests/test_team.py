@@ -56,8 +56,14 @@ def scenario(tmp_path, code, timeout=60):
     for key in list(env):
         if key.endswith(("_API_KEY", "_SEARCH_KEY")):
             env[key] = ""
-    result = subprocess.run([sys.executable, "-X", "utf8", "-c", PREFIX + code + "\nstack.close()"],
-        cwd=ROOT, env=env, capture_output=True, text=True, encoding="utf-8", timeout=timeout)
+    try:
+        result = subprocess.run([sys.executable, "-X", "utf8", "-c", PREFIX + code + "\nstack.close()"],
+            cwd=ROOT, env=env, capture_output=True, text=True, encoding="utf-8", timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        def decoded(value):
+            return value.decode("utf-8", errors="replace") if isinstance(value, bytes) else (value or "")
+        raise AssertionError(f"Synthetic team scenario exceeded {timeout}s; partial progress:\n" +
+                             decoded(exc.stdout) + decoded(exc.stderr)) from exc
     logs = tmp_path / "logs" / "wenshu.log"
     assert result.returncode == 0, result.stdout + result.stderr + (logs.read_text(encoding="utf-8")[-4000:] if logs.exists() else "")
 
@@ -88,6 +94,8 @@ def test_role_project_and_archive_http_matrix(tmp_path):
     scenario(tmp_path, """
 from app.core.models import DraftDoc,Block,ArticleStatus
 from app.services import draft_service
+import time
+matrix_started=time.monotonic()
 cases=0
 for client,person,role in ((a,admin,'admin'),(b,bm,'member'),(c,cm,'maintainer')):
     for grant in ('none','read','create','review','both','owner'):
@@ -132,6 +140,7 @@ for client,person,role in ((a,admin,'admin'),(b,bm,'member'),(c,cm,'maintainer')
             response=client.put('/api/articles/'+p+'/access',json=access)
             assert response.status_code==(200 if manageable else 404),(context,'access',response.text)
             cases+=1
+            print(f'Matrix progress: {cases}/36 {context}, elapsed={time.monotonic()-matrix_started:.2f}s',flush=True)
     for path in ('/api/settings','/api/auth/members','/api/team/audit','/openapi.json'):
         response=client.get(path)
         assert response.status_code==(200 if role=='admin' else 403),(role,path,response.text)
@@ -148,7 +157,9 @@ assert fresh.get('/api/articles').status_code==200
 assert fresh.post('/api/auth/logout').status_code==200
 assert fresh.get('/api/articles').status_code==401
 print(f'HTTP role/project/archive matrix: {cases} combinations plus system and session boundaries')
-""", timeout=120)
+# This is the deadline for the entire 36-combination fixture, not an API
+# latency criterion. Preserve all assertions and progress if a host is slow.
+""", timeout=180)
 
 
 def test_project_lists_files_and_foreign_material_ids_are_protected(tmp_path):
