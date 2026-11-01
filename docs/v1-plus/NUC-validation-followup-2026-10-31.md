@@ -1,5 +1,7 @@
 # NUC 部署复验分析与下一轮完成条件
 
+2026-11-01后续执行以[统一验收入口](validation/START-HERE.md)和[CASEBOOK](validation/CASEBOOK.md)为准；19项编号、run基线、证据模板及reported/reviewed账本已补齐。本文保留既有分析和历史补测事实，不代替本轮[STATUS](validation/STATUS.md)。
+
 依据 `dev/v1-plus` 的 `beed771`、`10bcd44` 及[家庭复验记录](home-validation-2026-10-31.md)。本轮在公司开发机分析、修改工具和隔离补测，没有连接或配置 NUC，也没有操作真实数据。
 
 ## 为什么没有完成全部验证
