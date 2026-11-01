@@ -1,5 +1,7 @@
 # V1.0+ 家庭开发机分阶段复验与补测交接（2026-10-31）
 
+本文件为历史复验事实。后续NUC Agent请使用[统一验收入口](validation/START-HERE.md)执行完整可执行项、记录证据并同步[STATUS](validation/STATUS.md)，不以本轮代表性通过直接结束正式验收。
+
 ## 1. 结论与验证边界
 
 验证对象：`dev/v1-plus` 集成候选 `2be37d65f2e5a579550c74d429aca665d60a6f02`，程序 `1.1.0-rc.1`，schema 6。

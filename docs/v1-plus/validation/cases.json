@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "cases": [
+    {"id":"B01","title":"机器、权限、程序与Git基线","group":"local","machine":"nuc","required":true,"depends":[]},
+    {"id":"B02","title":"候选SHA256、版本及源码对应关系","group":"local","machine":"nuc","required":true,"depends":["B01"]},
+    {"id":"L01","title":"隔离后端、权限及部署工具回归","group":"local","machine":"nuc","required":true,"depends":["B02"]},
+    {"id":"L02","title":"团队真实浏览器闭环及冲突恢复","group":"local","machine":"nuc","required":true,"depends":["B02"]},
+    {"id":"D01","title":"真实旧数据完整备份与隔离迁移回退","group":"local","machine":"nuc","required":true,"depends":["B02"]},
+    {"id":"D02","title":"独立runtime、三档实际成员和本机业务","group":"local","machine":"nuc","required":true,"depends":["D01"]},
+    {"id":"D03","title":"Windows计划任务和目录权限","group":"local","machine":"nuc","required":true,"depends":["D02"]},
+    {"id":"D04","title":"退出Windows登录会话后的服务可用性","group":"local","machine":"nuc","required":true,"depends":["D03"]},
+    {"id":"D05","title":"实际主机重启后的自启动和数据一致性","group":"local","machine":"nuc","required":true,"depends":["D03","D06"]},
+    {"id":"D06","title":"实际计划任务离线备份与隔离恢复","group":"local","machine":"nuc","required":true,"depends":["D03"]},
+    {"id":"D07","title":"合成任务异常退出、单实例与队列恢复","group":"local","machine":"nuc","required":true,"depends":["B02"]},
+    {"id":"P01","title":"三身份真实HTTP基线及资源采样","group":"local","machine":"nuc","required":true,"depends":["D02"]},
+    {"id":"P02","title":"30～60分钟持续工作负载与队列分段耗时","group":"local","machine":"nuc","required":true,"depends":["P01"]},
+    {"id":"R01","title":"私有组网/HTTPS及会话、CSRF、SSE","group":"remote","machine":"nuc","required":true,"depends":["D03"]},
+    {"id":"R02","title":"真实手机及蜂窝网络","group":"remote","machine":"nuc","required":true,"depends":["R01"]},
+    {"id":"R03","title":"外地实际成员完整协作与撤权","group":"remote","machine":"nuc","required":true,"depends":["R01"]},
+    {"id":"R04","title":"另一设备副本及实际RPO/RTO演练","group":"remote","machine":"nuc","required":true,"depends":["D06"]},
+    {"id":"R05","title":"10～20真实主题及3～7自然日试运行","group":"remote","machine":"nuc","required":true,"depends":["P02","R02","R03"]},
+    {"id":"X01","title":"Docker/Nginx运行（仅选用时）","group":"optional","machine":"nuc","required":false,"depends":["B02"]}
+  ]
+}
