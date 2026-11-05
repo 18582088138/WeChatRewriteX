@@ -22,21 +22,31 @@ def review_matches(review: dict | None, doc: DraftDoc) -> bool:
 
 
 def finalize(article_id: str, force: bool = False, expected_version: int | None = None,
-             expected_revision: int | None = None) -> dict:
+             expected_revision: int | None = None, exception_reason: str = "") -> dict:
     with db.transaction():
         art = dao.get_article(article_id)
         if not art:
             raise ValueError("文章不存在")
         doc, row = draft_service.get_doc(article_id)
+        from . import team, human_review
+        if team.enabled():
+            human_review.current(article_id, expected_version, expected_revision)
+            team.require(article_id, "release")
         draft_service.check_revision(doc, expected_revision)
         if expected_version is not None and doc.version != expected_version:
             raise draft_service.VersionConflict("草稿已更新，请刷新后重试")
         cur = ArticleStatus(art["status"])
         if cur in (ArticleStatus.FINALIZED, ArticleStatus.DONE) and row["status"] == "finalized":
+            if team.enabled():
+                if exception_reason:
+                    human_review.approval(article_id, doc, exception_reason)
+                    human_review.record_final(doc, None, exception_reason)
+                human_review.export_approval(article_id, row)
             return {"ok": True, "version": doc.version, "forced_blockers": 0,
                     "already_finalized": True}
         if cur not in (ArticleStatus.DRAFTED, ArticleStatus.REVIEWED, ArticleStatus.EDITING):
             raise ValueError(f"当前状态 {cur.value} 不允许定稿")
+        human = human_review.approval(article_id, doc, exception_reason) if team.enabled() else None
         review = dao.latest_review(article_id)
         matching = review_matches(review, doc)
         scores = json.loads(review["scores_json"]) if review else {}
@@ -63,6 +73,10 @@ def finalize(article_id: str, force: bool = False, expected_version: int | None 
         cp = draft_service.save_checkpoint(article_id, "finalized", "finalized",
                  note="定稿快照" + ("；强制：" + "；".join(reasons) if reasons else ""))
         dao.set_article_status(article_id, ArticleStatus.FINALIZED)
+        if team.enabled():
+            human_review.record_final(cp, human, exception_reason)
+            if force and reasons:
+                team.audit("draft.force-ai", cp.id, article_id, {"reasons": reasons})
         db.after_commit(lambda: events.bus.publish(events.DRAFT_FINALIZED, article_id,
                        version=cp.version, forced=bool(force and reasons)))
         return {"ok": True, "version": cp.version,

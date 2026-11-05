@@ -140,9 +140,13 @@ def retry_publish(aid: str, body: RetryPublish) -> dict:
         snapshot = dao.get_draft_by_id(payload.get("snapshot_id", ""))
         if not snapshot or snapshot["article_id"] != aid or snapshot["status"] != "finalized":
             raise HTTPException(409, "原定稿快照不存在")
+        from ..services import human_review
+        human_review.export_approval(aid, snapshot)
         payload["platforms"] = [body.platform] if body.platform else platforms
         payload["retry_of"] = job["id"]
         job_id = queue.enqueue("publish", aid, payload)
+        from ..services import team
+        team.audit("export.retry", job_id, aid, {"snapshot_id": snapshot["id"], "platforms": payload["platforms"]})
         return {"job_id": job_id, "platforms": payload["platforms"], "snapshot_id": snapshot["id"]}
 
 
@@ -165,9 +169,13 @@ def publish(aid: str, body: Publish) -> dict:
         if not draft or draft["status"] != "finalized" or current["status"] not in ("FINALIZED", "DONE", "PUBLISHING"):
             raise HTTPException(409, "当前内容尚未定稿")
         doc = DraftDoc.model_validate_json(draft["doc_json"])
+        from ..services import human_review
+        approved_assets = human_review.export_approval(aid, draft)
         job_id = queue.enqueue("publish", aid, {"platforms": list(dict.fromkeys(platforms)),
-                           "snapshot_id": draft["id"], "assets": assets.manifest(doc),
+                           "snapshot_id": draft["id"], "assets": approved_assets if approved_assets is not None else assets.manifest(doc),
                            "settings": config.all_settings()})
+        from ..services import team
+        team.audit("export.enqueue", job_id, aid, {"snapshot_id": draft["id"], "platforms": platforms})
     return {"job_id": job_id, "platforms": platforms}
 
 
@@ -266,15 +274,23 @@ def reload_env(request: Request) -> dict:
     return result
 
 @router.get("/sse")
-def sse():
+def sse(request: Request):
     q = events.bus.subscribe()
+    from ..services import team
+    member_token = request.cookies.get("wenshu_member", "")
+    team_mode = team.enabled()
 
     def stream():
         try:
             yield ": connected\n\n"
             while True:
+                member = team.session(member_token) if team_mode else None
+                if team_mode and not member:
+                    return
                 try:
-                    msg = q.get(timeout=15)
+                    msg = q.get(timeout=1 if team_mode else 15)
+                    if team_mode and not (team.allowed(member, msg.get("article_id")) if msg.get("article_id") else member["role"] == "admin"):
+                        continue
                     yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
                 except queue_mod.Empty:
                     yield ": heartbeat\n\n"
@@ -287,6 +303,14 @@ def sse():
 @router.get("/health")
 def health() -> dict:
     return {"ok": True}
+
+
+@router.get("/capabilities")
+def capabilities():
+    from ..services import team
+    from ..services.llm import router as llm_router
+    return {"team_mode": team.enabled(), "member": team.public(team.actor.get()) if team.actor.get() else None,
+            "create_available": llm_router.available("create"), "review_available": llm_router.available("review")}
 
 
 @router.get("/ready")
@@ -303,9 +327,16 @@ def ready(request: Request) -> dict:
     workers_ok = not request.app.state.worker_enabled or bool(runtime and runtime.healthy())
     if not request.app.state.ready or not workers_ok:
         raise HTTPException(503, "服务未就绪")
+    from ..services.readiness import storage_status
+    from .. import logging_setup
+    try:
+        storage = storage_status({"data": config.data_dir(), "config": config.CONFIG_DIR,
+                                  "logs": logging_setup.log_dir()})
+    except (OSError, ValueError):
+        raise HTTPException(503, "持久存储不可写或可用空间不足")
     return {"ok": True, "workers": len(runtime.threads) if runtime else 0,
             "queue": {r["status"]: r["count"] for r in queue_counts},
-            "disk_free_mb": shutil.disk_usage(config.data_dir()).free // (1024 * 1024),
+            "disk_free_mb": storage["data"]["free_mb"], "storage": storage,
             "event_sequence": events.bus.sequence, "event_dropped": events.bus.dropped}
 
 

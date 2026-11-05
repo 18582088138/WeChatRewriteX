@@ -24,6 +24,13 @@ class AddUrl(BaseModel):
 
 
 def _with_abs(m: dict) -> dict:
+    m = dict(m)
+    from ..services import team
+    if team.enabled() and team.actor.get():
+        source = dao.get_material(m.get("source_material_id")) if m.get("source_material_id") else None
+        if source and not team.material_allowed(team.actor.get(), source):
+            m["source_material_id"] = None
+        m["shared"] = bool(db.query_one("SELECT material_id FROM shared_materials WHERE material_id=?", (m["id"],)))
     p = library.material_abs_path(m.get("path"))
     m["url"] = f"/files/{m['path']}" if m.get("path") else None
     m["exists"] = bool(p and p.exists()) if m.get("path") else None
@@ -280,10 +287,13 @@ def patch_material(mid: str, body: PatchMaterial) -> dict:
     m = dao.get_material(mid)
     if not m:
         raise HTTPException(404, "素材不存在")
-    if body.title is not None:
-        db.execute("UPDATE materials SET title=? WHERE id=?", (body.title.strip(), mid))
-    if body.note is not None:
-        db.execute("UPDATE materials SET note=? WHERE id=?", (body.note, mid))
+    from ..services import team
+    with db.transaction():
+        if body.title is not None:
+            db.execute("UPDATE materials SET title=? WHERE id=?", (body.title.strip(), mid))
+        if body.note is not None:
+            db.execute("UPDATE materials SET note=? WHERE id=?", (body.note, mid))
+        team.audit("material.metadata", mid, m.get("article_id"))
     return {"ok": True}
 
 
@@ -329,6 +339,9 @@ def delete_material(mid: str) -> dict:
     m = dao.get_material(mid)
     if not m:
         raise HTTPException(404, "素材不存在")
-    dao.archive_material(mid)
+    from ..services import team
+    with db.transaction():
+        dao.archive_material(mid)
+        team.audit("material.archive", mid, m.get("article_id"))
     events.bus.publish(events.MATERIAL_INGESTED, m.get("article_id"), material_id=mid)
     return {"ok": True, "archived": True}

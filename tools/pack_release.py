@@ -116,6 +116,7 @@ def bundle_browsers(pkg_dir: Path) -> None:
 def copy_docs(dst: Path) -> None:
     # Preserve repository-relative links, including deployment -> architecture.
     shutil.copytree(ROOT / "docs", dst / "docs", dirs_exist_ok=True)
+    shutil.copytree(ROOT / "packaging" / "deployment", dst / "packaging" / "deployment", dirs_exist_ok=True)
     for name in ("README.md", "CHANGELOG.md"):
         shutil.copy(ROOT / name, dst / name)
     # Keep the entry points used by older release packages.
@@ -151,6 +152,8 @@ def main() -> None:
     args = ap.parse_args()
 
     ver = APP_VERSION
+    from packaging.version import Version
+    distribution_version = str(Version(ver))  # SemVer rc label -> normalized Python wheel metadata.
     # 产物按版本分目录（release/v<ver>/），构建中间产物放 build/，不污染发布根
     ver_dir = RELEASE / f"v{ver}"
     ver_dir.mkdir(parents=True, exist_ok=True)
@@ -172,7 +175,7 @@ def main() -> None:
     if not args.skip_sdist:
         print("[2] Python 发布包（sdist + wheel）")
         run([PY, "-m", "build", "--sdist", "--wheel", "--no-isolation"])
-        for name in (f"wenshu-{ver}.tar.gz", f"wenshu-{ver}-py3-none-any.whl"):
+        for name in (f"wenshu-{distribution_version}.tar.gz", f"wenshu-{distribution_version}-py3-none-any.whl"):
             artifact = ROOT / "dist" / name
             if not artifact.is_file():
                 raise SystemExit(f"构建未生成预期发布包：{name}")

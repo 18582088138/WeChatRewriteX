@@ -1,0 +1,8 @@
+Register-ScheduledTask : 拒绝访问。
+所在位置 C:\Users\75203\Documents\2026\SelfProject\WeChatRewriteX\packaging\deployment\register_windows_task.ps1:31 字
+符: 1
++ Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (PS_ScheduledTask:Root/Microsoft/...S_ScheduledTask) [Register-Schedul
+   edTask], CimException
+    + FullyQualifiedErrorId : HRESULT 0x80070005,Register-ScheduledTask

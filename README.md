@@ -7,6 +7,8 @@
 
 架构优化及升级注意事项见 [架构与升级说明](docs/ARCHITECTURE.md)。
 
+V1.0+ 团队候选源码为 **1.1.0-rc.1**，在 `dev/v1-plus` 集成，main/正式v1.0未改变。成员登录、项目共享、人工批准、并发保护与运维材料已实现；真实家中主机/外地成员验收仍待执行。见 [团队使用说明](docs/v1-plus/user-guide.md)、[安装维护](docs/v1-plus/S6-operations.md) 和 [阶段验收记录](docs/v1-plus/S7-acceptance.md)。
+
 **当前正式版：v1.0（程序版本 1.0.0）**，完成图文内容创作基础功能，汇总开发迭代 V1.18 的成果。
 下载：[GitHub Release](https://github.com/18582088138/WeChatRewriteX/releases/tag/v1.0)；
 范围与升级说明：[v1.0 发布说明](docs/release/V1.0.md)。旧 V1.1～V1.18 为开发编号，正式版本从 v1.0 起重新建立序列。

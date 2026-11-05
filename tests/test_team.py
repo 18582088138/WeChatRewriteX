@@ -1,0 +1,443 @@
+"""Team tests run in isolated processes so legacy-mode regression remains independent."""
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+PREFIX = """
+from contextlib import ExitStack
+from fastapi.testclient import TestClient
+from app.main import create_app
+from app.storage import db, dao
+from app.services import team
+import sys,traceback
+sys.excepthook=lambda *args: traceback.print_exception(*args,file=sys.__stdout__)
+stack = ExitStack()
+a = stack.enter_context(TestClient(create_app(start_worker=False)))
+admin = team.initialize_admin('admin', '管理员', 'admin-password')
+b = stack.enter_context(TestClient(a.app))
+c = stack.enter_context(TestClient(a.app))
+d = stack.enter_context(TestClient(a.app))
+bm = team.create_member('writer','创作者','writer-password')
+cm = team.create_member('maintainer','维护负责人','maintainer-password','maintainer')
+dm = team.create_member('outsider','无权成员','outsider-password')
+def sign(client, login, password):
+    result = client.post('/api/auth/login',json={'login':login,'password':password})
+    assert result.status_code == 200, result.text
+    client.headers['X-Wenshu-CSRF'] = result.json()['csrf']
+sign(a,'admin','admin-password'); sign(b,'writer','writer-password'); sign(c,'maintainer','maintainer-password'); sign(d,'outsider','outsider-password')
+import re
+for client in (a,b,c,d):
+    original = client.request
+    def guarded(method,url,*,_original=original,**kwargs):
+        headers=dict(kwargs.pop('headers',{}) or {})
+        if method.upper() not in ('GET','HEAD','OPTIONS') and 'X-Wenshu-Project-Revision' not in headers:
+            match=re.search('/api/articles/([^/]+)',str(url)); aid=match.group(1) if match else None
+            if not aid:
+                match=re.search('/api/(drafts|materials|review-items)/([^/]+)',str(url))
+                if match:
+                    kind,oid=match.groups()
+                    if kind=='materials':
+                        m=dao.get_material(oid);aid=m['article_id'] if m else None
+                        aid=(kwargs.get('json') or {}).get('article_id',aid)
+                    elif kind=='drafts': aid=oid.rsplit('-v',1)[0]
+            row=db.query_one('SELECT revision FROM project_access WHERE article_id=?',(aid,)) if aid else None
+            if row:headers['X-Wenshu-Project-Revision']=str(row['revision'])
+        return _original(method,str(url).replace(chr(92),'/'),headers=headers,**kwargs)
+    client.request=guarded
+"""
+
+
+def scenario(tmp_path, code, timeout=60):
+    env = dict(os.environ)
+    env.update(WENSHU_TEAM_MODE="1", WENSHU_RUNTIME_DIR=str(tmp_path), WENSHU_DATA_DIR=str(tmp_path / "resource"),
+               WENSHU_LOG_DIR=str(tmp_path / "logs"), APP_ACCESS_TOKEN="", WENSHU_BOOTSTRAP_TOKEN="x"*32)
+    for key in list(env):
+        if key.endswith(("_API_KEY", "_SEARCH_KEY")):
+            env[key] = ""
+    try:
+        result = subprocess.run([sys.executable, "-X", "utf8", "-c", PREFIX + code + "\nstack.close()"],
+            cwd=ROOT, env=env, capture_output=True, text=True, encoding="utf-8", timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        def decoded(value):
+            return value.decode("utf-8", errors="replace") if isinstance(value, bytes) else (value or "")
+        raise AssertionError(f"Synthetic team scenario exceeded {timeout}s; partial progress:\n" +
+                             decoded(exc.stdout) + decoded(exc.stderr)) from exc
+    logs = tmp_path / "logs" / "wenshu.log"
+    assert result.returncode == 0, result.stdout + result.stderr + (logs.read_text(encoding="utf-8")[-4000:] if logs.exists() else "")
+
+
+def test_member_sessions_csrf_and_last_administrator(tmp_path):
+    scenario(tmp_path, """
+anonymous = TestClient(a.app)
+assert anonymous.get('/api/articles').status_code == 401
+assert anonymous.get('/api/articles',headers={'Authorization':'Bearer shared-token'}).status_code == 401
+assert b.get('/api/settings').status_code == 403
+assert b.post('/api/auth/members',json={'login':'evil','name':'evil','password':'evil-password'}).status_code == 403
+saved = b.headers.pop('X-Wenshu-CSRF')
+assert b.post('/api/articles',json={'title':'csrf'}).status_code == 403
+b.headers['X-Wenshu-CSRF'] = saved
+assert b.post('/api/articles',json={'title':'origin'},headers={'Origin':'https://evil.example'}).status_code == 403
+assert a.put('/api/auth/members/'+admin['id'],json={'role':'member','enabled':True}).status_code == 409
+assert b.post('/api/auth/logout').status_code == 200
+assert b.get('/api/articles').status_code == 401
+sign(b,'writer','writer-password')
+assert a.put('/api/auth/members/'+bm['id'],json={'role':'member','enabled':False}).status_code == 200
+assert b.get('/api/articles').status_code == 401
+assert db.query_one('SELECT password_hash FROM members WHERE id=?',(bm['id'],))['password_hash'].startswith('scrypt$')
+assert 'writer-password' not in a.get('/api/auth/members').text
+""")
+
+
+def test_role_project_and_archive_http_matrix(tmp_path):
+    scenario(tmp_path, """
+from app.core.models import DraftDoc,Block,ArticleStatus
+from app.services import draft_service
+import time
+matrix_started=time.monotonic()
+cases=0
+for client,person,role in ((a,admin,'admin'),(b,bm,'member'),(c,cm,'maintainer')):
+    for grant in ('none','read','create','review','both','owner'):
+        for archived in (False,True):
+            p=a.post('/api/articles',json={'title':f'matrix-{role}-{grant}-{archived}','auto_collect':False}).json()['article']['id']
+            upload=a.post('/api/articles/'+p+'/materials/upload-batch',files={'files':('matrix.txt',b'Private matrix evidence','text/plain')})
+            assert upload.status_code==200,upload.text
+            mid=upload.json()['ok'][0]['material_id']; material=dao.get_material(mid)
+            draft_service.save_new_version(DraftDoc(id='',article_id=p,version=0,blocks=[Block(id='b',type='paragraph',text='Explicit human snapshot')]),'agent')
+            dao.set_article_status(p,ArticleStatus.DRAFTED)
+            doc=draft_service.get_doc(p)[0]
+            revision={'expected_version':doc.version,'expected_revision':doc.edit_revision}
+            submitted=a.post('/api/articles/'+p+'/human-review',json={'reviewer_id':admin['id'],**revision})
+            assert submitted.status_code==200,submitted.text
+            assert a.put('/api/articles/'+p+'/human-review/'+submitted.json()['id'],json={'status':'approved','submission_revision':0,**revision}).status_code==200
+            assert a.post('/api/articles/'+p+'/finalize',json={'force':True,**revision}).status_code==200
+            members=[] if grant in ('none','owner') else [{'member_id':person['id'],'can_create':grant in ('create','both'),'can_review':grant in ('review','both')}]
+            access={'expected_revision':a.get('/api/articles/'+p+'/access').json()['revision'],'owner_id':person['id'] if grant=='owner' else dm['id'],'archived':archived,'members':members}
+            result=a.put('/api/articles/'+p+'/access',json=access)
+            assert result.status_code==200,result.text
+            readable=role=='admin' or grant!='none'
+            writable=not archived and (role=='admin' or grant in ('owner','create','both'))
+            releasable=writable and role in ('admin','maintainer')
+            manageable=role=='admin' or grant=='owner'
+            context=(role,grant,archived)
+            for path in (f'/api/articles/{p}',f'/api/articles/{p}/draft',f'/api/articles/{p}/audit',f'/api/articles/{p}/human-review',f'/api/articles/{p}/exports',f'/api/jobs?article_id={p}',f'/api/materials/{mid}/text','/files/'+material['path']):
+                response=client.get(path)
+                assert response.status_code==(200 if readable else 404),(context,path,response.status_code,response.text)
+            doc=draft_service.get_doc(p)[0]
+            revision={'expected_version':doc.version,'expected_revision':doc.edit_revision}
+            response=client.post('/api/articles/'+p+'/finalize',json={'force':True,**revision})
+            assert response.status_code==(200 if releasable else 404),(context,'finalize',response.text)
+            response=client.post('/api/articles/'+p+'/publish',json={'platforms':['x']})
+            assert response.status_code==(200 if releasable else 404),(context,'publish',response.text)
+            before=db.query_one('SELECT revision FROM project_access WHERE article_id=?',(p,))['revision']
+            response=client.put('/api/articles/'+p+'/selection',json={'material_ids':[]})
+            assert response.status_code==(200 if writable else 404),(context,'selection',response.text)
+            if not writable: assert db.query_one('SELECT revision FROM project_access WHERE article_id=?',(p,))['revision']==before
+            response=client.post('/api/articles/'+p+'/lease',json={'client_id':'matrix-client'})
+            assert response.status_code==(200 if writable else 404),(context,'lease',response.text)
+            access['expected_revision']=db.query_one('SELECT revision FROM project_access WHERE article_id=?',(p,))['revision']
+            response=client.put('/api/articles/'+p+'/access',json=access)
+            assert response.status_code==(200 if manageable else 404),(context,'access',response.text)
+            cases+=1
+            print(f'Matrix progress: {cases}/36 {context}, elapsed={time.monotonic()-matrix_started:.2f}s',flush=True)
+    for path in ('/api/settings','/api/auth/members','/api/team/audit','/openapi.json'):
+        response=client.get(path)
+        assert response.status_code==(200 if role=='admin' else 403),(role,path,response.text)
+fresh=stack.enter_context(TestClient(a.app))
+reset=a.post('/api/auth/members',json={'login':'reset-check','name':'Reset','password':'reset-password','role':'maintainer'})
+assert reset.status_code==200,reset.text
+sign(fresh,'reset-check','reset-password')
+assert fresh.get('/api/articles').status_code==403
+assert fresh.get('/api/auth/me').status_code==200
+assert fresh.post('/api/auth/password',json={'old_password':'reset-password','password':'changed-password'}).status_code==200
+assert fresh.get('/api/articles').status_code==401
+sign(fresh,'reset-check','changed-password')
+assert fresh.get('/api/articles').status_code==200
+assert fresh.post('/api/auth/logout').status_code==200
+assert fresh.get('/api/articles').status_code==401
+print(f'HTTP role/project/archive matrix: {cases} combinations plus system and session boundaries')
+# This is the deadline for the entire 36-combination fixture, not an API
+# latency criterion. Preserve all assertions and progress if a host is slow.
+""", timeout=180)
+
+
+def test_project_lists_files_and_foreign_material_ids_are_protected(tmp_path):
+    scenario(tmp_path, """
+p = b.post('/api/articles',json={'title':'private-keyword','auto_collect':False}).json()['article']['id']
+upload = b.post('/api/articles/'+p+'/materials/upload-batch',files={'files':('source.md',b'private evidence','text/markdown')})
+assert upload.status_code == 200, upload.text
+mid = upload.json()['ok'][0]['material_id']
+material = dao.get_material(mid)
+assert d.get('/api/articles/'+p).status_code == 404
+assert d.get('/api/articles?q=private-keyword').json()['total'] == 0
+assert d.get('/api/materials/'+mid+'/text').status_code == 404
+assert d.get('/files/'+material['path']).status_code == 404
+file_response=b.get('/files/'+material['path'])
+assert file_response.status_code == 200,(file_response.status_code,file_response.text,file_response.url)
+db.execute('INSERT INTO project_members VALUES(?,?,1,1)',(p,cm['id']))
+assert c.get('/api/articles/'+p).status_code == 200
+q = d.post('/api/articles',json={'title':'other','auto_collect':False}).json()['article']['id']
+assert d.put('/api/articles/'+q+'/selection',json={'material_ids':[mid]}).status_code == 404
+db.execute('DELETE FROM project_members WHERE article_id=? AND member_id=?',(p,cm['id']))
+assert c.get('/files/'+material['path']).status_code == 404
+assert b.post('/api/articles/'+p+'/finalize',json={}).status_code == 404
+assert db.query_one('PRAGMA user_version')['user_version'] == 6
+db.init_db()
+assert db.query_one('PRAGMA user_version')['user_version'] == 6
+""")
+
+
+def test_team_worker_records_member_and_runs_authorized_generation(tmp_path):
+    scenario(tmp_path, """
+import time
+worker_app = stack.enter_context(TestClient(create_app(start_worker=True)))
+p = b.post('/api/articles',json={'title':'authorized generation','auto_collect':False}).json()['article']['id']
+assert b.post('/api/articles/'+p+'/materials/upload-batch',files={'files':('source.md',b'authorized source content','text/markdown')}).status_code == 200
+job = b.post('/api/articles/'+p+'/advance',json={'stage':'create'})
+assert job.status_code == 200, job.text
+deadline = time.monotonic()+20
+while time.monotonic()<deadline:
+    row = db.query_one('SELECT * FROM jobs WHERE id=?',(job.json()['job_id'],))
+    if row['status'] in ('done','failed'): break
+    time.sleep(.1)
+assert row['status']=='done', row
+assert __import__('json').loads(row['payload_json'])['_member_id']==bm['id']
+assert d.get('/api/jobs?article_id='+p).status_code == 404
+assert d.get('/api/jobs').json()['jobs'] == []
+assert 'payload_json' not in b.get('/api/jobs?article_id='+p).text
+""")
+
+
+def test_membership_transfer_archive_sharing_and_owned_copy(tmp_path):
+    scenario(tmp_path, """
+p = b.post('/api/articles',json={'title':'P1','auto_collect':False}).json()['article']['id']
+q = d.post('/api/articles',json={'title':'P2','auto_collect':False}).json()['article']['id']
+access=b.get('/api/articles/'+p+'/access').json()
+body={'expected_revision':access['revision'],'owner_id':bm['id'],'members':[{'member_id':cm['id'],'can_review':True}]}
+assert b.put('/api/articles/'+p+'/access',json=body).status_code==200
+assert b.put('/api/articles/'+p+'/access',json=body).status_code==409
+assert c.get('/api/articles/'+p).status_code==200
+assert c.get('/api/articles/'+q).status_code==404
+assert d.get('/api/articles/'+p).status_code==404
+assert c.put('/api/articles/'+p+'/selection',json={'material_ids':[]}).status_code==404
+mid=a.post('/api/materials/upload',files={'file':('shared.md',b'shared text','text/markdown')}).json()['material_id']
+assert b.get('/api/materials/'+mid+'/text').status_code==404
+assert a.put('/api/materials/'+mid+'/sharing',json={'shared':True}).status_code==200
+assert b.get('/api/materials/'+mid+'/file').status_code==200
+copied=b.post('/api/materials/'+mid+'/copy-to-article',json={'article_id':p})
+assert copied.status_code==200,copied.text
+dest=dao.get_material(copied.json()['material_id']); source=dao.get_material(mid)
+assert dest['path'] != source['path'] and dest['source_material_id']==mid
+assert a.put('/api/materials/'+mid+'/sharing',json={'shared':False}).status_code==200
+assert b.get('/files/'+source['path']).status_code==404
+file_response=b.get('/files/'+dest['path'])
+assert file_response.status_code==200,(file_response.status_code,file_response.text,file_response.url)
+body.update(expected_revision=b.get('/api/articles/'+p+'/access').json()['revision'],owner_id=cm['id'],archived=True,members=[])
+assert b.put('/api/articles/'+p+'/access',json=body).status_code==200
+assert b.get('/api/articles/'+p).status_code==404
+assert c.get('/api/articles/'+p).status_code==200
+assert c.put('/api/articles/'+p+'/selection',json={'material_ids':[]}).status_code==404
+assert a.put('/api/articles/'+p+'/selection',json={'material_ids':[]}).status_code==404
+assert a.put('/api/auth/members/'+cm['id'],json={'role':'maintainer','enabled':False}).status_code==409
+assert db.query_one("SELECT count(*) AS n FROM audit_events WHERE article_id=? AND action='project.access'",(p,))['n']==2
+db.init_db(); assert db.query_one('SELECT count(*) AS n FROM project_access')['n']==2
+""")
+
+
+def test_human_return_revision_approval_finalization_and_export(tmp_path):
+    scenario(tmp_path, """
+from app.core.models import DraftDoc,Block,ArticleStatus
+from app.services import draft_service
+p=b.post('/api/articles',json={'title':'human-flow','auto_collect':False}).json()['article']['id']
+acl=b.get('/api/articles/'+p+'/access').json()
+assert b.put('/api/articles/'+p+'/access',json={'expected_revision':0,'owner_id':bm['id'],'members':[{'member_id':cm['id'],'can_create':True,'can_review':True}]}).status_code==200
+doc=draft_service.save_new_version(DraftDoc(id=p+'-v0',article_id=p,version=0,blocks=[Block(id='h',type='heading',level=1,text='Human flow'),Block(id='b',type='paragraph',text='First draft')]),'create')
+dao.set_article_status(p,ArticleStatus.DRAFTED)
+def rev():
+    current=b.get('/api/articles/'+p+'/draft').json()['draft']['doc']
+    return {'expected_version':current['version'],'expected_revision':current['edit_revision']}
+def submit():
+    r=b.post('/api/articles/'+p+'/human-review',json={'reviewer_id':cm['id'],**rev()}); assert r.status_code==200,r.text; return r.json()
+def decide(client,s,status,reason=''):
+    return client.put('/api/articles/'+p+'/human-review/'+s['id'],json={'status':status,'reason':reason,'submission_revision':s['revision'],**rev()})
+s=submit(); assert submit()['id']==s['id']
+assert d.put('/api/articles/'+p+'/human-review/'+s['id'],json={'status':'approved','submission_revision':0,**rev()}).status_code==404
+assert decide(b,s,'approved').status_code==403
+co=c.post('/api/articles/'+p+'/human-review/'+s['id']+'/comments',json={'anchor':'b','message':'Improve clarity'})
+assert co.status_code==200,co.text
+assert decide(c,s,'returned','Please revise').status_code==200
+edited=b.put('/api/drafts/'+p+'-v1/edit',json={'expected_revision':rev()['expected_revision'],'ops':[{'op':'update','block_id':'b','text':'Revised draft'}]})
+assert edited.status_code==200,edited.text
+s=submit(); assert decide(c,s,'approved').status_code==200
+assert b.get('/api/articles/'+p+'/human-review').json()['valid_approval']
+# Discussion state never mutates the content token or the approval.
+assert b.put('/api/articles/'+p+'/human-review/'+s['id']+'/comments/'+co.json()['id'],json={'status':'resolved','expected_revision':0}).status_code==404
+assert b.post('/api/articles/'+p+'/finalize',json={'force':True,**rev()}).status_code==404
+final=c.post('/api/articles/'+p+'/finalize',json={'force':True,**rev()})
+assert final.status_code==200,final.text
+assert db.query_one('SELECT submission_id FROM human_finalizations WHERE snapshot_id=?',(p+'-v1',))['submission_id']==s['id']
+export=c.post('/api/articles/'+p+'/publish',json={'platforms':['weibo']})
+assert export.status_code==200,export.text
+assert b.post('/api/articles/'+p+'/publish',json={'platforms':['weibo']}).status_code==404
+assert b.put('/api/drafts/'+p+'-v1/edit',json={'expected_revision':rev()['expected_revision'],'ops':[{'op':'update','block_id':'b','text':'New version'}]}).status_code==200
+assert not b.get('/api/articles/'+p+'/human-review').json()['valid_approval']
+assert c.post('/api/articles/'+p+'/finalize',json={'force':True,**rev()}).status_code==409
+s=submit(); old=rev()
+assert b.put('/api/drafts/'+p+'-v2/edit',json={'expected_revision':old['expected_revision'],'ops':[{'op':'update','block_id':'b','text':'Late edit'}]}).status_code==200
+assert decide(c,s,'approved').status_code==409
+assert a.post('/api/articles/'+p+'/finalize',json={'force':True,'exception_reason':'Emergency documented release',**rev()}).status_code==200
+""")
+
+
+def test_human_self_review_setting_material_change_and_comment_state(tmp_path):
+    scenario(tmp_path, """
+from app.core.models import DraftDoc,Block,ArticleStatus
+from app.services import draft_service
+p=b.post('/api/articles',json={'title':'self-review','auto_collect':False}).json()['article']['id']
+mid=b.post('/api/articles/'+p+'/materials/upload-batch',files={'files':('source.md',b'evidence','text/markdown')}).json()['ok'][0]['material_id']
+doc=draft_service.save_new_version(DraftDoc(id=p+'-v0',article_id=p,version=0,blocks=[Block(id='b',type='paragraph',text='test',citations=[mid])]),'create');dao.set_article_status(p,ArticleStatus.DRAFTED)
+r={'expected_version':1,'expected_revision':doc.edit_revision}
+s=b.post('/api/articles/'+p+'/human-review',json={'reviewer_id':bm['id'],**r}).json()
+comment=b.post('/api/articles/'+p+'/human-review/'+s['id']+'/comments',json={'message':'self comment'}).json()
+assert b.put('/api/articles/'+p+'/human-review/'+s['id'],json={'status':'approved','submission_revision':0,**r}).status_code==200
+assert b.put('/api/articles/'+p+'/human-review/'+s['id']+'/comments/'+comment['id'],json={'status':'resolved','expected_revision':0}).status_code==200
+assert b.get('/api/articles/'+p+'/human-review').json()['valid_approval']
+s2=b.post('/api/articles/'+p+'/human-review',json={'reviewer_id':bm['id'],**r}).json()
+assert s2['id']!=s['id'] and 'assets_json' not in s2
+assert not b.get('/api/articles/'+p+'/human-review').json()['valid_approval']
+assert b.put('/api/articles/'+p+'/human-review/'+s2['id'],json={'status':'approved','submission_revision':0,**r}).status_code==200
+assert a.put('/api/team/settings',json={'self_review':False}).status_code==200
+assert b.post('/api/articles/'+p+'/human-review',json={'reviewer_id':bm['id'],**r}).status_code==403
+# Material metadata is part of approval, including citations.
+assert b.patch('/api/materials/'+mid,json={'title':'new evidence title'}).status_code==200
+assert not b.get('/api/articles/'+p+'/human-review').json()['valid_approval']
+assert b.put('/api/team/settings',json={'self_review':True}).status_code==403
+""")
+
+
+def test_concurrent_guards_late_ai_revocation_and_expiring_lease(tmp_path):
+    scenario(tmp_path, """
+import threading,time
+from app.core.models import DraftDoc,Block,ArticleStatus
+from app.services import draft_service
+from app.agents.creator import CreatorAgent
+p=b.post('/api/articles',json={'title':'race','auto_collect':False}).json()['article']['id']
+assert b.put('/api/articles/'+p+'/access',json={'expected_revision':0,'owner_id':bm['id'],'members':[{'member_id':cm['id'],'can_create':True,'can_review':True}]}).status_code==200
+doc=draft_service.save_new_version(DraftDoc(id=p+'-v0',article_id=p,version=0,blocks=[Block(id='b',type='paragraph',text='Original')]),'create');dao.set_article_status(p,ArticleStatus.DRAFTED)
+token=b.get('/api/articles/'+p).headers['X-Wenshu-Project-Revision']
+body={'expected_revision':doc.edit_revision,'ops':[{'op':'update','block_id':'b','text':'B saved'}]}
+assert b.put('/api/drafts/'+p+'-v1/edit',json=body,headers={'X-Wenshu-Project-Revision':token}).status_code==200
+body['ops'][0]['text']='C local input'
+assert c.put('/api/drafts/'+p+'-v1/edit',json=body,headers={'X-Wenshu-Project-Revision':token}).status_code==409
+assert c.put('/api/drafts/'+p+'-v1/edit',json=body,headers={'X-Wenshu-Project-Revision':''}).status_code==428
+assert draft_service.get_doc(p)[0].blocks[0].text=='B saved'
+def revision(): return draft_service.get_doc(p)[0].edit_revision
+started=threading.Event();release=threading.Event()
+CreatorAgent.llm_available=lambda self:True
+def fake(self,aid,new,bids,instruction):
+    started.set();assert release.wait(10);new.blocks[0].text='Late AI';return new
+CreatorAgent.regenerate_blocks=fake
+out=[]
+t=threading.Thread(target=lambda:out.append(c.post('/api/drafts/'+p+'-v1/regenerate',json={'expected_revision':revision(),'block_ids':['b']})))
+t.start();assert started.wait(10)
+assert b.put('/api/drafts/'+p+'-v1/edit',json={'expected_revision':revision(),'ops':[{'op':'update','block_id':'b','text':'Human wins'}]}).status_code==200
+release.set();t.join(10);assert out[0].status_code==409,out[0].text
+assert draft_service.get_doc(p)[0].blocks[0].text=='Human wins'
+started.clear();release.clear();out.clear()
+t=threading.Thread(target=lambda:out.append(c.post('/api/drafts/'+p+'-v1/regenerate',json={'expected_revision':revision(),'block_ids':['b']})))
+t.start();assert started.wait(10)
+access=b.get('/api/articles/'+p+'/access').json()
+assert b.put('/api/articles/'+p+'/access',json={'expected_revision':access['revision'],'owner_id':bm['id'],'members':[]}).status_code==200
+release.set();t.join(10);assert out[0].status_code==404,out[0].text
+assert draft_service.get_doc(p)[0].blocks[0].text=='Human wins'
+lease=b.post('/api/articles/'+p+'/lease',json={'client_id':'browser-one'});assert lease.json()['acquired']
+assert not b.post('/api/articles/'+p+'/lease',json={'client_id':'browser-two'}).json()['acquired']
+db.execute('UPDATE edit_leases SET expires=?',(time.time()-1,))
+assert b.post('/api/articles/'+p+'/lease',json={'client_id':'browser-two'}).json()['acquired']
+assert d.get('/api/articles/'+p+'/audit').status_code==404
+assert b.get('/api/team/audit').status_code==403
+assert b.get('/api/team/work').status_code==200
+audit=b.get('/api/articles/'+p+'/audit').text
+assert 'password_hash' not in audit and 'csrf' not in audit and 'writer-password' not in audit
+""")
+
+
+def test_offline_admin_recovery_and_full_team_backup_restore(tmp_path):
+    scenario(tmp_path, """
+import os,subprocess,sqlite3,json
+from pathlib import Path
+from app.pipeline.runtime_lock import RuntimeLock
+from app.core import config
+from app.services.instance_backup import backup_instance,restore_instance
+p=b.post('/api/articles',json={'title':'recover-project','auto_collect':False}).json()['article']['id']
+mid=b.post('/api/articles/'+p+'/materials/upload-batch',files={'files':('source.md',b'restore evidence','text/markdown')}).json()['ok'][0]['material_id']
+from app.core.models import DraftDoc,Block,ArticleStatus
+from app.services import draft_service
+doc=draft_service.save_new_version(DraftDoc(id=p+'-v0',article_id=p,version=0,blocks=[Block(id='b',type='paragraph',text='Restore human snapshot',citations=[mid])]),'create');dao.set_article_status(p,ArticleStatus.DRAFTED)
+r={'expected_version':doc.version,'expected_revision':doc.edit_revision}
+s=b.post('/api/articles/'+p+'/human-review',json={'reviewer_id':bm['id'],**r}).json()
+comment=b.post('/api/articles/'+p+'/human-review/'+s['id']+'/comments',json={'message':'backup human history'}).json()
+assert b.put('/api/articles/'+p+'/human-review/'+s['id'],json={'status':'approved','submission_revision':0,**r}).status_code==200
+assert a.post('/api/articles/'+p+'/finalize',json={'force':True,**r}).status_code==200
+script="import getpass,sys; getpass.getpass=lambda *args:'recovery-password'; sys.argv=['wenshu','--recover-admin','admin']; from app.__main__ import main; main()"
+guard=RuntimeLock(config.data_dir()).acquire()
+try:
+    blocked=subprocess.run([sys.executable,'-X','utf8','-c',script],capture_output=True)
+    assert blocked.returncode!=0
+finally:guard.close()
+result=subprocess.run([sys.executable,'-X','utf8','-c',script],capture_output=True)
+assert result.returncode==0,result.stderr
+assert a.get('/api/auth/me').status_code==401
+sign(a,'admin','recovery-password')
+assert a.get('/api/articles').status_code==403
+assert a.post('/api/auth/password',json={'old_password':'recovery-password','password':'final-admin-password'}).status_code==200
+sign(a,'admin','final-admin-password')
+assert a.get('/api/articles/'+p).status_code==200
+stack.close()
+backup=config.RUNTIME_ROOT/'offline-copy';restored=config.RUNTIME_ROOT/'restored-copy'
+backup_instance(config.RUNTIME_ROOT,config.data_dir(),backup);restore_instance(backup,restored)
+with sqlite3.connect(restored/'resource'/'app.db') as con:
+    assert con.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
+    assert con.execute('SELECT count(*) FROM members').fetchone()[0]==4
+    assert con.execute('SELECT owner_id FROM project_access WHERE article_id=?',(p,)).fetchone()[0]==bm['id']
+    assert con.execute("SELECT count(*) FROM audit_events WHERE action='member.offline-recovery'").fetchone()[0]==1
+    assert con.execute('SELECT submission_id FROM human_finalizations WHERE snapshot_id=?',(p+'-v1',)).fetchone()[0]==s['id']
+    assert con.execute('SELECT message FROM human_comments WHERE id=?',(comment['id'],)).fetchone()[0]=='backup human history'
+    path=con.execute('SELECT path FROM materials WHERE id=?',(mid,)).fetchone()[0]
+assert (restored/'resource'/path).is_file()
+""")
+
+
+def test_twenty_project_parallel_read_fixture(tmp_path):
+    scenario(tmp_path, """
+import concurrent.futures,time,json,statistics
+from pathlib import Path
+from app.storage import library
+projects=[]
+for i in range(20):
+    p=dao.create_article('local://fixture-'+str(i),title='fixture-'+str(i))['id'];projects.append(p)
+    if i%4 in (0,1):
+        db.execute('UPDATE project_access SET owner_id=? WHERE article_id=?',(bm['id'],p))
+        db.execute('INSERT INTO project_members VALUES(?,?,1,1)',(p,cm['id']))
+    elif i%4==2:
+        db.execute('INSERT INTO project_members VALUES(?,?,1,1)',(p,bm['id']))
+        db.execute('INSERT INTO project_members VALUES(?,?,1,1)',(p,dm['id']))
+    library.ingest_text('Fixed evidence for topic '+str(i),'Topic '+str(i),'article',p)
+db.execute('UPDATE project_access SET archived=1 WHERE article_id=?',(projects[-1],))
+def browse(client,count):
+    samples=[]
+    for i in range(15):
+        for path in ('/api/articles','/api/jobs','/api/team/work'):
+            start=time.perf_counter();response=client.get(path);samples.append((time.perf_counter()-start)*1000)
+            assert response.status_code==200,response.text
+            if path=='/api/articles':assert response.json()['total']==count
+    return samples
+with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+    results=list(pool.map(lambda args:browse(*args),[(b,15),(c,10),(d,5)]))
+samples=sorted(x for group in results for x in group)
+report={'projects':20,'identities':3,'requests':len(samples),'median_ms':round(statistics.median(samples),2),'p95_ms':round(samples[int(len(samples)*.95)-1],2),'transport':'in-process ASGI TestClient; not host/network benchmark'}
+output=Path('build/s7-validation');output.mkdir(parents=True,exist_ok=True)
+(output/'parallel-read.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
+assert db.query_one('SELECT count(*) AS n FROM project_access')['n']==20
+""")

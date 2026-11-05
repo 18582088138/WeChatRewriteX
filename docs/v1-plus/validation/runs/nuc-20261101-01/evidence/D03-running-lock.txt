@@ -1,0 +1,16 @@
+Traceback (most recent call last):
+  File "app\pipeline\runtime_lock.py", line 21, in acquire
+    msvcrt.locking(self.file.fileno(), msvcrt.LK_NBLCK, 1)
+PermissionError: [Errno 13] Permission denied
+The above exception was the direct cause of the following exception:
+Traceback (most recent call last):
+  File "launcher.py", line 14, in <module>
+  File "app\__main__.py", line 87, in main
+    backup_instance(config.RUNTIME_ROOT, config.data_dir(), Path(args.backup))
+  File "app\services\instance_backup.py", line 49, in backup_instance
+    guard = RuntimeLock(data).acquire()
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "app\pipeline\runtime_lock.py", line 28, in acquire
+    raise RuntimeError(f"数据目录已有运行实例：{self.path.parent}。请使用单个 ASGI worker。") from exc
+RuntimeError: 数据目录已有运行实例：C:\Wenshu\runtime\resource。请使用单个 ASGI worker。
+[PYI-8760:ERROR] Failed to execute script 'launcher' due to unhandled exception!

@@ -1,0 +1,8 @@
+Get-ScheduledTask : 找不到任何“TaskName”属性等于“Wenshu-SingleInstance”的 MSFT_ScheduledTask 对象。请验证属性值，然
+后重试。
+所在位置 C:\Users\75203\Documents\2026\SelfProject\WeChatRewriteX\packaging\deployment\backup_windows_task.ps1:16 字符:
+ 7
++ $task=Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
++       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (Wenshu-SingleInstance:String) [Get-ScheduledTask], CimJobException
+    + FullyQualifiedErrorId : CmdletizationQuery_NotFound_TaskName,Get-ScheduledTask

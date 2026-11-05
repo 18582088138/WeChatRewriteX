@@ -203,9 +203,30 @@ def _clone_for_scope(dup: dict, scope: str, article_id: str | None, note: str) -
     防止「两篇文章引用同一原文时，后收的文章拿不到素材行」——去重只省文件，不省行。
     """
     with db.transaction():
+        from ..services import team
+        path = dup.get("path")
+        if team.enabled() and team.actor.get():
+            if not team.material_allowed(team.actor.get(), dao.get_material(dup["id"])):
+                from fastapi import HTTPException
+                raise HTTPException(404, "来源素材权限已撤销")
+            if scope == "article":
+                team.require(article_id, "write")
+            else:
+                team.admin()
+            # Each scope owns its file; removing source access cannot expose its directory.
+            if path:
+                import shutil
+                source = material_abs_path(path)
+                if not source or not source.is_file():
+                    raise ValueError("来源素材文件不存在")
+                dest_dir = _dest_dir(scope, article_id, dup["kind"])
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                dest = dest_dir / (uuid.uuid4().hex + source.suffix)
+                shutil.copy2(source, dest)
+                path = str(dest.relative_to(library_root()))
         mid = dao.insert_material(
             scope=scope, article_id=article_id if scope == "article" else None,
-            kind=dup["kind"], path=dup.get("path"), sha256=dup.get("sha256"),
+            kind=dup["kind"], path=path, sha256=dup.get("sha256"),
             phash=dup.get("phash"), source_url=dup.get("source_url"),
             source_material_id=dup.get("source_material_id") or dup["id"], watermark=dup.get("watermark"),
             width=dup.get("width"), height=dup.get("height"), duration=dup.get("duration"),
@@ -217,6 +238,7 @@ def _clone_for_scope(dup: dict, scope: str, article_id: str | None, note: str) -
             txt = dao.get_material_text(dup["id"])
             if txt:
                 dao.set_material_text(mid, txt)
+        team.audit("material.copy", mid, article_id, {"source_material_id": dup["id"], "scope": scope})
         return mid
 
 

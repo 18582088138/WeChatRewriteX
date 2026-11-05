@@ -30,3 +30,4 @@ app/_assets/
 # browser test artifacts
 web/test-results/
 web/playwright-report/
+web/team-test-results/

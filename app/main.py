@@ -10,7 +10,7 @@ import time
 import ipaddress
 import os
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
@@ -21,7 +21,7 @@ from .core.config import RUNTIME_ROOT, data_dir
 from .pipeline import hooks, queue
 from .storage import dao, db
 
-WEB_DIST = RUNTIME_ROOT / "web" / "dist"
+WEB_DIST = config.WEB_ROOT
 
 
 def create_app(start_worker: bool = True, llm=None) -> FastAPI:
@@ -31,6 +31,8 @@ def create_app(start_worker: bool = True, llm=None) -> FastAPI:
         app.state.import_watcher = False
         startup_started = time.perf_counter()
         try:
+            from .services.readiness import minimum_free_mb
+            minimum_free_mb()
             app.state.runtime = queue.start(llm) if start_worker else None
             if not start_worker:
                 db.init_db()
@@ -73,13 +75,48 @@ def create_app(start_worker: bool = True, llm=None) -> FastAPI:
 
     # 本地工具默认可跨域（开发期 Vite 端口不同）
     app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in os.environ.get("WENSHU_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if origin.strip() != "*"], allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-                       allow_headers=["Authorization", "Content-Type"], allow_credentials=True)
+                       allow_headers=["Authorization", "Content-Type", "X-Wenshu-CSRF", "X-Wenshu-Project-Revision"], expose_headers=["X-Wenshu-Project-ID", "X-Wenshu-Project-Revision"], allow_credentials=True)
 
     @app.middleware("http")
     async def token_guard(request: Request, call_next):
         from .core.execution import context
         request_id = uuid.uuid4().hex
         ctx = context.set({"request_id": request_id})
+        from .services import team
+        if team.enabled():
+            from .services.access_policy import authorize
+            member = team.session(request.cookies.get("wenshu_member", ""))
+            member_token = team.actor.set(member)
+            op_token = None
+            guard_token = None
+            try:
+                op = await authorize(request, member)
+                op_token = team.operation.set(op)
+                aid = op[0] if op and op[0] not in (None, "admin") else None
+                exempt = any(segment in request.url.path for segment in ("/access", "/human-review", "/lease", "/audit"))
+                if aid and request.method not in ("GET", "HEAD", "OPTIONS") and not exempt:
+                    raw = request.headers.get("X-Wenshu-Project-Revision", "")
+                    if not raw.isdigit():
+                        raise HTTPException(428, "需携带项目 revision，请先读取项目再修改")
+                    guard_token = team.write_guard.set({"aid": aid, "revision": int(raw)})
+                result = await call_next(request)
+                if aid:
+                    access = db.query_one("SELECT revision FROM project_access WHERE article_id=?", (aid,))
+                    if access:
+                        result.headers["X-Wenshu-Project-ID"] = aid
+                        result.headers["X-Wenshu-Project-Revision"] = str(access["revision"])
+                result.headers["X-Request-ID"] = request_id
+                result.headers["Cache-Control"] = "no-store"
+                return result
+            except HTTPException as exc:
+                return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+            finally:
+                if guard_token is not None:
+                    team.write_guard.reset(guard_token)
+                if op_token is not None:
+                    team.operation.reset(op_token)
+                team.actor.reset(member_token)
+                context.reset(ctx)
         token = config.get_env("APP_ACCESS_TOKEN")
         path = request.url.path
         protected = path.startswith(("/api/", "/files/")) or path in ("/docs", "/redoc", "/openapi.json")
@@ -130,6 +167,12 @@ def create_app(start_worker: bool = True, llm=None) -> FastAPI:
     app.include_router(drafts.router)
     app.include_router(materials.router)
     app.include_router(ops.router)
+    from .api import team as team_api
+    app.include_router(team_api.router)
+    from .api import collaboration
+    app.include_router(collaboration.router)
+    from .api import human_review
+    app.include_router(human_review.router)
 
     # 素材与导出文件（图片预览 / 下载）
     @app.get("/files/{relative:path}", include_in_schema=False)

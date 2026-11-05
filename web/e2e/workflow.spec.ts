@@ -28,11 +28,20 @@ test('editing survives event refresh and produces downloadable packages', async 
   await editor.blur()
   await expect.poll(async () => (await (await request.get(`/api/articles/${aid}/draft`)).json()).draft.doc.edit_revision).toBeGreaterThan(1)
   expect((await (await request.get(`/api/articles/${aid}/draft`)).json()).draft.version).toBe(1)
-  await request.post(`/api/articles/${aid}/advance`, { data: { stage: 'review' } })
-  await expect.poll(async () => (await (await request.get(`/api/articles/${aid}`)).json()).status).toBe('EDITING')
-  await expect.poll(async () => (await (await request.get(`/api/articles/${aid}/reviews/latest`)).json()).current).toBe(true)
+  // The UI action itself queues review, including in EDITING. Do not queue a
+  // separate API review first and then race finalization against a second one.
+  const reviewQueued = page.waitForResponse(r => r.url().endsWith(`/articles/${aid}/advance`) && r.request().method() === 'POST')
   await page.getByRole('button', { name: '去审稿 →', exact: true }).click()
+  expect((await reviewQueued).status()).toBe(200)
+  await expect.poll(async () => {
+    const jobs = (await (await request.get(`/api/jobs?article_id=${aid}`)).json()).jobs
+    const reviews = jobs.filter((job: { type: string }) => job.type === 'review')
+    return reviews.length > 0 && reviews.every((job: { status: string }) => job.status === 'done')
+  }).toBe(true)
+  await expect.poll(async () => (await (await request.get(`/api/articles/${aid}/reviews/latest`)).json()).current).toBe(true)
+  const finalized = page.waitForResponse(r => r.url().endsWith(`/articles/${aid}/finalize`) && r.request().method() === 'POST')
   await page.getByRole('button', { name: '定稿', exact: true }).click()
+  expect((await finalized).status()).toBe(200)
   await expect.poll(async () => (await (await request.get(`/api/articles/${aid}`)).json()).status).toBe('FINALIZED')
   await request.post(`/api/articles/${aid}/publish`, { data: { platforms: ['wechat_mp', 'weibo', 'x', 'xhs'] } })
   await expect.poll(async () => (await (await request.get(`/api/articles/${aid}`)).json()).status, { timeout: 15000 }).toBe('DONE')

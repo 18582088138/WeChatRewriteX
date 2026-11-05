@@ -1,0 +1,40 @@
+{
+  "backup_files": 52,
+  "backup_bytes": 4867820,
+  "schema": 6,
+  "integrity": "ok",
+  "three_logins": 3,
+  "authenticated_ready": 200,
+  "human_history": true,
+  "material_file_read": 200,
+  "manifest_read": 200,
+  "maintainer_archived_read": 200,
+  "member_archived_owner_read": 200,
+  "member_archived_write": 404,
+  "members": [
+    [
+      "admin",
+      1,
+      1
+    ],
+    [
+      "maintainer",
+      1,
+      1
+    ],
+    [
+      "member",
+      0,
+      1
+    ],
+    [
+      "member",
+      1,
+      1
+    ]
+  ],
+  "human_finalizations": 2,
+  "done_publish_jobs": 5,
+  "original_ready_after_restore": 200,
+  "restored_service_stopped": true
+}

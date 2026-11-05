@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "run_id": "nuc-20261101-01",
+  "machine_role": "nuc",
+  "agent_label": "ZCode",
+  "source_commit": "91c90090515405f6235e31f70a47f64c1851631f",
+  "criteria_sha256": "cc8ed5259502462fab0bf829ae3012ee906a3c1ad29b04cc0ffb0f8b83f80649",
+  "created_at_utc": "2026-11-01T08:34:17.578248+00:00",
+  "candidate": {
+    "version_output": "文枢 - 自媒体 Studio 1.1.0-rc.1",
+    "build": {
+      "version": "1.1.0-rc.1",
+      "commit": "2be37d65f2e5a579550c74d429aca665d60a6f02",
+      "source_hash": "6b74adc2aeec44404ca99e3183959e15da73b6f4de662ca5a7c537d51531b9a7",
+      "lock_hash": null,
+      "node_lock_hash": "efa5c126c81a0400bcb41136f9298e597036bc5a7297cde729a8110fb519955d",
+      "build_lock_hash": null,
+      "python": "3.12.14",
+      "sqlite": "3.53.4",
+      "node": "v22.16.0",
+      "playwright": "1.63.0"
+    },
+    "executable_name": "文枢.exe"
+  }
+}

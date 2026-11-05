@@ -1,0 +1,11 @@
+﻿{
+    "task":  "Wenshu-SingleInstance",
+    "state":  "Running",
+    "logon_type":  "S4U",
+    "run_level":  "Limited",
+    "execute":  "C:\\Wenshu\\releases\\v1.1.0-rc.1\\文枢.exe",
+    "arguments":  "--runtime-dir \"C:\\Wenshu\\runtime\" --data-dir \"C:\\Wenshu\\runtime\\resource\" --log-dir \"C:\\Wenshu\\runtime\\log\" --host 127.0.0.1 --port 8000 --no-browser",
+    "working_directory":  "C:\\Wenshu\\releases\\v1.1.0-rc.1",
+    "last_result":  267009,
+    "last_run":  "11/01/2026 19:08:33"
+}

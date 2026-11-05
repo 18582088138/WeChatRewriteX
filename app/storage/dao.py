@@ -14,10 +14,17 @@ from . import db
 def create_article(url: str, title: str = "", user_notes: str = "",
                    style_pack: str | None = None, target_word_count: int | None = None) -> dict:
     aid = new_id("article")
-    db.execute(
-        "INSERT INTO articles(id,url,title,user_notes,style_pack,target_word_count) VALUES(?,?,?,?,?,?)",
-        (aid, url, title, user_notes, style_pack, target_word_count),
-    )
+    with db.transaction():
+        db.execute(
+            "INSERT INTO articles(id,url,title,user_notes,style_pack,target_word_count) VALUES(?,?,?,?,?,?)",
+            (aid, url, title, user_notes, style_pack, target_word_count),
+        )
+        from ..services import team
+        if team.enabled():
+            owner = team.actor.get() or db.query_one("SELECT * FROM members WHERE role='admin' AND enabled=1 LIMIT 1")
+            if owner:
+                db.execute("INSERT INTO project_access(article_id,owner_id) VALUES(?,?)", (aid, owner["id"]))
+                team.audit("project.create", aid, aid)
     return get_article(aid)
 
 
@@ -27,6 +34,10 @@ def get_article(aid: str) -> dict | None:
 
 def _article_where(status_ui=None, q=None):
     clauses, params = [], []
+    from ..services import team
+    clause, values = team.visibility()
+    clauses.append(clause)
+    params.extend(values)
     if q:
         clauses.append("(LOWER(title) LIKE ? OR LOWER(url) LIKE ?)")
         # instr preserves literal substring behavior, including punctuation.
@@ -100,17 +111,27 @@ def get_material(mid: str) -> dict | None:
 
 
 def find_material_by_sha(sha256: str) -> dict | None:
-    return db.query_one("SELECT * FROM materials WHERE sha256=? AND deleted_at IS NULL", (sha256,))
+    from ..services import team
+    clause, params = team.material_visibility()
+    return db.query_one("SELECT * FROM materials WHERE sha256=? AND deleted_at IS NULL AND " + clause, (sha256, *params))
 
 
 def find_materials_by_sha(sha256: str) -> list[dict]:
     # 同 sha256 的全部记录（复制会合法产生多行）
-    return db.query("SELECT * FROM materials WHERE sha256=? AND deleted_at IS NULL", (sha256,))
+    from ..services import team
+    clause, params = team.material_visibility()
+    return db.query("SELECT * FROM materials WHERE sha256=? AND deleted_at IS NULL AND " + clause, (sha256, *params))
 
 
 def list_materials(scope: str | None = None, article_id: str | None = None,
                    kind: str | None = None) -> list[dict]:
     sql, params = "SELECT * FROM materials WHERE deleted_at IS NULL", []
+    from ..services import team
+    member = team.actor.get()
+    if team.enabled() and member and member["role"] != "admin":
+        clause, values = team.visibility("article_id")
+        sql += " AND ((scope='article' AND " + clause + ") OR (scope='common' AND id IN (SELECT material_id FROM shared_materials)))"
+        params.extend(values)
     if scope:
         sql += " AND scope=?"; params.append(scope)
     if article_id:
@@ -142,6 +163,10 @@ def search_materials_fts(query_str: str, limit: int = 20, article_id: str | None
     """
     scope = " AND (m.article_id=? OR m.scope='common')" if article_id else ""
     scope_params = (article_id,) if article_id else ()
+    from ..services import team
+    clause, params = team.material_visibility("m.")
+    scope += " AND " + clause
+    scope_params = (*scope_params, *params)
     def _like() -> list[tuple[str, str]]:
         rows = db.query(
             "SELECT t.material_id, substr(t.content,1,200) AS snip "
@@ -167,14 +192,16 @@ def search_materials_fts(query_str: str, limit: int = 20, article_id: str | None
 
 
 def all_material_texts(article_id: str | None = None) -> list[tuple[str, str]]:
+    from ..services import team
+    clause, params = team.material_visibility("m.")
     if article_id:
         rows = db.query(
             "SELECT t.material_id, t.content FROM material_texts t "
-            "JOIN materials m ON m.id=t.material_id WHERE m.deleted_at IS NULL AND (m.article_id=? OR m.scope='common')",
-            (article_id,),
+            "JOIN materials m ON m.id=t.material_id WHERE m.deleted_at IS NULL AND (m.article_id=? OR m.scope='common') AND " + clause,
+            (article_id, *params),
         )
     else:
-        rows = db.query("SELECT t.material_id, t.content FROM material_texts t JOIN materials m ON m.id=t.material_id WHERE m.deleted_at IS NULL")
+        rows = db.query("SELECT t.material_id, t.content FROM material_texts t JOIN materials m ON m.id=t.material_id WHERE m.deleted_at IS NULL AND " + clause, params)
     return [(r["material_id"], r["content"]) for r in rows]
 
 

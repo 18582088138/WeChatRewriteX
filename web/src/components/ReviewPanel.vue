@@ -5,7 +5,7 @@ import { api } from '../api'
 import { useAppStore } from '../stores/app'
 import type { DraftDoc, DraftView, ReviewItem } from '../types'
 
-const props = defineProps<{ articleId: string }>()
+const props = defineProps<{ articleId: string; teamMode?: boolean }>()
 const emit = defineEmits<{ (e: 'goto-publish'): void }>()
 const message = useMessage()
 const dialog = useDialog()
@@ -351,12 +351,12 @@ async function finalize(force = false) {
       </div>
 
       <div class="p-3 shrink-0" style="border-top: 1px solid var(--rule);">
-        <NButton block type="primary" :loading="finalizing"
+        <NButton v-if="!props.teamMode" block type="primary" :loading="finalizing"
                  :disabled="!doc || saveBusy || !!editingId || loading || !!busyId" @click="finalize(false)">
           定稿{{ pendingBlockers.length ? `（含 ${pendingBlockers.length} 个阻断项）` : '' }}
         </NButton>
         <div class="text-[11px] mt-1.5 text-center" style="color: var(--faint);">
-          定稿生成可回滚的正式版本；定稿后仍可继续编辑，再次定稿生成新版本。
+          {{ props.teamMode ? 'AI/规则检查独立记录；请在人工审核页批准具体快照，由维护人员定稿。' : '定稿生成可回滚的正式版本；定稿后仍可继续编辑，再次定稿生成新版本。' }}
         </div>
       </div>
     </aside>

@@ -1,0 +1,567 @@
+{
+  "B01": {
+    "status": "passed",
+    "summary": "B01权限条件已通过提升注册实际补齐",
+    "at_utc": "2026-11-01T11:12:21.502792+00:00",
+    "tested_commit": "91c90090515405f6235e31f70a47f64c1851631f",
+    "evidence": [
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/B01-attempt02.md",
+        "visibility": "shared",
+        "bytes": 1067,
+        "hash_kind": "utf8_lf",
+        "sha256": "8e72d3e424e61f5373487dd30eb9901d55d0fd1f0b6966cbec66d854d710b30d"
+      }
+    ],
+    "needed_input": "",
+    "next_action": "",
+    "review": {
+      "verdict": "accepted",
+      "reviewer": "company-agent",
+      "summary": "已阅读原probe、权限补齐及任务运行材料，机器/路径/空间/服务注册条件满足；资源为瞬时值。",
+      "at_utc": "2026-11-01T11:36:38.453845+00:00"
+    }
+  },
+  "B02": {
+    "status": "passed",
+    "summary": "候选SHA/CRC/版本/源码对应关系及B01前置通过",
+    "at_utc": "2026-11-01T11:12:21.674866+00:00",
+    "tested_commit": "91c90090515405f6235e31f70a47f64c1851631f",
+    "evidence": [
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/B02-attempt02.md",
+        "visibility": "shared",
+        "bytes": 791,
+        "hash_kind": "utf8_lf",
+        "sha256": "330f881e9958ea2e0cdf6a159c8dd84fb6b8c6fcf507edeb4a0fa3b258d97339"
+      }
+    ],
+    "needed_input": "",
+    "next_action": "",
+    "review": {
+      "verdict": "accepted",
+      "reviewer": "company-agent",
+      "summary": "已阅读包SHA/CRC与build-info，并实际比较build到固定源码的业务文件无差异；外置工具从仓库使用。",
+      "at_utc": "2026-11-01T11:36:38.460855+00:00"
+    }
+  },
+  "L01": {
+    "status": "passed",
+    "summary": "build/155后端/7+3浏览器实际通过，B02前置已补齐",
+    "at_utc": "2026-11-01T11:12:21.854661+00:00",
+    "tested_commit": "91c90090515405f6235e31f70a47f64c1851631f",
+    "evidence": [
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/L01.md",
+        "visibility": "shared",
+        "bytes": 1645,
+        "hash_kind": "utf8_lf",
+        "sha256": "fab2e346de170d3955e8a1ec32ede03e63400ba7e18421444c99d1a67d7ebbb2"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/L01-backend.json",
+        "visibility": "shared",
+        "bytes": 843,
+        "hash_kind": "utf8_lf",
+        "sha256": "1125c9acc22c5d3c6a3292c6d6146bd32297b22b3007659cb149bed114e5038f"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/prerequisites-resolved.md",
+        "visibility": "shared",
+        "bytes": 864,
+        "hash_kind": "utf8_lf",
+        "sha256": "efd935b62f53c45fa3b88edbf06c1ef6402db2b29adf5b621b6e4c2527d5987e"
+      }
+    ],
+    "needed_input": "",
+    "next_action": "",
+    "review": {
+      "verdict": "accepted",
+      "reviewer": "company-agent",
+      "summary": "四份runner JSON与155项无失败/跳过共享摘要相符；接受合成回归范围，原XML在NUC，L02另行失败。",
+      "at_utc": "2026-11-01T11:36:38.469914+00:00"
+    }
+  },
+  "L02": {
+    "status": "failed",
+    "summary": "额外UI实测发现归档checkbox刷新后与服务端状态不一致，且自审开关无管理员UI",
+    "at_utc": "2026-11-01T09:21:15.277892+00:00",
+    "tested_commit": "91c90090515405f6235e31f70a47f64c1851631f",
+    "evidence": [
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/L02.md",
+        "visibility": "shared",
+        "bytes": 3118,
+        "hash_kind": "utf8_lf",
+        "sha256": "3d07692f93676cee3c233a461923566f006cf7df6ce897762e185965d52e97bc"
+      }
+    ],
+    "needed_input": "前端Agent修复ProjectAccess归档布尔绑定并补管理员自审开关及回归",
+    "next_action": "独立分支修复并验证，合入后对新基线新建run；当前run保留failed",
+    "review": {
+      "verdict": "pending"
+    }
+  },
+  "D01": {
+    "status": "passed",
+    "summary": "真实原件备份/隔离迁移/旧程序回退实际通过，B02前置已补齐",
+    "at_utc": "2026-11-01T11:12:22.033223+00:00",
+    "tested_commit": "91c90090515405f6235e31f70a47f64c1851631f",
+    "evidence": [
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D01.md",
+        "visibility": "shared",
+        "bytes": 2463,
+        "hash_kind": "utf8_lf",
+        "sha256": "b14bea1b929d3253e2075269fc54860e12a6a6aec3a88a2681fefb762128dc14"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D01-original-inventory.json",
+        "visibility": "shared",
+        "bytes": 548,
+        "hash_kind": "utf8_lf",
+        "sha256": "4f98353f4cd3a46851b9d1213629fbc5730ca7b896ae1d34e30b039bc976472e"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D01-upgraded-inventory.json",
+        "visibility": "shared",
+        "bytes": 548,
+        "hash_kind": "utf8_lf",
+        "sha256": "fa2b46522a66e57e1ac7b59834da80a316b2d041b752ec7d694afec58147eeac"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/prerequisites-resolved.md",
+        "visibility": "shared",
+        "bytes": 864,
+        "hash_kind": "utf8_lf",
+        "sha256": "efd935b62f53c45fa3b88edbf06c1ef6402db2b29adf5b621b6e4c2527d5987e"
+      }
+    ],
+    "needed_input": "",
+    "next_action": "",
+    "review": {
+      "verdict": "accepted",
+      "reviewer": "company-agent",
+      "summary": "原件与升级副本数量和文稿/素材/导出SHA一致，旧程序读取及迁移边界材料相符；接受现有真实原件隔离范围，不代表正式切换。",
+      "at_utc": "2026-11-01T11:36:38.479585+00:00"
+    }
+  },
+  "D02": {
+    "status": "passed",
+    "summary": "独立runtime三档账号与完整业务实际通过，D01前置已补齐",
+    "at_utc": "2026-11-01T11:12:22.215465+00:00",
+    "tested_commit": "91c90090515405f6235e31f70a47f64c1851631f",
+    "evidence": [
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D02.md",
+        "visibility": "shared",
+        "bytes": 2122,
+        "hash_kind": "utf8_lf",
+        "sha256": "c52c20d38af2b2e663e6b6f6847c20baea76b095fc3ae93b63ae6b4f74389b3f"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D02-report.json",
+        "visibility": "shared",
+        "bytes": 769,
+        "hash_kind": "utf8_lf",
+        "sha256": "08696b34b343eecebf7484aea6934e46285bcbf36d978f682087e1766ac1944f"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D02-database-summary.json",
+        "visibility": "shared",
+        "bytes": 396,
+        "hash_kind": "utf8_lf",
+        "sha256": "950d555be4c23dd92cb680fb7dacdad1091a80883f7c3b34f021641168d16934"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/prerequisites-resolved.md",
+        "visibility": "shared",
+        "bytes": 864,
+        "hash_kind": "utf8_lf",
+        "sha256": "efd935b62f53c45fa3b88edbf06c1ef6402db2b29adf5b621b6e4c2527d5987e"
+      }
+    ],
+    "needed_input": "",
+    "next_action": "",
+    "review": {
+      "verdict": "accepted",
+      "reviewer": "company-agent",
+      "summary": "三档验收账号业务、权限/409/人审及导出摘要满足；接受正式独立runtime上的合成项目，不代表真实成员或模型质量验收。",
+      "at_utc": "2026-11-01T11:36:38.488701+00:00"
+    }
+  },
+  "D03": {
+    "status": "passed",
+    "summary": "任务Running/S4U/ready/导出/单实例实际通过",
+    "at_utc": "2026-11-01T11:12:22.588654+00:00",
+    "tested_commit": "91c90090515405f6235e31f70a47f64c1851631f",
+    "evidence": [
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D03-attempt02.md",
+        "visibility": "shared",
+        "bytes": 1289,
+        "hash_kind": "utf8_lf",
+        "sha256": "14df34aaf6d50710acfc8479c34a34618342c4be361d59f0db09c78153c54507"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D03-task.json",
+        "visibility": "shared",
+        "bytes": 516,
+        "hash_kind": "utf8_lf",
+        "sha256": "3e0765095a06120d0a39039548fb2089ce28bbec304416fee9194c040b05d2b7"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D03-after-start.json",
+        "visibility": "shared",
+        "bytes": 4177,
+        "hash_kind": "utf8_lf",
+        "sha256": "2fce485445f002d022a8503df465ea42c678896f58655252762f4a54215e9b0e"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D03-verify.json",
+        "visibility": "shared",
+        "bytes": 182,
+        "hash_kind": "utf8_lf",
+        "sha256": "fbfd83ad0275dffeab56f24cd7ec30a3245dd84d2b85babdb822c18f040a425d"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D03-running-lock.txt",
+        "visibility": "shared",
+        "bytes": 986,
+        "hash_kind": "utf8_lf",
+        "sha256": "5d52430c8a66088977f091dd6b853c0d3c1dbba5aa2191fdac8659255b749a8d"
+      }
+    ],
+    "needed_input": "",
+    "next_action": "",
+    "review": {
+      "verdict": "accepted",
+      "reviewer": "company-agent",
+      "summary": "S4U/Limited任务动作、Running、认证ready和导出/单实例拒绝材料对应；接受会话内任务运行，注销/重启未验收。",
+      "at_utc": "2026-11-01T11:36:38.498235+00:00"
+    }
+  },
+  "D04": {
+    "status": "blocked",
+    "summary": "D03已Running；尚未执行真实注销/再登录及期间服务观察",
+    "at_utc": "2026-11-01T11:36:38.524262+00:00",
+    "tested_commit": null,
+    "evidence": [
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D04.md",
+        "visibility": "shared",
+        "bytes": 736,
+        "hash_kind": "utf8_lf",
+        "sha256": "8b62358d31ea2c68cc128f8a8c005f4adc90d45f239c2c48782bfeacf4417ab3"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/company-review-20261101.md",
+        "visibility": "shared",
+        "bytes": 5216,
+        "hash_kind": "utf8_lf",
+        "sha256": "a62f9e01666b62b91609dc98d5a67c1d9d6600aeb6f6687420de8838af0a4faa"
+      }
+    ],
+    "needed_input": "主机维护者提供约10分钟真实注销/再登录窗口和人工时间确认",
+    "next_action": "按CASEBOOK准备注销后S4U probe并由维护者执行注销，保留期间观察和再登录业务核对。",
+    "review": {
+      "verdict": "pending"
+    }
+  },
+  "D05": {
+    "status": "blocked",
+    "summary": "D03/D06已通过；尚未执行受控重启和无人登录时自启动观察",
+    "at_utc": "2026-11-01T11:36:38.532146+00:00",
+    "tested_commit": null,
+    "evidence": [
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D05.md",
+        "visibility": "shared",
+        "bytes": 668,
+        "hash_kind": "utf8_lf",
+        "sha256": "bfdf88d8b7719c98904d17f899c8478f622efff8cc878a1a9fd8e638206da29c"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/company-review-20261101.md",
+        "visibility": "shared",
+        "bytes": 5216,
+        "hash_kind": "utf8_lf",
+        "sha256": "a62f9e01666b62b91609dc98d5a67c1d9d6600aeb6f6687420de8838af0a4faa"
+      }
+    ],
+    "needed_input": "主机维护者提供约20分钟受控重启窗口，先确认现有完整备份可用",
+    "next_action": "记录running并同步，由维护者重启，再记录登录前启动与数据一致性证据。",
+    "review": {
+      "verdict": "pending"
+    }
+  },
+  "D06": {
+    "status": "passed",
+    "summary": "实际任务停启备份52文件/4,867,820字节，隔离恢复三档登录/ACL/人工历史/素材/导出及故意失败均通过",
+    "at_utc": "2026-11-01T11:21:25.034330+00:00",
+    "tested_commit": "91c90090515405f6235e31f70a47f64c1851631f",
+    "evidence": [
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D06-attempt02.md",
+        "visibility": "shared",
+        "bytes": 1984,
+        "hash_kind": "utf8_lf",
+        "sha256": "e4aacc01445a21eb001326d736a7957b95c157c86af0749786167444169530f7"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D06-task-backup.txt",
+        "visibility": "shared",
+        "bytes": 458,
+        "hash_kind": "utf8_lf",
+        "sha256": "ab59ed508667d96642a65c6ce4dfe34481c89f98125abc5a9ef3c27d2eda07dc"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D06-backup-acl.json",
+        "visibility": "shared",
+        "bytes": 378,
+        "hash_kind": "utf8_lf",
+        "sha256": "e255b86f4c32d377a515b97f2678d039899c7f3e988f18234b8ce600eb467fa3"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D06-restore-verify.json",
+        "visibility": "shared",
+        "bytes": 694,
+        "hash_kind": "utf8_lf",
+        "sha256": "2891dc36c59b7dde9d76d77d14f647897531d11d1090499b7f859a6d78306fc1"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D06-existing-target.txt",
+        "visibility": "shared",
+        "bytes": 469,
+        "hash_kind": "utf8_lf",
+        "sha256": "08a54146bed52da1a00af0630419d3be75c8a5975ba8d5a21668cfdedeafadd9"
+      }
+    ],
+    "needed_input": "",
+    "next_action": "",
+    "review": {
+      "verdict": "accepted",
+      "reviewer": "company-agent",
+      "summary": "实际任务停启备份52文件及隔离恢复/ACL/故意失败材料对应；接受4,867,820字节验收集恢复，另一设备与RPO/RTO待测。",
+      "at_utc": "2026-11-01T11:36:38.507897+00:00"
+    }
+  },
+  "D07": {
+    "status": "passed",
+    "summary": "两个D07子进程恢复测试实际通过，B02前置已补齐",
+    "at_utc": "2026-11-01T11:12:22.397617+00:00",
+    "tested_commit": "91c90090515405f6235e31f70a47f64c1851631f",
+    "evidence": [
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/D07.md",
+        "visibility": "shared",
+        "bytes": 1141,
+        "hash_kind": "utf8_lf",
+        "sha256": "d9b2ee93aa19fba17987fcbd533c7c4bee18d2361be1cc4db764c933afdcddae"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/L01-backend.json",
+        "visibility": "shared",
+        "bytes": 843,
+        "hash_kind": "utf8_lf",
+        "sha256": "1125c9acc22c5d3c6a3292c6d6146bd32297b22b3007659cb149bed114e5038f"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/prerequisites-resolved.md",
+        "visibility": "shared",
+        "bytes": 864,
+        "hash_kind": "utf8_lf",
+        "sha256": "efd935b62f53c45fa3b88edbf06c1ef6402db2b29adf5b621b6e4c2527d5987e"
+      }
+    ],
+    "needed_input": "",
+    "next_action": "",
+    "review": {
+      "verdict": "accepted",
+      "reviewer": "company-agent",
+      "summary": "与L01重叠的两个实际CLI异常恢复测试有共享摘要及原XML定位；接受该合成恢复范围，不另增加测试总数。",
+      "at_utc": "2026-11-01T11:36:38.517257+00:00"
+    }
+  },
+  "P01": {
+    "status": "blocked",
+    "summary": "实际计划任务已Running；尚未执行三身份交互密码HTTP探针与资源采样",
+    "at_utc": "2026-11-01T11:36:38.538235+00:00",
+    "tested_commit": null,
+    "evidence": [
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/P01.md",
+        "visibility": "shared",
+        "bytes": 900,
+        "hash_kind": "utf8_lf",
+        "sha256": "9e9dfff69d44daecf9d3f06dd295d89244430702256a3b4e654d6e029de2898a"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/company-review-20261101.md",
+        "visibility": "shared",
+        "bytes": 5216,
+        "hash_kind": "utf8_lf",
+        "sha256": "a62f9e01666b62b91609dc98d5a67c1d9d6600aeb6f6687420de8838af0a4faa"
+      }
+    ],
+    "needed_input": "主机维护者在本机交互终端输入三档验收账号密码，约5分钟",
+    "next_action": "使用现有运行实例按CASEBOOK执行60秒probe/trace，记录至少100成功读、P95和资源；不要重复启动同runtime。",
+    "review": {
+      "verdict": "pending"
+    }
+  },
+  "P02": {
+    "status": "blocked",
+    "summary": "未执行三人30～60分钟持续工作负载",
+    "at_utc": "2026-11-01T09:20:20.405015+00:00",
+    "tested_commit": null,
+    "evidence": [
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/P02.md",
+        "visibility": "shared",
+        "bytes": 799,
+        "hash_kind": "utf8_lf",
+        "sha256": "1e151c39ad2d06e87e083922eaaa8d8536255d1de22f159515dcb0b763f4ff58"
+      }
+    ],
+    "needed_input": "主机维护者及三档成员提供30～60分钟、10～20主题协作窗口，先完成P01",
+    "next_action": "并行执行工作负载、HTTP和资源trace，记录队列/模型/渲染分段耗时",
+    "review": {
+      "verdict": "pending"
+    }
+  },
+  "R01": {
+    "status": "blocked",
+    "summary": "D03已Running；尚未配置受保护跨网络HTTPS/私有组网入口",
+    "at_utc": "2026-11-01T11:36:38.545308+00:00",
+    "tested_commit": null,
+    "evidence": [
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/R01.md",
+        "visibility": "shared",
+        "bytes": 802,
+        "hash_kind": "utf8_lf",
+        "sha256": "e0c3f41c032470f7b8dc7209f83c77acd418ed9c9db92c7cd0406b72200a26b3"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/company-review-20261101.md",
+        "visibility": "shared",
+        "bytes": 5216,
+        "hash_kind": "utf8_lf",
+        "sha256": "a62f9e01666b62b91609dc98d5a67c1d9d6600aeb6f6687420de8838af0a4faa"
+      }
+    ],
+    "needed_input": "网络/主机维护者提供上行/NAT/IP、组网与证书选择及另一独立网络",
+    "next_action": "保持应用loopback，按CASEBOOK配置授权HTTPS并从独立网络验证Cookie/CSRF/SSE/下载/撤权。",
+    "review": {
+      "verdict": "pending"
+    }
+  },
+  "R02": {
+    "status": "blocked",
+    "summary": "没有实际手机与蜂窝操作",
+    "at_utc": "2026-11-01T09:20:20.733557+00:00",
+    "tested_commit": null,
+    "evidence": [
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/R02.md",
+        "visibility": "shared",
+        "bytes": 637,
+        "hash_kind": "utf8_lf",
+        "sha256": "c3ec318d5f2d3c1aaa1e059b5341b893e63ebafa10e2ccea67b189e3f2de7470"
+      }
+    ],
+    "needed_input": "手机持有人提供真实设备、蜂窝和约20分钟窗口，先完成R01",
+    "next_action": "Wi-Fi/蜂窝分别完成登录、素材、审批、下载和重连并记录操作者确认",
+    "review": {
+      "verdict": "pending"
+    }
+  },
+  "R03": {
+    "status": "blocked",
+    "summary": "没有外地真实成员参与",
+    "at_utc": "2026-11-01T09:20:20.923344+00:00",
+    "tested_commit": null,
+    "evidence": [
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/R03.md",
+        "visibility": "shared",
+        "bytes": 657,
+        "hash_kind": "utf8_lf",
+        "sha256": "551768405de141e589dd6b6933391324a67a5e806ba5cb00e92833bb3399e8c6"
+      }
+    ],
+    "needed_input": "至少一名外地成员及管理员提供另一城市网络和30分钟窗口，先完成R01",
+    "next_action": "完成跨城协作、冲突和撤权闭环并记录双方确认",
+    "review": {
+      "verdict": "pending"
+    }
+  },
+  "R04": {
+    "status": "blocked",
+    "summary": "D06实际本机备份恢复已通过；尚无另一物理设备副本及实际RPO/RTO",
+    "at_utc": "2026-11-01T11:36:38.553076+00:00",
+    "tested_commit": null,
+    "evidence": [
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/R04.md",
+        "visibility": "shared",
+        "bytes": 827,
+        "hash_kind": "utf8_lf",
+        "sha256": "a2969d3de28bf1a8697dde85f77f57268bba8f812b6c3d99870c495e65229216"
+      },
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/company-review-20261101.md",
+        "visibility": "shared",
+        "bytes": 5216,
+        "hash_kind": "utf8_lf",
+        "sha256": "a62f9e01666b62b91609dc98d5a67c1d9d6600aeb6f6687420de8838af0a4faa"
+      }
+    ],
+    "needed_input": "备份维护者提供另一物理设备或异地位置及约60分钟恢复窗口",
+    "next_action": "复制并核对完整备份，在独立目录按真实数据量恢复，记录数据窗口/业务可用时间；同盘目录不替代另一设备。",
+    "review": {
+      "verdict": "pending"
+    }
+  },
+  "R05": {
+    "status": "blocked",
+    "summary": "未执行10～20真实主题、真实模型质量及3～7自然日试运行",
+    "at_utc": "2026-11-01T09:20:21.275478+00:00",
+    "tested_commit": null,
+    "evidence": [
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/R05.md",
+        "visibility": "shared",
+        "bytes": 869,
+        "hash_kind": "utf8_lf",
+        "sha256": "fa1b589a8fd04fdb2125b9733db429b36609995ecced21f2b5a022d97934e954"
+      }
+    ],
+    "needed_input": "团队管理员和成员提供真实主题/模型及3～7自然日，先完成P02/R02/R03",
+    "next_action": "逐日记录用量、失败、质量、资源与备份并由真实成员确认",
+    "review": {
+      "verdict": "pending"
+    }
+  },
+  "X01": {
+    "status": "not_applicable",
+    "summary": "选择Windows绿色包+独立runtime+计划任务，未采用Docker/Nginx可选路线",
+    "at_utc": "2026-11-01T09:20:21.440502+00:00",
+    "tested_commit": null,
+    "evidence": [
+      {
+        "locator": "docs/v1-plus/validation/runs/nuc-20261101-01/evidence/X01.md",
+        "visibility": "shared",
+        "bytes": 625,
+        "hash_kind": "utf8_lf",
+        "sha256": "bfa651fabadb78f19998919c0a04b579e5605a75f920cdf7a777bb1481108b94"
+      }
+    ],
+    "needed_input": "",
+    "next_action": "",
+    "review": {
+      "verdict": "pending"
+    }
+  }
+}

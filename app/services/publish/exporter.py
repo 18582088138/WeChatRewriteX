@@ -179,6 +179,8 @@ def export_variants(article_id: str, platforms: list[str], snapshot_id: str | No
     draft = dao.get_draft_by_id(snapshot_id) if snapshot_id else dao.latest_draft(article_id)
     if not draft:
         raise ValueError("没有草稿，先完成创作")
+    from .. import human_review
+    human_review.export_approval(article_id, draft, asset_manifest)
     doc = DraftDoc.model_validate_json(draft["doc_json"])
     # 发布包落在文章素材文件夹内：data/library/articles/<标题_短id>/exports/<平台>/
     if draft["article_id"] != article_id:

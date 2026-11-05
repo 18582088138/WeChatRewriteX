@@ -10,6 +10,9 @@ import MaterialsPanel from '../components/MaterialsPanel.vue'
 import BlockEditor from '../components/BlockEditor.vue'
 import ReviewPanel from '../components/ReviewPanel.vue'
 import PublishPanel from '../components/PublishPanel.vue'
+import ProjectAccess from '../components/ProjectAccess.vue'
+import HumanReview from '../components/HumanReview.vue'
+import CollaborationStatus from '../components/CollaborationStatus.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -25,6 +28,10 @@ store.invalidateArticle(aid.value)
 const article = ref<Article | null>(null)
 const tab = ref('create')
 const busy = ref(false)
+const teamMode = ref(false)
+const capabilities = ref<any>(null)
+onMounted(async () => { teamMode.value = (await api.get('/api/auth/status')).team_mode })
+watch(teamMode,load)
 const editorRef = ref<InstanceType<typeof BlockEditor> | null>(null)
 
 /** 去审稿：跳到审稿页；若尚未审稿（DRAFTED）则同时触发审稿任务 */
@@ -61,12 +68,14 @@ async function onImportCreate(ids: string[]) {
 
 async function load() {
   article.value = await api.get(`/api/articles/${aid.value}`)
+  if(teamMode.value)capabilities.value=(await api.get(`/api/articles/${aid.value}/access`)).capabilities
   if (store.devMode) {
     try { totalCosts.value = await api.get(`/api/articles/${aid.value}/costs`) } catch { /* ignore */ }
   }
 }
 onMounted(async () => {
   await load()
+  if (tab.value !== 'create') return  // Keep the tab chosen while initial data was loading.
   const s = article.value?.status
   if (['EDITING', 'REVIEWED'].includes(s || '')) tab.value = 'review'
   else if (['FINALIZED', 'DONE', 'PUBLISHING'].includes(s || '')) tab.value = 'publish'
@@ -78,6 +87,7 @@ watch(() => store.articleTicks[aid.value] || 0, load)
 const status = computed(() => article.value?.status || '')
 
 const actions = computed(() => {
+  if(teamMode.value && !capabilities.value?.write)return []
   const s = status.value
   const list: { key: string; label: string; stage?: string; primary?: boolean; deep?: boolean }[] = []
   if (s === 'NEW' || s === 'FAILED') list.push({ key: 'collect', label: '开始收集', stage: 'collect', primary: true })
@@ -197,6 +207,9 @@ const logExpanded = ref(false)   // 默认收起；点击才展开（不再随�
       </div>
 
       <NTabs v-model:value="tab" type="line" animated size="large">
+        <NTabPane v-if="teamMode" name="access" tab="项目权限"><ProjectAccess :article-id="aid" /></NTabPane>
+        <NTabPane v-if="teamMode" name="human" tab="人工审核"><HumanReview :article-id="aid" /></NTabPane>
+        <NTabPane v-if="teamMode" name="collaboration" tab="协作记录"><CollaborationStatus :article-id="aid" /></NTabPane>
         <NTabPane name="materials" tab="素材库">
           <MaterialsPanel :article-id="aid" @insert-refs="onInsertRefs"
                           @import-create="onImportCreate" />
@@ -204,11 +217,11 @@ const logExpanded = ref(false)   // 默认收起；点击才展开（不再随�
         <NTabPane name="create" tab="创作">
           <BlockEditor ref="editorRef" :article-id="aid" @goto-review="onGotoReview" />
         </NTabPane>
-        <NTabPane name="review" tab="审稿">
-          <ReviewPanel :article-id="aid" @goto-publish="tab = 'publish'" />
+        <NTabPane name="review" :tab="teamMode ? 'AI/规则审稿' : '审稿'">
+          <ReviewPanel :article-id="aid" :team-mode="teamMode" @goto-publish="tab = 'publish'" />
         </NTabPane>
         <NTabPane name="publish" tab="发布">
-          <PublishPanel :article-id="aid" />
+          <PublishPanel :article-id="aid" :team-mode="teamMode" :can-release="capabilities?.release" />
         </NTabPane>
       </NTabs>
     </main>
