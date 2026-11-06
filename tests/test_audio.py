@@ -56,6 +56,35 @@ def draft_conflict():
     return VersionConflict
 
 
+def test_incremental_cache_reorder_mix_and_valid_mp3(speech):
+    aid,data=speech
+    first=synth(aid,data)
+    assert len(first['attempts'])==2
+    assert first['result']['duration']>0
+    assert first['result']['loudness']['method'].startswith('ffmpeg')
+    assert not first['result']['precise_word_alignment']
+    again=audio.generate(aid,Generate(revision=data['product']['revision']))
+    assert again['id']==first['id']
+    doc=SpeechDoc.model_validate(data['product']['doc'])
+    doc.paragraphs[0].text+='补充一句。'
+    changed=audio.save(aid,data['product']['revision'],doc)
+    second=synth(aid,changed)
+    assert len(second['attempts'])==1
+    assert second['result']['cache_hits']==1
+    assert audio.batch(aid,first['id'])['stale']
+    doc=SpeechDoc.model_validate(changed['product']['doc']);doc.paragraphs.reverse()
+    reordered=audio.save(aid,changed['product']['revision'],doc)
+    third=synth(aid,reordered)
+    assert third['attempts']==[]
+    assert third['result']['timeline'][0]['paragraph_id']==doc.paragraphs[0].id
+    assert third['result']['timeline'][1]['start']>third['result']['timeline'][0]['end']
+    doc.mix.loudness_lufs=-18
+    mixed=audio.save(aid,reordered['product']['revision'],doc)
+    fourth=synth(aid,mixed)
+    assert fourth['attempts']==[]
+    audio.file_path(aid,first['files'][0]['id']) # old versions stay readable
+
+
 def test_queued_cancel_and_unknown_never_auto_resends(speech,monkeypatch):
     aid,data=speech
     pending=audio.generate(aid,Generate(revision=data['product']['revision']))
