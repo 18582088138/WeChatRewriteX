@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
     "test:e2e": "playwright test",
-    "test:team": "playwright test --config playwright.team.config.ts"
+    "test:team": "playwright test --config playwright.team.config.ts",
+    "test:audio": "playwright test --config playwright.audio.config.ts"
   },
   "dependencies": {
     "naive-ui": "^2.43.1",

@@ -13,6 +13,7 @@ import PublishPanel from '../components/PublishPanel.vue'
 import ProjectAccess from '../components/ProjectAccess.vue'
 import HumanReview from '../components/HumanReview.vue'
 import CollaborationStatus from '../components/CollaborationStatus.vue'
+import AudioStudio from '../components/AudioStudio.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -217,6 +218,7 @@ const logExpanded = ref(false)   // 默认收起；点击才展开（不再随�
         <NTabPane name="create" tab="创作">
           <BlockEditor ref="editorRef" :article-id="aid" @goto-review="onGotoReview" />
         </NTabPane>
+        <NTabPane name="audio" tab="音频创作"><AudioStudio :article-id="aid" /></NTabPane>
         <NTabPane name="review" :tab="teamMode ? 'AI/规则审稿' : '审稿'">
           <ReviewPanel :article-id="aid" :team-mode="teamMode" @goto-publish="tab = 'publish'" />
         </NTabPane>
