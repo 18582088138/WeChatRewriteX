@@ -7,7 +7,7 @@
 
 架构优化及升级注意事项见 [架构与升级说明](docs/ARCHITECTURE.md)。
 
-V2 音频创作已从最新 main 按 S0～S9 独立阶段重新开发，候选 `1.2.0-rc.2`、集成分支 `codex/v2-rebuild`。功能、阶段提交、验证和用户验收入口见 [V2 说明](docs/v2/README.md)。本次不合入 main、不部署或正式发布，真实长音频和设备验收单独保留。
+V2 音频创作已从最新 main 按 S0～S9 独立阶段重新开发，候选 `1.2.0-rc.2`、最终开发分支 `dev/v2-audio`。仅推送最终开发分支，阶段通过 commit 拉取复验；功能、阶段提交、验证和用户验收入口见 [V2 说明](docs/v2/README.md)。本次不合入 main、不部署或正式发布，真实长音频和设备验收单独保留。
 
 V1.0+ 团队候选源码为 **1.1.0-rc.1**，在 `dev/v1-plus` 集成，main/正式v1.0未改变。成员登录、项目共享、人工批准、并发保护与运维材料已实现；真实家中主机/外地成员验收仍待执行。见 [团队使用说明](docs/v1-plus/user-guide.md)、[安装维护](docs/v1-plus/S6-operations.md) 和 [阶段验收记录](docs/v1-plus/S7-acceptance.md)。
 

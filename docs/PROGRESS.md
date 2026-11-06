@@ -1,4 +1,10 @@
-# 仓库规则、整理与远端交付（2026-11-06）
+# V2 分支命名与按 commit 复验（2026-11-06）
+
+按【更新规则】直接在 main 提交/推送 `cc6e844`：最终开发分支 `dev/<feature>`，本地 step 分支 `dev/<feature>-s<N>-<purpose>`，step 验证后以一个 commit 合入最终分支，仅推送最终分支。V2 最终分支更名为 `dev/v2-audio`，S0～S9 本地检查点更名且 commit 保留；后续阶段按新规则集成，本次不重写已交付历史。
+
+本轮只整理 V2：旧远端集成/step 分支及两条 V2 文档/清理别名删除，新远端仅保留 `dev/v2-audio`；V1.0+ 和更早版本分支/标签不动。main 没有合入 V2 功能，程序构建仍为 `87f3004`，本轮只做规则/文档/分支检查，无新增 API/克隆调用。阶段文档与复验入口见 [V2 README](v2/README.md)、[commit 清单](v2/rebuild/commits.md)及 [本次整理记录](v2/rebuild/branch-conventions-2026-11-06.md)。
+
+# 仓库规则、整理与远端交付（2026-11-06，以下为之前整理的历史）
 
 用户标记【规则更新】后，规则直接在 main 更新并提交/推送 `723ce2b`，明确每阶段文档及用途维护在对应 docs README、push/分支管理授权以及功能合入 main 由用户决定。整理分支 `codex/repository-s1-cleanup` 从新 main 创建，合入保留的 V2 候选形成 `8a48b7e`，仅同步规则/文档，原阶段历史与程序构建 `87f3004` 保留。
 
