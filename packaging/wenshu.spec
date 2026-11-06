@@ -11,6 +11,7 @@ ROOT = os.path.abspath(os.getcwd())
 datas = [(os.path.join(ROOT, "app", "_assets"), "wenshu_assets"),
          # 包内运行期数据文件（DB schema、卡片主题模板）
          (os.path.join(ROOT, "app", "storage", "schema.sql"), "app/storage"),
+         (os.path.join(ROOT, "app", "storage", "audio_schema.sql"), "app/storage"),
          (os.path.join(ROOT, "app", "services", "cards", "themes"),
           "app/services/cards/themes")]
 hiddenimports = collect_submodules("app")

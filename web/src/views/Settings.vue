@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { NButton, NInputNumber, NSelect, NSwitch, NTag, useMessage } from 'naive-ui'
 import { api, getToken, setToken } from '../api'
 import { useAppStore } from '../stores/app'
+import AudioSettings from '../components/AudioSettings.vue'
 
 const router = useRouter()
 const store = useAppStore()
@@ -187,6 +188,7 @@ function saveToken() {
         </div>
       </section>
 
+      <AudioSettings />
       <!-- 风格包 -->
       <section class="panel p-5">
         <div class="font-semibold mb-2">语言风格包</div>

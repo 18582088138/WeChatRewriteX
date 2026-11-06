@@ -15,6 +15,7 @@ recursive-include tests *.py *.md *.txt *.json *.png *.html
 recursive-include web/src *
 recursive-include web/e2e *.ts
 recursive-include web/team-e2e *.ts
+recursive-include web/audio-e2e *.ts
 include web/package.json web/package-lock.json web/index.html web/*.config.* web/tsconfig*.json
 recursive-include .github/workflows *.yml
 global-exclude __pycache__ *.pyc

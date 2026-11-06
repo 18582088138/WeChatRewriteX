@@ -40,7 +40,7 @@ version = { attr = "app.__init__.__version__" }
 include = ["app*"]
 
 [tool.setuptools.package-data]
-app = ["_assets/**", "storage/schema.sql", "services/cards/themes/*/*.yaml", "services/cards/themes/*/*.html"]
+app = ["_assets/**", "storage/*.sql", "services/cards/themes/*/*.yaml", "services/cards/themes/*/*.html"]
 
 # 注意：sdist/wheel 内置资产由 scripts/build_assets.py 预先生成（app/_assets/）。
 # 从源码树直接 pip install 前，先执行 python scripts/build_assets.py。

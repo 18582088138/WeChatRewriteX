@@ -44,16 +44,18 @@ MAX_ATTEMPTS = 2
 # lane A = 抓取类（collect/ingest），lane B = 创作类（create/review/publish）
 # V1.12：deepsearch（扩搜/深度搜索）已下线
 LANE_A = ("collect", "ingest")
-LANE_B = ("create", "review", "publish")
+LANE_B = ("create", "review", "publish", "audio")
 
 
 def register_defaults(llm=None) -> None:
+    from ..services.audio import run_batch
     _handlers.update({
         "collect": lambda aid, payload: orchestrator.run_stage("collect", aid, llm),
         "create": lambda aid, payload: orchestrator.run_stage("create", aid, llm, payload),
         "review": lambda aid, payload: orchestrator.run_stage("review", aid, llm, payload),
         "publish": _run_publish,
         "ingest": _run_ingest,
+        "audio": run_batch,
     })
 
 
@@ -150,6 +152,9 @@ def _loop(runtime: WorkerRuntime, lane_types: tuple[str, ...]) -> None:
             member = db.query_one(
                 "SELECT * FROM members WHERE id=? AND enabled=1", (payload.get("_member_id"),))
             if not member or (job["article_id"] and not team.allowed(member, job["article_id"], "release" if job["type"] == "publish" else "write")):
+                if job['type'] == 'audio':
+                    from ..services.audio import abort_unstarted
+                    abort_unstarted(payload.get('batch_id'), '成员权限已撤销；未发送预留已释放')
                 dao.fail_job(job["id"], "成员权限已撤销或旧任务尚未确认责任")
                 continue
             member_ctx = team.actor.set(member)
@@ -173,13 +178,18 @@ def _loop(runtime: WorkerRuntime, lane_types: tuple[str, ...]) -> None:
             payload = json.loads(job.get("payload_json") or "{}")
             payload["_job_id"] = job["id"]
             result = handler(job["article_id"], payload)
-            if isinstance(result, dict) and result.get("status") in ("FAILED", "PARTIAL_FAILED"):
+            if job['type']=='audio' and isinstance(result,dict) and result.get('status') in ('failed','unknown'):
+                dao.fail_job(job['id'], result.get('error') or '音频处理未完成，详见批次状态', requeue=False)
+                db.execute('UPDATE jobs SET result_json=? WHERE id=?',(json.dumps(result,ensure_ascii=False),job['id']))
+            elif isinstance(result, dict) and result.get("status") in ("FAILED", "PARTIAL_FAILED"):
                 from ..storage import db
                 with db.transaction():
                     dao.fail_job(job["id"], "导出失败平台: " + ", ".join(result["failed_platforms"]))
                     db.execute("UPDATE jobs SET result_json=? WHERE id=?", (json.dumps(result, ensure_ascii=False), job["id"]))
             else:
                 dao.finish_job(job["id"], result)
+            if job['type']=='audio':
+                events.bus.publish('job.finished',job['article_id'],job_id=job['id'],result_status=result.get('status'))
             logging_setup.log("error" if isinstance(result, dict) and result.get("ok") is False else "info",
                               "任务执行结束 %s (article=%s, result=%s)", job["type"], job["article_id"],
                               result.get("status", "done") if isinstance(result, dict) else "done")
@@ -191,13 +201,13 @@ def _loop(runtime: WorkerRuntime, lane_types: tuple[str, ...]) -> None:
             from ..services.draft_service import VersionConflict
             from fastapi import HTTPException
             from ..core.statemachine import InvalidTransition
-            requeue = job["attempts"] < MAX_ATTEMPTS and not isinstance(e, (ValueError, VersionConflict, InvalidTransition, HTTPException))
+            requeue = job['type'] != 'audio' and job["attempts"] < MAX_ATTEMPTS and not isinstance(e, (ValueError, VersionConflict, InvalidTransition, HTTPException))
             dao.fail_job(job["id"], str(e)[:500], requeue=requeue)
             logging_setup.log("error", "任务失败 %s (article=%s): %s",
                               job["type"], job["article_id"], str(e)[:300],
                               exc_info=True)
             if not requeue:
-                if job["type"] != "publish":
+                if job["type"] not in ("publish", "audio"):
                     orchestrator.mark_failed(job["article_id"], str(e))
         finally:
             context.reset(ctx_token)
@@ -211,6 +221,8 @@ def _loop(runtime: WorkerRuntime, lane_types: tuple[str, ...]) -> None:
 def recover_interrupted() -> None:
     """启动时把 running 态任务重置回 pending（进程崩溃恢复）。"""
     from ..storage import db
+    from ..services.audio import recover
+    recover()
     db.execute("UPDATE jobs SET status='pending' WHERE status='running'")
 
 

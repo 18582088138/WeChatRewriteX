@@ -173,6 +173,8 @@ def create_app(start_worker: bool = True, llm=None) -> FastAPI:
     app.include_router(collaboration.router)
     from .api import human_review
     app.include_router(human_review.router)
+    from .api import audio
+    app.include_router(audio.router)
 
     # 素材与导出文件（图片预览 / 下载）
     @app.get("/files/{relative:path}", include_in_schema=False)
