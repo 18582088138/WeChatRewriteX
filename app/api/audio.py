@@ -20,6 +20,16 @@ def save(aid: str, request: SaveSpeech):
     return audio.save(aid, request.revision, request.doc)
 
 
+@router.post(BASE + '/derive')
+def derive(aid: str, request: Derive):
+    return audio.derive(aid, request)
+
+
+@router.post(BASE + '/rewrite')
+def rewrite(aid: str, request: Rewrite):
+    return audio.rewrite(aid, request)
+
+
 @router.get(BASE + '/history')
 def history(aid: str):
     return {'versions': audio.history(aid)}

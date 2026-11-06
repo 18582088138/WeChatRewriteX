@@ -13,6 +13,7 @@ from .audio_models import SpeechDoc, Paragraph, VoiceSettings, Limits
 
 
 from .audio_models import Mix
+from . import audio_text
 
 
 def uid():
@@ -76,7 +77,7 @@ def normalize(doc):
         raise ValueError('口播稿总长度超过上限')
     for p in doc.paragraphs:
         if not p.manual_speech:
-            p.speech_text = p.text
+            p.speech_text = audio_text.pronounce(p.text, {}, doc.brief.language)
         if '<' in p.speech_text or '>' in p.speech_text:
             raise ValueError('当前不支持 SSML/情绪标签；请使用纯文本和段间停顿')
     return doc
@@ -133,6 +134,77 @@ def validate_references(aid, doc):
                 raise HTTPException(404, '引用素材没有授权')
 
 
+def derive(aid, request):
+    project(aid, 'write')
+    current, fingerprint = source(aid)
+    if not current:
+        raise ValueError('需要先保存图文稿再派生口播')
+    paragraphs = []
+    for block in current.blocks:
+        if block.type.value in ('paragraph', 'quote', 'heading') and block.text.strip():
+            # Conservative extraction preserves facts; segment at sentence boundaries.
+            import re
+            sentences = re.split(r'(?<=[。！？.!?])\s*', audio_text.clean(block.text))
+            chunk = ''
+            for sentence in sentences:
+                if len(chunk) + len(sentence) > 350 and chunk:
+                    paragraphs.append(Paragraph(id=uid(), text=chunk, speech_text='', source_block_ids=[block.id], citations=block.citations))
+                    chunk = ''
+                chunk += sentence
+            if chunk:
+                paragraphs.append(Paragraph(id=uid(), text=chunk, speech_text='', source_block_ids=[block.id], citations=block.citations))
+    doc = SpeechDoc(title=dao.get_article(aid)['title'], brief=request.brief, paragraphs=paragraphs,
+                    source_hash=fingerprint, source_version=current.version, source_revision=current.edit_revision)
+    existing = db.query_one("SELECT doc_json FROM media_products WHERE article_id=? AND kind='speech'", (aid,))
+    if existing:
+        old = SpeechDoc.model_validate_json(existing['doc_json'])
+        doc.voice, doc.mix, doc.dictionary = old.voice, old.mix, old.dictionary
+    if request.use_llm:
+        from .llm.router import complete
+        from pydantic import BaseModel, Field
+        class SpokenResult(BaseModel):
+            paragraphs: list[Paragraph] = Field(max_length=80)
+        result = complete('rewrite', [
+            {'role': 'system', 'content': '将图文改为单人口播：开场、事实、解释、结尾。缩短长句，去除引用标记；不得增加无依据事实，不得改变数值。保留输入段落id和source_block_ids/citations，只改text，speech_text填空。输出JSON paragraphs。'},
+            {'role': 'user', 'content': store.dumps({'brief': request.brief.model_dump(), 'paragraphs': [p.model_dump() for p in paragraphs]})}
+        ], schema=SpokenResult, article_id=aid, stage='speech_derive')
+        output = result.parsed.paragraphs
+        old_map = {p.id: p for p in paragraphs}
+        if {p.id for p in output} != set(old_map) or len(output) != len(paragraphs):
+            raise ValueError('AI 改变段落来源结构，结果未保存')
+        import re
+        for p in output:
+            original = old_map[p.id]
+            if re.findall(r'\d+(?:\.\d+)?', p.text) != re.findall(r'\d+(?:\.\d+)?', original.text):
+                raise ValueError('AI 改变关键数字，结果未保存；请使用保守派生并人工编辑')
+            p.source_block_ids, p.citations, p.manual_speech = original.source_block_ids, original.citations, False
+        doc.paragraphs = output
+    if source(aid)[1] != fingerprint:
+        raise draft_service.VersionConflict('图文在派生期间已改变，请重新派生')
+    return save(aid, request.revision, doc, deriving=True)
+
+
+def rewrite(aid, request):
+    row, doc = product(aid)
+    check_revision(row, request.revision)
+    paragraph = next((p for p in doc.paragraphs if p.id == request.paragraph_id), None)
+    if not paragraph:
+        raise HTTPException(404, '目标段落不存在')
+    from .llm.router import complete
+    from pydantic import BaseModel
+    class Result(BaseModel):
+        text: str
+    result = complete('rewrite', [
+        {'role': 'system', 'content': '只重写目标口播段落，保留全部关键事实和数值，不添加事实。输出JSON text。'},
+        {'role': 'user', 'content': store.dumps({'text': paragraph.text, 'instruction': request.instruction})}
+    ], schema=Result, article_id=aid, stage='speech_rewrite')
+    import re
+    if re.findall(r'\d+(?:\.\d+)?', result.parsed.text) != re.findall(r'\d+(?:\.\d+)?', paragraph.text):
+        raise ValueError('AI 改变关键数字，结果未保存')
+    paragraph.text, paragraph.manual_speech = result.parsed.text, False
+    return save(aid, request.revision, doc)
+
+
 def get(aid):
     project(aid)
     row = db.query_one("SELECT * FROM media_products WHERE article_id=? AND kind='speech'", (aid,))
@@ -142,7 +214,7 @@ def get(aid):
         doc = SpeechDoc.model_validate_json(row['doc_json'])
         state['product'] = {'id': row['id'], 'revision': row['revision'], 'doc': doc.model_dump(),
                             'source_stale': source_stale(aid, doc)}
-        state['rules_review'] = None
+        state['rules_review'] = audio_text.review(doc)
     return state
 
 
