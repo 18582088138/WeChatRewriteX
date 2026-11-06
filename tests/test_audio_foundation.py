@@ -46,7 +46,7 @@ def _old_database(path):
 
 
 def test_additive_migration_backups_existing_database_and_is_idempotent(tmp_path, monkeypatch):
-    monkeypatch.setenv('WENSHU_DATA_DIR', str(tmp_path))
+    monkeypatch.setattr(db, '_db_path', tmp_path/'app.db')
     _old_database(db.db_path())
     db.init_db()
     assert db.query_one('SELECT version FROM audio_schema')['version'] == 1
@@ -61,7 +61,7 @@ def test_additive_migration_backups_existing_database_and_is_idempotent(tmp_path
 
 def test_failed_extension_migration_is_atomic(tmp_path, monkeypatch):
     from pathlib import Path
-    monkeypatch.setenv('WENSHU_DATA_DIR', str(tmp_path))
+    monkeypatch.setattr(db, '_db_path', tmp_path/'app.db')
     _old_database(db.db_path())
     original = Path.read_text
     def corrupt(path, *args, **kwargs):
