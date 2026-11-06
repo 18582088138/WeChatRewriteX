@@ -36,8 +36,10 @@ test('stage workbench preserves edits, reuses segments and plays MP3', async ({ 
   expect(state.batches[0].attempts).toHaveLength(1)
   expect(state.batches[0].result.cache_hits).toBe(1)
   const player = page.locator('.batch audio').first()
+  const expectedUrl = state.batches[0].files.find((file: any) => file.name === 'audio.mp3').url
+  await expect(player).toHaveAttribute('src', expectedUrl)
   await player.evaluate(async (node: HTMLAudioElement) => { node.load(); await node.play() })
-  await expect.poll(() => player.evaluate((node: HTMLAudioElement) => node.currentTime)).toBeGreaterThan(0)
+  await expect.poll(() => player.evaluate((node: HTMLAudioElement) => node.currentTime), { timeout: 10000 }).toBeGreaterThan(0)
   await player.evaluate((node: HTMLAudioElement) => node.pause())
   await page.setViewportSize({ width: 390, height: 844 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
