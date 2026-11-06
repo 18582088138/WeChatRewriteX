@@ -69,6 +69,11 @@ def cancel(aid: str, bid: str):
     return audio.cancel(aid, bid)
 
 
+@router.put(BASE + '/batches/{bid}/subtitles')
+def subtitles(aid: str, bid: str, request: Subtitles):
+    return audio.update_subtitles(aid, bid, request)
+
+
 @router.get(BASE + '/files/{oid}')
 def file(aid: str, oid: str):
     path = audio.file_path(aid, oid)

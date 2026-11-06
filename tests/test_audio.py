@@ -213,6 +213,23 @@ def test_corrupt_cache_cannot_be_reused(speech):
     assert len(second['attempts'])==1
 
 
+def test_subtitle_correction_creates_new_candidate_without_calls(speech):
+    from app.services.audio_models import Subtitles
+    aid,data=speech
+    b=synth(aid,data)
+    cues=[{k:c[k] for k in ('paragraph_id','start','end','text')} for c in b['result']['timeline']]
+    cues[0]['text']='修正字幕显示'
+    corrected=audio.update_subtitles(aid,b['id'],Subtitles(cues=cues))
+    assert corrected['id']!=b['id']
+    assert corrected['attempts']==[]
+    assert audio.batch(aid,b['id'])['result']['timeline'][0]['text']!=cues[0]['text']
+    assert corrected['result']['timeline'][0]['quality']=='manual_paragraph'
+    assert audio.get(aid)['product']['doc']==data['product']['doc']
+    cues[1]['start']=0
+    with pytest.raises(ValueError,match='有序'):
+        audio.update_subtitles(aid,b['id'],Subtitles(cues=cues))
+
+
 def test_mix_intro_music_outro_uses_local_media_and_cache(speech):
     from app.storage import library
     from app.services import audio_processing

@@ -162,3 +162,15 @@ def compose(segments, mix, media, directory):
         return {'duration': duration, 'timeline': timeline, 'loudness': {'target_lufs': target,
                 'method': 'ffmpeg loudnorm two-pass; measured MP3', 'measured': measured},
                 'within_target': 120 <= duration <= 300}
+
+
+def subtitles(cues, vtt=False):
+    def stamp(seconds):
+        ms = round(seconds * 1000)
+        h, ms = divmod(ms, 3600000); m, ms = divmod(ms, 60000); s, ms = divmod(ms, 1000)
+        return f'{h:02}:{m:02}:{s:02}{"." if vtt else ","}{ms:03}'
+    lines = ['WEBVTT', ''] if vtt else []
+    for i, cue in enumerate(cues, 1):
+        text = cue['text'].replace('-->', '→').replace('\r', '').replace('\n\n', '\n')
+        lines.extend([str(i), f'{stamp(cue["start"])} --> {stamp(cue["end"])}', text, ''])
+    return '\n'.join(lines)

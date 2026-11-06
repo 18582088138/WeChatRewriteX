@@ -357,7 +357,7 @@ def mix_media(aid, doc):
 def snapshot(aid, row, doc):
     voice = voice_for(aid, doc)
     _, media = mix_media(aid, doc)
-    return {'processing_version': 'audio-mix-v1', 'product_id': row['id'], 'revision': row['revision'], 'doc': doc.model_dump(),
+    return {'processing_version': 'audio-mix-captions-v1', 'product_id': row['id'], 'revision': row['revision'], 'doc': doc.model_dump(),
             'voice': voice, 'media': media, 'script_hash': script_hash(doc)}
 
 
@@ -494,7 +494,7 @@ def get(aid):
     project(aid)
     row = db.query_one("SELECT * FROM media_products WHERE article_id=? AND kind='speech'", (aid,))
     if not row:
-        return {'features': {'reviews': True, 'mix': True, 'subtitles': False}, 'product': None, 'voices': profiles(aid), 'batches': [], 'reviews': [], 'limits': limits().model_dump()}
+        return {'features': {'reviews': True, 'mix': True, 'subtitles': True}, 'product': None, 'voices': profiles(aid), 'batches': [], 'reviews': [], 'limits': limits().model_dump()}
     doc = SpeechDoc.model_validate_json(row['doc_json'])
     segments = []
     try:
@@ -506,7 +506,7 @@ def get(aid):
                              'url': f'/api/articles/{aid}/audio/segments/{segment["id"]}' if segment else None})
     except (ValueError, HTTPException):
         segments = [{'paragraph_id': p.id, 'stale': True, 'url': None} for p in doc.paragraphs]
-    return {'features': {'reviews': True, 'mix': True, 'subtitles': False}, 'product': {'id': row['id'], 'revision': row['revision'], 'doc': doc.model_dump(),
+    return {'features': {'reviews': True, 'mix': True, 'subtitles': True}, 'product': {'id': row['id'], 'revision': row['revision'], 'doc': doc.model_dump(),
                         'source_stale': source_stale(aid, doc)}, 'voices': profiles(aid), 'segments': segments,
             'batches': [batch(aid, b['id']) for b in db.query('SELECT id FROM audio_batches WHERE article_id=? ORDER BY created_at DESC LIMIT 30', (aid,))],
             'reviews': reviews(aid), 'rules_review': audio_text.review(doc), 'billing': billing(aid),
@@ -634,13 +634,15 @@ def run_batch(aid, payload):
                        'alignment': 'paragraph', 'precise_word_alignment': False,
                        'segment_manifest': [{'paragraph_id': p['id'], 'path': path.relative_to(root()).as_posix(), 'sha256': processing.checksum(path)} for p,path in segments]})
         for name, content in [('script.txt', '\n\n'.join(p['text'] for p,_ in segments)),
-                              ('pronunciation.txt', '\n\n'.join(p['speech_text'] for p,_ in segments))]:
+                              ('pronunciation.txt', '\n\n'.join(p['speech_text'] for p,_ in segments)),
+                              ('subtitles.srt', processing.subtitles(result['timeline'])),
+                              ('subtitles.vtt', processing.subtitles(result['timeline'], True))]:
             (directory / name).write_text(content, encoding='utf-8')
         with db.transaction():
             project(aid, 'write')
             if cancelled(bid):
                 return finish('cancelled', '合并结果未发布；已发送请求可能计费')
-            for name in ('audio.mp3', 'audio.wav', 'script.txt', 'pronunciation.txt'):
+            for name in ('audio.mp3', 'audio.wav', 'script.txt', 'pronunciation.txt', 'subtitles.srt', 'subtitles.vtt'):
                 path = directory / name
                 db.execute('INSERT INTO audio_files VALUES(?,?,?,?,?,?,?)',
                            (uid(), aid, bid, name, path.relative_to(root()).as_posix(), processing.checksum(path), result['duration'] if name.startswith('audio.') else None))
@@ -862,3 +864,38 @@ def export(aid, bid):
                    (aid,bid,approved['id'],store.dumps(manifest),time.time()))
         team.audit('audio.export', bid, aid, {'approval': approved['id']})
     return manifest
+
+
+def update_subtitles(aid, bid, request):
+    with db.transaction():
+        project(aid, 'write')
+        b = batch(aid,bid)
+        if b['status'] != 'done' or b['stale']:
+            raise ValueError('仅最新已完成音频可修正字幕，请先重建过期成品')
+        old = b['result']['timeline']
+        cues = [c.model_dump() for c in request.cues]
+        if [c['paragraph_id'] for c in cues] != [c['paragraph_id'] for c in old]:
+            raise ValueError('字幕段落映射须保持完整顺序')
+        previous_end = 0
+        for cue in cues:
+            if not previous_end <= cue['start'] < cue['end'] <= b['result']['duration']:
+                raise ValueError('字幕时间须有序、无重叠且在音频范围内')
+            previous_end = cue['end']
+        # A subtitle correction creates a new immutable candidate batch without TTS.
+        new_id = uid()
+        record = db.query_one('SELECT * FROM audio_batches WHERE id=?',(bid,))
+        result = b['result']; result['timeline'] = [{**c, 'quality':'manual_paragraph'} for c in cues]
+        result['subtitle_source_batch'] = bid
+        db.execute('INSERT INTO audio_batches(id,article_id,product_id,revision,input_hash,snapshot_json,status,initiator_id,result_json,created_at,finished_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                   (new_id,aid,b['product_id'],b['revision'],b['input_hash'],record['snapshot_json'],'done', (team.actor.get() or {}).get('id'),store.dumps(result),time.time(),time.time()))
+        directory = root() / aid / 'batches' / new_id; directory.mkdir(parents=True)
+        for f in b['files']:
+            if f['name'] not in ('audio.mp3','audio.wav','script.txt','pronunciation.txt','subtitles.srt','subtitles.vtt'):
+                continue
+            target = directory / f['name']
+            if f['name'].startswith('subtitles.'):
+                target.write_text(processing.subtitles(cues, f['name'].endswith('.vtt')), encoding='utf-8')
+            else:
+                shutil.copy2(file_path(aid,f['id']),target)
+            db.execute('INSERT INTO audio_files VALUES(?,?,?,?,?,?,?)', (uid(),aid,new_id,f['name'],target.relative_to(root()).as_posix(),processing.checksum(target),f['duration']))
+    return batch(aid,new_id)
