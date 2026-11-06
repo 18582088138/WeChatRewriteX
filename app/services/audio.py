@@ -15,6 +15,7 @@ from .audio_models import SpeechDoc, Paragraph, VoiceSettings, Limits
 from .audio_models import Mix
 from . import audio_text
 from . import tts
+from . import audio_processing as processing
 
 
 def uid():
@@ -23,6 +24,24 @@ def uid():
 
 def digest(value):
     return hashlib.sha256(store.dumps(value).encode()).hexdigest()
+
+
+def root():
+    path = db.db_path().parent / 'audio'
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def disk_check():
+    from .readiness import minimum_free_mb
+    if shutil.disk_usage(root()).free < max(256, minimum_free_mb()) * 1024 * 1024:
+        raise ValueError('音频生成需至少256MB可用空间，保留已有成品；请归档或扩容')
+    used = sum(p.stat().st_size for p in root().rglob('*') if p.is_file())
+    limit = int(config.get_env('WENSHU_AUDIO_MAX_MB') or '2048')
+    if not 64 <= limit <= 100000:
+        raise ValueError('WENSHU_AUDIO_MAX_MB 须为64～100000')
+    if used >= limit * 1024 * 1024:
+        raise ValueError('音频存储达到上限，请先备份归档；不会自动删除历史音频')
 
 
 def project(aid, capability='read'):
@@ -64,6 +83,15 @@ def script_hash(doc):
     return digest({'title': doc.title, 'brief': doc.brief.model_dump(),
                    'paragraphs': [p.model_dump() for p in doc.paragraphs],
                    'source_hash': doc.source_hash, 'source_confirmed_hash': doc.source_confirmed_hash, 'evidence': evidence})
+
+
+def billable_chars(text):
+    # MiniMax China pricing: each Han ideograph counts two, all other Unicode characters one.
+    return sum(2 if '\u3400' <= c <= '\u4dbf' or '\u4e00' <= c <= '\u9fff' or '\U00020000' <= c <= '\U0002fa1f' else 1 for c in text)
+
+
+def applicable_rate(lim, snap):
+    return lim.rate_per_10k if snap['doc']['voice']['model'] == lim.rate_model else None
 
 
 def normalize(doc):
@@ -263,6 +291,39 @@ def query_inventory():
     return result
 
 
+def limits():
+    return Limits.model_validate(store.setting('limits', {}))
+
+
+def set_limits(request):
+    if team.enabled():
+        team.admin()
+    if request.rate_per_10k is not None and (not request.rate_source.strip() or not request.rate_effective.strip()):
+        raise ValueError('设置费率必须填写来源及生效时间')
+    if request.rate_model not in tts.MiniMaxTTS.capabilities['models']:
+        raise ValueError('费率模型不在支持清单内')
+    with db.transaction():
+        store.set_setting('limits', request.model_dump())
+        team.audit('audio.limits', detail=request.model_dump())
+    return request.model_dump()
+
+
+def billing(aid=None):
+    if aid:
+        project(aid)
+    query = 'SELECT a.* FROM audio_attempts a JOIN audio_batches b ON b.id=a.batch_id'
+    rows = db.query(query + (' WHERE b.article_id=?' if aid else ''), (aid,) if aid else ())
+    real = [r for r in rows if r['provider'] == 'minimax']
+    charged = [r for r in real if r['sent_at'] is not None or r['state'] == 'reserved']
+    return {'attempts': rows, 'sent_requests': sum(r['sent_at'] is not None for r in real),
+            'reserved_requests': sum(r['state'] == 'reserved' for r in real),
+            'sent_chars': sum(r['chars'] for r in real if r['sent_at'] is not None),
+            'committed_chars': sum(r['chars'] for r in charged),
+            'committed_requests': len(charged),
+            'estimated_cost': sum(r['estimated_cost'] or 0 for r in charged) if charged and all(r['estimated_cost'] is not None for r in charged) else None,
+            'cost_status': '估算/待账单核对', 'currency': 'CNY'}
+
+
 def voice_for(aid, doc):
     profile = db.query_one('SELECT * FROM voice_profiles WHERE id=? AND enabled=1', (doc.voice.profile_id,))
     if not profile or aid not in json.loads(profile['projects_json']):
@@ -270,17 +331,164 @@ def voice_for(aid, doc):
     return {k: profile[k] for k in ('id', 'provider', 'voice_id', 'name', 'authorization')}
 
 
+def snapshot(aid, row, doc):
+    voice = voice_for(aid, doc)
+    media = {}
+    return {'product_id': row['id'], 'revision': row['revision'], 'doc': doc.model_dump(),
+            'voice': voice, 'media': media, 'script_hash': script_hash(doc)}
+
+
+def input_hash(snap):
+    return digest({k: v for k, v in snap.items() if k not in ('revision',)})
+
+
+def cache_key(paragraph, snap):
+    doc = snap['doc']
+    return digest({'speech_text': paragraph['speech_text'], 'voice': {k: snap['voice'][k] for k in ('provider', 'voice_id')},
+                   'settings': {k: v for k, v in doc['voice'].items() if k != 'profile_id'},
+                   'language': doc['brief']['language'], 'rules_version': doc['rules_version'],
+                   'format': '24000-mono-mp3/pcm-v1'})
+
+
+def cached(aid, key):
+    segment = db.query_one('SELECT * FROM audio_segments WHERE article_id=? AND cache_key=?', (aid, key))
+    if segment:
+        path = root() / segment['path']
+        if path.is_file() and processing.checksum(path) == segment['sha256']:
+            return segment
+    return None
+
+
+def estimate(aid):
+    row, doc = product(aid)
+    snap = snapshot(aid, row, doc)
+    needed = {}
+    hits = 0
+    for p in snap['doc']['paragraphs']:
+        key = cache_key(p, snap)
+        if cached(aid, key):
+            hits += 1
+        else:
+            needed[key] = p['speech_text']
+    chars = sum(len(t) for t in needed.values())
+    billing_units = sum(billable_chars(t) for t in needed.values())
+    rate = limits()
+    price = applicable_rate(rate,snap)
+    return {'new_requests': len(needed), 'chars': chars, 'cache_hits': hits,
+            'billable_chars': billing_units,
+            'estimated_cost': billing_units * price / 10000 if price is not None else None,
+            'cost_status': '离线测试无服务商费用' if snap['voice']['provider'] == 'fake' else '估算' if price is not None else '费用待核实',
+            'provider': snap['voice']['provider'], 'input_hash': input_hash(snap)}
+
+
+def generate(aid, request):
+    from ..pipeline import queue
+    with db.transaction():
+        project(aid, 'write')
+        row, doc = product(aid); check_revision(row, request.revision)
+        disk_check()
+        processing.tool('ffmpeg'); processing.tool('ffprobe')
+        report = audio_text.review(doc)
+        if any(i['severity'] == 'blocker' for i in report['issues']):
+            raise ValueError('口播含空文本，请修订后合成')
+        if sum(len(p.speech_text) for p in doc.paragraphs) > 2400:
+            raise ValueError('当前单人音频稿发送文本超过2400字符，请缩短脚本或分为多个项目，避免生成过长音频')
+        snap = snapshot(aid, row, doc)
+        if request.paragraph_ids is not None:
+            if not request.paragraph_ids or not set(request.paragraph_ids).issubset({p.id for p in doc.paragraphs}):
+                raise ValueError('目标段落不存在或为空')
+            snap['selected_ids'] = sorted(set(request.paragraph_ids))
+        fingerprint = input_hash(snap)
+        old = db.query_one("SELECT * FROM audio_batches WHERE article_id=? AND input_hash=? AND status IN ('queued','running','done') ORDER BY created_at DESC LIMIT 1", (aid, fingerprint))
+        if old:
+            if old['status'] != 'done' or all((root() / f['path']).is_file() and processing.checksum(root() / f['path']) == f['sha256'] for f in db.query('SELECT * FROM audio_files WHERE batch_id=?', (old['id'],))):
+                return batch(aid, old['id'])
+        unknown = db.query_one("SELECT a.id FROM audio_attempts a JOIN audio_batches b ON b.id=a.batch_id WHERE b.article_id=? AND a.state='unknown' LIMIT 1", (aid,))
+        if unknown and not request.confirm_unknown_retry:
+            raise HTTPException(409, '已有响应未知请求，可能重复收费；需明确确认重试后另建批次')
+        provider = tts.provider(snap['voice']['provider'])
+        if snap['voice']['provider'] == 'minimax':
+            if not config.get_env('MINIMAX_TTS_API_KEY'):
+                raise ValueError('未配置 MINIMAX_TTS_API_KEY')
+            tts.origin()
+        needed = {}
+        for p in snap['doc']['paragraphs']:
+            if snap.get('selected_ids') and p['id'] not in snap['selected_ids']:
+                continue
+            key = cache_key(p, snap)
+            if not cached(aid, key):
+                needed[key] = p
+        lim = limits()
+        price = applicable_rate(lim,snap)
+        new_chars = sum(len(p['speech_text']) for p in needed.values())
+        billing_units = sum(billable_chars(p['speech_text']) for p in needed.values())
+        if snap['voice']['provider'] == 'minimax':
+            ledger = billing()
+            if ledger['committed_requests'] + len(needed) > lim.max_requests or ledger['committed_chars'] + new_chars > lim.max_chars:
+                raise HTTPException(409, '真实 TTS 额度不足；管理员需先核对累计请求/文本预算')
+            if lim.max_estimated_cost is not None:
+                if price is None or any(a['estimated_cost'] is None for a in ledger['attempts'] if a['provider']=='minimax' and (a['sent_at'] is not None or a['state']=='reserved')):
+                    raise ValueError('费用待核实，不能按零费用放行预算限制')
+                if (ledger['estimated_cost'] or 0) + billing_units * price / 10000 > lim.max_estimated_cost:
+                    raise HTTPException(409, '批次预计超出费用上限')
+        bid = uid()
+        db.execute("INSERT INTO audio_batches(id,article_id,product_id,revision,input_hash,snapshot_json,status,initiator_id,created_at) VALUES(?,?,?,?,?,?,'queued',?,?)",
+                   (bid, aid, row['id'], row['revision'], fingerprint, store.dumps(snap), (team.actor.get() or {}).get('id'), time.time()))
+        for key, p in needed.items():
+            cost = billable_chars(p['speech_text']) * price / 10000 if price is not None else None
+            db.execute('INSERT INTO audio_attempts(id,batch_id,paragraph_id,cache_key,provider,state,chars,cost_status,estimated_cost,rate_json) VALUES(?,?,?,?,?,?,?,?,?,?)',
+                       (uid(), bid, p['id'], key, snap['voice']['provider'], 'reserved', len(p['speech_text']),
+                        'estimate' if cost is not None else 'unverified', cost, store.dumps({**lim.model_dump(), 'estimated_billable_chars': billable_chars(p['speech_text'])})))
+        jid = queue.enqueue('audio', aid, {'batch_id': bid})
+        db.execute('UPDATE audio_batches SET job_id=? WHERE id=?', (jid, bid))
+    return batch(aid, bid)
+
+
+def batch(aid, bid):
+    project(aid)
+    row = db.query_one('SELECT * FROM audio_batches WHERE id=? AND article_id=?', (bid, aid))
+    if not row:
+        raise HTTPException(404, '音频批次不存在')
+    snap = json.loads(row.pop('snapshot_json'))
+    row['result'] = json.loads(row.pop('result_json') or '{}')
+    row['snapshot'] = snap
+    row['attempts'] = db.query('SELECT * FROM audio_attempts WHERE batch_id=? ORDER BY rowid', (bid,))
+    row['files'] = [{'id': f['id'], 'name': f['name'], 'duration': f['duration'], 'url': f'/api/articles/{aid}/audio/files/{f["id"]}'}
+                    for f in db.query('SELECT * FROM audio_files WHERE batch_id=?', (bid,))]
+    _, doc = product(aid)
+    current_row, _ = product(aid)
+    try:
+        current = snapshot(aid, current_row, doc)
+        if snap.get('selected_ids'):
+            current['selected_ids'] = snap['selected_ids']
+        row['stale'] = input_hash(current) != row['input_hash'] or source_stale(aid, doc)
+    except (ValueError, HTTPException):
+        row['stale'] = True
+    return row
+
+
 def get(aid):
     project(aid)
     row = db.query_one("SELECT * FROM media_products WHERE article_id=? AND kind='speech'", (aid,))
-    state = {'product': None, 'voices': profiles(aid), 'batches': [], 'reviews': [],
-             'features': {'reviews': False, 'mix': False, 'subtitles': False}}
-    if row:
-        doc = SpeechDoc.model_validate_json(row['doc_json'])
-        state['product'] = {'id': row['id'], 'revision': row['revision'], 'doc': doc.model_dump(),
-                            'source_stale': source_stale(aid, doc)}
-        state['rules_review'] = audio_text.review(doc)
-    return state
+    if not row:
+        return {'features': {'reviews': False, 'mix': False, 'subtitles': False}, 'product': None, 'voices': profiles(aid), 'batches': [], 'reviews': [], 'limits': limits().model_dump()}
+    doc = SpeechDoc.model_validate_json(row['doc_json'])
+    segments = []
+    try:
+        snap = snapshot(aid, row, doc)
+        for p in doc.paragraphs:
+            segment = cached(aid, cache_key(p.model_dump(), snap))
+            segments.append({'paragraph_id': p.id, 'stale': segment is None,
+                             'duration': segment['duration'] if segment else None,
+                             'url': f'/api/articles/{aid}/audio/segments/{segment["id"]}' if segment else None})
+    except (ValueError, HTTPException):
+        segments = [{'paragraph_id': p.id, 'stale': True, 'url': None} for p in doc.paragraphs]
+    return {'features': {'reviews': False, 'mix': False, 'subtitles': False}, 'product': {'id': row['id'], 'revision': row['revision'], 'doc': doc.model_dump(),
+                        'source_stale': source_stale(aid, doc)}, 'voices': profiles(aid), 'segments': segments,
+            'batches': [batch(aid, b['id']) for b in db.query('SELECT id FROM audio_batches WHERE article_id=? ORDER BY created_at DESC LIMIT 30', (aid,))],
+            'reviews': [], 'rules_review': audio_text.review(doc), 'billing': billing(aid),
+            'ai_review': store.setting('speech_review:'+aid+':'+str(row['revision'])),
+            'limits': limits().model_dump(), 'export': db.query_one('SELECT * FROM audio_exports WHERE article_id=?', (aid,))}
 
 
 def history(aid):
@@ -294,3 +502,152 @@ def confirm_source(aid, revision):
         row, doc = product(aid); check_revision(row, revision)
         doc.source_confirmed_hash = source(aid)[1]
         return save(aid, revision, doc, deriving=True)
+
+
+def cancel(aid, bid):
+    with db.transaction():
+        project(aid, 'write')
+        row = batch(aid, bid)
+        if row['status'] in ('done', 'failed', 'unknown', 'cancelled'):
+            return row
+        db.execute('UPDATE audio_batches SET cancel_requested=1 WHERE id=?', (bid,))
+        db.execute("UPDATE audio_attempts SET state='cancelled_unissued' WHERE batch_id=? AND state='reserved'", (bid,))
+        if row['status'] == 'queued':
+            db.execute("UPDATE audio_batches SET status='cancelled',finished_at=? WHERE id=?", (time.time(), bid))
+        team.audit('audio.cancel', bid, aid, {'sent_requests_may_be_charged': True})
+    return batch(aid, bid)
+
+
+def cancelled(bid):
+    row = db.query_one('SELECT cancel_requested FROM audio_batches WHERE id=?', (bid,))
+    return not row or bool(row['cancel_requested'])
+
+
+def run_batch(aid, payload):
+    bid = payload['batch_id']
+    record = db.query_one('SELECT * FROM audio_batches WHERE id=? AND article_id=?', (bid, aid))
+    if not record or record['status'] in ('done', 'unknown', 'cancelled'):
+        return {'status': record['status'] if record else 'failed'}
+    snap = json.loads(record['snapshot_json'])
+    doc = SpeechDoc.model_validate(snap['doc'])
+    provider = tts.provider(snap['voice']['provider'])
+    def finish(status, error=''):
+        # Ownership/status repair is internal; result writes still use the actor ACL.
+        with db.connect() as conn:
+            conn.execute('UPDATE audio_batches SET status=?,error=?,finished_at=? WHERE id=?', (status, error, time.time(), bid))
+            conn.execute("UPDATE audio_attempts SET state='cancelled_unissued' WHERE batch_id=? AND state='reserved'", (bid,))
+        events.bus.publish('audio.updated', aid, batch_id=bid, status=status)
+        return {'status': status, 'error': error}
+    try:
+        with db.transaction():
+            project(aid, 'write')
+            if cancelled(bid):
+                return finish('cancelled')
+            voice_for(aid, doc)  # Revalidate scope without changing saved voice.
+            db.execute("UPDATE audio_batches SET status='running' WHERE id=?", (bid,))
+        segments, hits = [], 0
+        for p in snap['doc']['paragraphs']:
+            if cancelled(bid):
+                return finish('cancelled', '已发送请求可能仍计费')
+            key = cache_key(p, snap)
+            segment = cached(aid, key)
+            if segment:
+                hits += 1
+            elif snap.get('selected_ids') and p['id'] not in snap['selected_ids']:
+                continue
+            else:
+                attempt = db.query_one('SELECT * FROM audio_attempts WHERE batch_id=? AND cache_key=?', (bid, key))
+                if not attempt or attempt['state'] != 'reserved':
+                    return finish('unknown' if attempt and attempt['state'] in ('sent','unknown') else 'failed', '此片段没有安全的未发送预留，不会自动重复付费')
+                with db.transaction():
+                    project(aid, 'write'); disk_check()
+                    profile = voice_for(aid, doc)
+                    if profile != snap['voice']:
+                        return finish('failed', '声音档案在入队后改变，请重新选择并创建新批次')
+                    if cancelled(bid):
+                        return finish('cancelled')
+                    db.execute("UPDATE audio_attempts SET state='sent',sent_at=? WHERE id=?", (time.time(), attempt['id']))
+                events.bus.publish('audio.progress', aid, batch_id=bid, paragraph_id=p['id'], stage='request_sent')
+                try:
+                    result = provider.synthesize(p['speech_text'], snap['voice'], VoiceSettings.model_validate(snap['doc']['voice']), doc.brief.language)
+                except tts.TTSError as exc:
+                    with db.connect() as conn:
+                        conn.execute('UPDATE audio_attempts SET state=?,error=?,finished_at=?,cost_status=? WHERE id=?',
+                                     (exc.state, str(exc), time.time(), 'pending_bill' if exc.state!='not_sent' else 'not_sent', attempt['id']))
+                    return finish('unknown' if exc.state == 'unknown' else 'failed', str(exc))
+                with db.connect() as conn:
+                    rate = json.loads(attempt['rate_json'])
+                    rate.update({'request_id': result.request_id, 'provider_usage_characters': result.usage_characters})
+                    conn.execute("UPDATE audio_attempts SET state='received',rate_json=? WHERE id=?", (store.dumps(rate),attempt['id']))
+                temp = root() / aid / 'segments' / (uid() + '.' + result.extension)
+                temp.parent.mkdir(parents=True, exist_ok=True)
+                temp.write_bytes(result.audio)
+                try:
+                    duration = processing.probe(temp)
+                except ValueError as exc:
+                    db.execute("UPDATE audio_attempts SET state='validation_failed',error=?,finished_at=?,cost_status='pending_bill' WHERE id=?", (str(exc), time.time(), attempt['id']))
+                    return finish('failed', str(exc))
+                relative, checksum = temp.relative_to(root()).as_posix(), processing.checksum(temp)
+                with db.transaction():
+                    project(aid, 'write')
+                    sid = uid()
+                    # A corrupt old cache may be replaced; history batch files are independent.
+                    db.execute('INSERT INTO audio_segments VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(article_id,cache_key) DO UPDATE SET path=excluded.path,sha256=excluded.sha256,duration=excluded.duration,snapshot_json=excluded.snapshot_json',
+                               (sid, aid, key, relative, checksum, duration, store.dumps({'paragraph': p, 'voice': snap['voice'], 'settings': snap['doc']['voice']}), time.time()))
+                    db.execute("UPDATE audio_attempts SET state='completed',finished_at=?,cost_status=? WHERE id=?", (time.time(), 'pending_bill' if snap['voice']['provider']=='minimax' else 'offline', attempt['id']))
+                segment = cached(aid, key)
+            if segment:
+                segments.append((p, root() / segment['path']))
+                events.bus.publish('audio.progress', aid, batch_id=bid, completed_segments=len(segments), total_segments=len(doc.paragraphs), stage='validated')
+        if cancelled(bid):
+            return finish('cancelled')
+        # A local mix uses the immutable batch settings and current ACL of source files.
+        media = {}
+        directory = root() / aid / 'batches' / bid
+        result = processing.compose(segments, doc.mix, media, directory)
+        result.update({'cache_hits': hits, 'selected_only': bool(snap.get('selected_ids')), 'provider': snap['voice']['provider'],
+                       'alignment': 'paragraph', 'precise_word_alignment': False,
+                       'segment_manifest': [{'paragraph_id': p['id'], 'path': path.relative_to(root()).as_posix(), 'sha256': processing.checksum(path)} for p,path in segments]})
+        with db.transaction():
+            project(aid, 'write')
+            if cancelled(bid):
+                return finish('cancelled', '合并结果未发布；已发送请求可能计费')
+            for name in ('audio.mp3', 'audio.wav'):
+                path = directory / name
+                db.execute('INSERT INTO audio_files VALUES(?,?,?,?,?,?,?)',
+                           (uid(), aid, bid, name, path.relative_to(root()).as_posix(), processing.checksum(path), result['duration'] if name.startswith('audio.') else None))
+            db.execute("UPDATE audio_batches SET status='done',result_json=?,finished_at=? WHERE id=?", (store.dumps(result), time.time(), bid))
+        events.bus.publish('audio.updated', aid, batch_id=bid, status='done')
+        return {'status': 'done', 'batch_id': bid}
+    except HTTPException:
+        return finish('failed', '成员或项目/素材授权已变化；结果未发布')
+    except Exception as exc:
+        # Do not leak third-party response or secret-bearing exception strings.
+        return finish('failed', str(exc) if isinstance(exc, ValueError) else '音频处理失败，已完成片段可复用，未替换已有成品')
+
+
+def recover():
+    with db.connect() as conn:
+        conn.execute("UPDATE audio_attempts SET state='unknown',cost_status='pending_bill',error='进程中断：已发送请求未完成校验，需人工确认' WHERE state IN ('sent','received')")
+        conn.execute("UPDATE audio_batches SET status='unknown',error='请求响应未知，不自动重发' WHERE status IN ('running','queued') AND id IN (SELECT batch_id FROM audio_attempts WHERE state='unknown')")
+        conn.execute("UPDATE audio_attempts SET state='cancelled_unissued' WHERE state='reserved' AND batch_id IN (SELECT id FROM audio_batches WHERE status='unknown' OR cancel_requested=1)")
+        conn.execute("UPDATE audio_batches SET status='cancelled' WHERE cancel_requested=1 AND status IN ('queued','running')")
+        conn.execute("UPDATE audio_batches SET status='queued' WHERE status='running'")
+
+
+def abort_unstarted(bid, reason):
+    with db.connect() as conn:
+        conn.execute("UPDATE audio_batches SET status='failed',error=?,finished_at=? WHERE id=? AND status IN ('queued','running')",(reason,time.time(),bid))
+        conn.execute("UPDATE audio_attempts SET state='cancelled_unissued' WHERE batch_id=? AND state='reserved'",(bid,))
+
+
+def file_path(aid, oid, segment=False):
+    project(aid)
+    table = 'audio_segments' if segment else 'audio_files'
+    row = db.query_one(f'SELECT * FROM {table} WHERE id=? AND article_id=?', (oid, aid))
+    if not row:
+        raise HTTPException(404, '音频文件不存在或无授权')
+    path = (root() / row['path']).resolve()
+    if not path.is_relative_to(root().resolve()) or not path.is_file() or processing.checksum(path) != row['sha256']:
+        raise HTTPException(404, '音频文件缺失或校验失败')
+    return path

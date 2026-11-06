@@ -44,12 +44,51 @@ def confirm(aid: str, request: Revision):
     return audio.confirm_source(aid, request.revision)
 
 
+@router.get(BASE + '/estimate')
+def estimate(aid: str):
+    return audio.estimate(aid)
+
+
+@router.post(BASE + '/generate')
+def generate(aid: str, request: Generate):
+    return audio.generate(aid, request)
+
+
+@router.get(BASE + '/batches/{bid}')
+def batch(aid: str, bid: str):
+    return audio.batch(aid, bid)
+
+
+@router.post(BASE + '/batches/{bid}/cancel')
+def cancel(aid: str, bid: str):
+    return audio.cancel(aid, bid)
+
+
+@router.get(BASE + '/files/{oid}')
+def file(aid: str, oid: str):
+    path = audio.file_path(aid, oid)
+    return FileResponse(path, headers={'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'})
+
+
+@router.get(BASE + '/segments/{oid}')
+def segment(aid: str, oid: str):
+    path = audio.file_path(aid, oid, True)
+    return FileResponse(path, headers={'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'})
+
+
 @router.get('/api/audio/settings')
 def settings():
     from ..storage import audio_store
-    return {'voices': audio.profiles(), 'default_voice_id': audio.config.get_env('MINIMAX_DEFAULT_VOICE_ID') or '',
-            'key_set': bool(audio.config.get_env('MINIMAX_TTS_API_KEY')), 'inventory': audio_store.setting('inventory'),
-            'capabilities': tts.MiniMaxTTS.capabilities, 'fake_enabled': audio.config.get_env('WENSHU_FAKE_TTS') == '1'}
+    return {'limits': audio.limits().model_dump(), 'voices': audio.profiles(),
+            'default_voice_id': audio.config.get_env('MINIMAX_DEFAULT_VOICE_ID') or '',
+            'key_set': bool(audio.config.get_env('MINIMAX_TTS_API_KEY')), 'ledger': audio.billing(),
+            'inventory': audio_store.setting('inventory'), 'capabilities': tts.MiniMaxTTS.capabilities,
+            'fake_enabled': audio.config.get_env('WENSHU_FAKE_TTS') == '1'}
+
+
+@router.put('/api/audio/limits')
+def limits(request: Limits):
+    return audio.set_limits(request)
 
 
 @router.post('/api/audio/voices')

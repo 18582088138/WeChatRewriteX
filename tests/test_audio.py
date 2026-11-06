@@ -56,6 +56,45 @@ def draft_conflict():
     return VersionConflict
 
 
+def test_queued_cancel_and_unknown_never_auto_resends(speech,monkeypatch):
+    aid,data=speech
+    pending=audio.generate(aid,Generate(revision=data['product']['revision']))
+    cancelled=audio.cancel(aid,pending['id'])
+    assert cancelled['status']=='cancelled'
+    assert all(a['sent_at'] is None for a in cancelled['attempts'])
+    assert audio.run_batch(aid,{'batch_id':pending['id']})['status']=='cancelled'
+    def unknown(*args):
+        raise tts.TTSError('响应未知','unknown')
+    monkeypatch.setattr(tts.FakeTTS,'synthesize',unknown)
+    retry=audio.generate(aid,Generate(revision=data['product']['revision']))
+    assert audio.run_batch(aid,{'batch_id':retry['id']})['status']=='unknown'
+    audio.recover()
+    with pytest.raises(Exception,match='响应未知'):
+        audio.generate(aid,Generate(revision=data['product']['revision']))
+    assert sum(a['state']=='unknown' for a in audio.batch(aid,retry['id'])['attempts'])==1
+    assert sum(a['state']=='reserved' for a in audio.batch(aid,retry['id'])['attempts'])==0
+
+
+def test_billing_reserves_shared_limits_and_no_network(speech,monkeypatch):
+    aid,data=speech
+    profile=audio.register_profile(VoiceProfile(voice_id='known',name='已知',authorization='用户授权',projects=[aid]))
+    doc=SpeechDoc.model_validate(data['product']['doc']);doc.voice.profile_id=profile['id']
+    updated=audio.save(aid,data['product']['revision'],doc)
+    monkeypatch.setenv('MINIMAX_TTS_API_KEY','test-sentinel')
+    audio.set_limits(Limits(max_requests=1,max_chars=120))
+    with pytest.raises(Exception,match='额度不足'):
+        audio.generate(aid,Generate(revision=updated['product']['revision']))
+    audio.set_limits(Limits(max_requests=2,max_chars=120))
+    batch=audio.generate(aid,Generate(revision=updated['product']['revision']))
+    ledger=audio.billing(aid)
+    assert ledger['reserved_requests']==2
+    assert ledger['sent_requests']==0
+    assert ledger['estimated_cost'] is None
+    audio.cancel(aid,batch['id'])
+    assert audio.billing(aid)['committed_requests']==0
+    audio.set_limits(Limits())
+
+
 def test_adapter_hex_errors_and_endpoint_whitelist(monkeypatch):
     monkeypatch.setenv('MINIMAX_TTS_ORIGIN','https://evil.invalid/v1/voice_clone')
     with pytest.raises(tts.TTSError,match='官方'):
@@ -63,6 +102,44 @@ def test_adapter_hex_errors_and_endpoint_whitelist(monkeypatch):
     result=tts.FakeTTS().synthesize('测试',{},None,'zh')
     assert result.audio.startswith(b'RIFF')
     assert result.audio==tts.FakeTTS().synthesize('测试',{},None,'zh').audio
+
+
+def test_restart_sent_request_unknown_and_queued_reservations(speech):
+    aid,data=speech
+    b=audio.generate(aid,Generate(revision=data['product']['revision']))
+    db.execute("UPDATE audio_batches SET status='running' WHERE id=?",(b['id'],))
+    db.execute("UPDATE audio_attempts SET state='sent',sent_at=123 WHERE id=?",(b['attempts'][0]['id'],))
+    audio.recover()
+    recovered=audio.batch(aid,b['id'])
+    assert recovered['status']=='unknown'
+    assert recovered['attempts'][0]['state']=='unknown'
+    assert recovered['attempts'][1]['state']=='cancelled_unissued'
+
+
+def test_billing_han_double_units_and_model_rate(speech):
+    aid,data=speech
+    assert audio.billable_chars('中文 AI!')==8
+    audio.set_limits(Limits(rate_per_10k=3.5,rate_source='official China pricing',rate_effective='2026-11-05'))
+    estimate=audio.estimate(aid)
+    assert estimate['billable_chars']>estimate['chars']
+    assert estimate['estimated_cost']==estimate['billable_chars']*3.5/10000
+    doc=SpeechDoc.model_validate(data['product']['doc']);doc.voice.model='speech-2.6-turbo'
+    audio.save(aid,data['product']['revision'],doc)
+    assert audio.estimate(aid)['estimated_cost'] is None # HD rate never silently applies to Turbo.
+    audio.set_limits(Limits())
+
+
+def test_corrupt_cache_cannot_be_reused(speech):
+    aid,data=speech
+    first=synth(aid,data)
+    segments=audio.get(aid)['segments']
+    record=db.query_one('SELECT * FROM audio_segments WHERE id=?',(segments[0]['url'].split('/')[-1],))
+    (audio.root()/record['path']).write_bytes(b'broken')
+    assert audio.get(aid)['segments'][0]['stale']
+    assert audio.estimate(aid)['new_requests']==1
+    from app.services.audio_models import Generate
+    second=audio.generate(aid,Generate(revision=data['product']['revision'],paragraph_ids=[data['product']['doc']['paragraphs'][0]['id']]))
+    assert len(second['attempts'])==1
 
 
 def test_minimax_adapter_response_contract_and_no_clone_paths(monkeypatch):
@@ -88,6 +165,24 @@ def test_minimax_adapter_response_contract_and_no_clone_paths(monkeypatch):
     assert sent[0][1].endswith('/v1/t2a_v2')
     assert sent[0][2]['voice_setting']['voice_id']=='existing'
     assert 'test-sentinel' not in json.dumps(sent)
+
+
+def test_sent_cancellation_preserves_attempt_and_blocks_later_requests(speech,monkeypatch):
+    aid,data=speech
+    b=audio.generate(aid,Generate(revision=data['product']['revision']))
+    original=tts.FakeTTS.synthesize
+    calls=[]
+    def synthesize(self,*args):
+        calls.append(1)
+        audio.cancel(aid,b['id'])
+        return original(self,*args)
+    monkeypatch.setattr(tts.FakeTTS,'synthesize',synthesize)
+    assert audio.run_batch(aid,{'batch_id':b['id']})['status']=='cancelled'
+    result=audio.batch(aid,b['id'])
+    assert len(calls)==1
+    assert result['attempts'][0]['sent_at'] is not None
+    assert result['attempts'][1]['sent_at'] is None
+    assert result['files']==[]
 
 
 def test_cannot_forge_source_position(speech):

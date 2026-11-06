@@ -68,3 +68,41 @@ def checksum(path):
         for block in iter(lambda: stream.read(1024 * 1024), b''):
             h.update(block)
     return h.hexdigest()
+
+
+def pcm(source, target, trim_start=0, trim_seconds=None):
+    probe(source)
+    args = ['-v', 'error', '-nostdin', '-y', *input_args(source)]
+    if trim_start:
+        args += ['-ss', str(trim_start)]
+    if trim_seconds:
+        args += ['-t', str(trim_seconds)]
+    run('ffmpeg', args + ['-map', '0:a:0', '-ac', '1', '-ar', '24000', '-c:a', 'pcm_s16le', str(target)])
+    probe(target)
+
+
+def compose(segments, mix, media, directory):
+    """MVP concatenation; enhanced mixing is introduced at S7."""
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    with _processing:
+        frames = []
+        seconds = 0.0
+        for index, (_, segment) in enumerate(segments):
+            path = directory / f'pcm-{index}.wav'
+            pcm(segment, path)
+            with wave.open(str(path), 'rb') as stream:
+                frames.append(stream.readframes(stream.getnframes()))
+                seconds += stream.getnframes() / 24000
+            frames.append(b'\0\0' * 7200)
+            seconds += .3
+        if not 0 < seconds <= MAX_DURATION:
+            raise ValueError('合成后时长须在0～10分钟内')
+        wav = directory / 'audio.wav'
+        with wave.open(str(wav), 'wb') as stream:
+            stream.setnchannels(1); stream.setsampwidth(2); stream.setframerate(24000)
+            for chunk in frames:
+                stream.writeframes(chunk)
+        mp3 = directory / 'audio.mp3'
+        run('ffmpeg', ['-v', 'error', '-nostdin', '-y', *input_args(wav), '-c:a', 'libmp3lame', '-b:a', '128k', str(mp3)])
+        return {'duration': probe(mp3), 'timeline': [], 'within_target': 120 <= seconds <= 300}
