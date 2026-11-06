@@ -17,4 +17,4 @@ S9 完整后端 190 项在 `79bfff8` 上通过；图文 7/团队 3 项保留同�
 
 所有阶段新增付费/克隆请求为 0；真实环境与用户终审独立待验收。
 
-S9 最终包固定 `87f3004`，wheel/Windows 安装与包一致性通过；后续交付提交只更新文档。集成候选 `codex/v2-rebuild` 保留完整阶段历史，本地 S0～S9 分支继续用于检查与回退。旧集中实现的 `codex/v2-audio` 与 `codex/v2-audio-s3-api-recheck` 已删除，远端没有这两条分支；main 仍为 `bf24cac`。最终包详情见 [S9](S9.md)。
+S9 最终包固定 `87f3004`，wheel/Windows 安装与包一致性通过；后续交付提交只更新规则/文档。集成候选 `codex/v2-rebuild` 保留完整阶段历史，S0～S9 分支已全部推送，继续用于检查与回退。旧集中实现的 `codex/v2-audio` 与 `codex/v2-audio-s3-api-recheck` 已删除，远端没有这两条分支；开发起点仍为 `bf24cac`，当前 main 仅追加规则提交 `723ce2b`，没有合入 V2 功能。最终包详情见 [S9](S9.md)，本次整理详见 [清理记录](repository-cleanup-2026-11-06.md)。
