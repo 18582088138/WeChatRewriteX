@@ -39,6 +39,11 @@ class Revision(Strict):
     revision: int = Field(ge=1)
 
 
+@router.post(BASE + '/review-ai')
+def ai_review(aid: str,request: Revision):
+    return audio.ai_review(aid,request.revision)
+
+
 @router.post(BASE + '/confirm-source')
 def confirm(aid: str, request: Revision):
     return audio.confirm_source(aid, request.revision)
@@ -74,6 +79,63 @@ def file(aid: str, oid: str):
 def segment(aid: str, oid: str):
     path = audio.file_path(aid, oid, True)
     return FileResponse(path, headers={'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'})
+
+
+@router.post(BASE + '/reviews')
+def submit(aid: str, request: SubmitReview):
+    return audio.submit_review(aid, request)
+
+
+@router.put(BASE + '/reviews/{sid}')
+def decide(aid: str, sid: str, request: ReviewAction):
+    return audio.decide_review(aid, sid, request)
+
+
+class Comment(Strict):
+    revision: int = Field(ge=0)
+    paragraph_id: str = Field(max_length=80)
+    message: str = Field(min_length=1, max_length=2000)
+
+
+@router.post(BASE + '/reviews/{sid}/comments')
+def comment(aid: str, sid: str, request: Comment):
+    return audio.comment(aid, sid, request.revision, request.paragraph_id, request.message)
+
+
+class ResolveComment(Strict):
+    revision: int = Field(ge=0)
+    status: str = Field(pattern='^(resolved|declined)$')
+    reason: str = Field(default='',max_length=2000)
+
+
+@router.put(BASE + '/review-comments/{sid}/{cid}')
+def resolve(aid: str,sid: str,cid: str,request: ResolveComment):
+    return audio.resolve_comment(aid,sid,cid,request.revision,request.status,request.reason)
+
+
+class Export(Strict):
+    batch_id: str
+
+
+@router.post(BASE + '/export')
+def export(aid: str, request: Export):
+    return audio.export(aid, request.batch_id)
+
+
+@router.get(BASE + '/exports/{name}')
+def download(aid: str, name: str):
+    import json
+    from ..storage import db
+    from fastapi import HTTPException
+    audio.project(aid)
+    row = db.query_one('SELECT manifest_json FROM audio_exports WHERE article_id=?', (aid,))
+    if not row:
+        raise HTTPException(404, '暂无正式音频导出')
+    manifest = json.loads(row['manifest_json'])
+    f = next((f for f in manifest['files'] if f['name']==name), None)
+    if not f:
+        raise HTTPException(404, '导出文件不存在')
+    return FileResponse(audio.file_path(aid,f['id']), filename=name, headers={'Cache-Control':'no-store'})
 
 
 @router.get('/api/audio/settings')

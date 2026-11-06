@@ -95,6 +95,38 @@ def test_billing_reserves_shared_limits_and_no_network(speech,monkeypatch):
     audio.set_limits(Limits())
 
 
+def test_human_script_audio_approval_export_and_change(speech):
+    aid,data=speech
+    script=audio.submit_review(aid,SubmitReview(kind='script',revision=data['product']['revision']))
+    audio.decide_review(aid,script['id'],ReviewAction(status='approved'))
+    finished=synth(aid,data)
+    with pytest.raises(Exception,match='人工批准'):
+        audio.export(aid,finished['id'])
+    review=audio.submit_review(aid,SubmitReview(kind='audio',revision=data['product']['revision'],batch_id=finished['id']))
+    audio.decide_review(aid,review['id'],ReviewAction(status='approved'))
+    exported=audio.export(aid,finished['id'])
+    assert exported['approval_id']==review['id']
+    assert 'API_KEY' not in json.dumps(exported)
+    doc=SpeechDoc.model_validate(data['product']['doc']);doc.voice.speed=1.1
+    audio.save(aid,data['product']['revision'],doc)
+    assert any(r['status']=='approved' and r['kind']=='script' for r in audio.reviews(aid))
+    with pytest.raises(Exception,match='最新'):
+        audio.export(aid,finished['id'])
+    assert db.query_one('SELECT batch_id FROM audio_exports WHERE article_id=?',(aid,))['batch_id']==finished['id']
+
+
+def test_source_change_requires_manual_recheck(speech):
+    aid,data=speech
+    old=DraftDoc.model_validate_json(dao.latest_draft(aid)['doc_json'])
+    old.blocks[0].text='来源改变。';old.edit_revision+=1
+    dao.save_workspace(old,'test')
+    assert audio.get(aid)['product']['source_stale']
+    with pytest.raises(Exception,match='来源已改变'):
+        audio.submit_review(aid,SubmitReview(kind='script',revision=data['product']['revision']))
+    reviewed=audio.confirm_source(aid,data['product']['revision'])
+    assert not reviewed['product']['source_stale']
+
+
 def test_adapter_hex_errors_and_endpoint_whitelist(monkeypatch):
     monkeypatch.setenv('MINIMAX_TTS_ORIGIN','https://evil.invalid/v1/voice_clone')
     with pytest.raises(tts.TTSError,match='官方'):
@@ -183,6 +215,21 @@ def test_sent_cancellation_preserves_attempt_and_blocks_later_requests(speech,mo
     assert result['attempts'][0]['sent_at'] is not None
     assert result['attempts'][1]['sent_at'] is None
     assert result['files']==[]
+
+
+def test_ai_review_cannot_overwrite_new_script(speech,monkeypatch):
+    from app.services.llm import router
+    aid,data=speech
+    def late(*args,**kwargs):
+        from types import SimpleNamespace
+        doc=SpeechDoc.model_validate(data['product']['doc']);doc.paragraphs[0].text+='人工已修改。'
+        audio.save(aid,data['product']['revision'],doc)
+        return SimpleNamespace(parsed=kwargs['schema'](issues=[]),model='fixture')
+    monkeypatch.setattr(router,'complete',late)
+    with pytest.raises(draft_conflict()):
+        audio.ai_review(aid,data['product']['revision'])
+    assert audio.get(aid)['ai_review'] is None
+    assert '人工已修改' in audio.get(aid)['product']['doc']['paragraphs'][0]['text']
 
 
 def test_cannot_forge_source_position(speech):
