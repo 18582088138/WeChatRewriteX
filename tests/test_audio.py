@@ -115,6 +115,16 @@ def test_human_script_audio_approval_export_and_change(speech):
     assert db.query_one('SELECT batch_id FROM audio_exports WHERE article_id=?',(aid,))['batch_id']==finished['id']
 
 
+def test_pronunciation_dictionary_changes_only_used_segments(speech):
+    aid,data=speech
+    synth(aid,data)
+    doc=SpeechDoc.model_validate(data['product']['doc']);doc.dictionary={'AI':'人工智能'}
+    updated=audio.save(aid,data['product']['revision'],doc)
+    changed=synth(aid,updated)
+    assert len(changed['attempts'])==1
+    assert changed['result']['cache_hits']==1
+
+
 def test_source_change_requires_manual_recheck(speech):
     aid,data=speech
     old=DraftDoc.model_validate_json(dao.latest_draft(aid)['doc_json'])
@@ -172,6 +182,53 @@ def test_corrupt_cache_cannot_be_reused(speech):
     from app.services.audio_models import Generate
     second=audio.generate(aid,Generate(revision=data['product']['revision'],paragraph_ids=[data['product']['doc']['paragraphs'][0]['id']]))
     assert len(second['attempts'])==1
+
+
+def test_mix_intro_music_outro_uses_local_media_and_cache(speech):
+    from app.storage import library
+    from app.services import audio_processing
+    aid,data=speech
+    first=synth(aid,data)
+    target=library.article_dir(aid)/'music.wav'
+    target.parent.mkdir(parents=True,exist_ok=True)
+    target.write_bytes(tts.FakeTTS().synthesize('离线音乐素材',{},None,'zh').audio)
+    from app.core.ids import new_id
+    mid=new_id('material')
+    db.execute('INSERT INTO materials(id,scope,article_id,kind,path,title,sha256) VALUES(?,?,?,?,?,?,?)',
+               (mid,'article',aid,'audio',str(target.relative_to(library.library_root())),'离线音乐',audio_processing.checksum(target)))
+    doc=SpeechDoc.model_validate(data['product']['doc'])
+    doc.mix.music_id=mid;doc.mix.intro_id=mid;doc.mix.outro_id=mid;doc.mix.license_note='自建离线测试音，允许测试使用'
+    doc.mix.trim_seconds=.5
+    updated=audio.save(aid,data['product']['revision'],doc)
+    mixed=synth(aid,updated)
+    assert mixed['attempts']==[]
+    assert mixed['result']['timeline'][0]['start']>=.5
+    assert mixed['result']['duration']>first['result']['duration']
+    assert float(mixed['result']['loudness']['measured']['input_tp'])<0
+
+
+def test_processing_failure_and_low_disk_keep_export(speech,monkeypatch):
+    aid,data=speech
+    script=audio.submit_review(aid,SubmitReview(kind='script',revision=data['product']['revision']))
+    audio.decide_review(aid,script['id'],ReviewAction(status='approved'))
+    first=synth(aid,data)
+    review=audio.submit_review(aid,SubmitReview(kind='audio',revision=data['product']['revision'],batch_id=first['id']))
+    audio.decide_review(aid,review['id'],ReviewAction(status='approved'))
+    audio.export(aid,first['id'])
+    # Publishing the same approved package remains idempotent after manifest files were added.
+    audio.export(aid,first['id'])
+    doc=SpeechDoc.model_validate(data['product']['doc']);doc.mix.loudness_lufs=-18
+    updated=audio.save(aid,data['product']['revision'],doc)
+    new=audio.generate(aid,Generate(revision=updated['product']['revision']))
+    def fail(*args):raise ValueError('模拟本地合并失败')
+    monkeypatch.setattr(audio.processing,'compose',fail)
+    assert audio.run_batch(aid,{'batch_id':new['id']})['status']=='failed'
+    assert db.query_one('SELECT batch_id FROM audio_exports WHERE article_id=?',(aid,))['batch_id']==first['id']
+    import shutil
+    usage=shutil.disk_usage(audio.root())
+    monkeypatch.setattr(audio.shutil,'disk_usage',lambda *args:type(usage)(usage.total,usage.used,0))
+    with pytest.raises(ValueError,match='256MB'):
+        audio.generate(aid,Generate(revision=updated['product']['revision']))
 
 
 def test_minimax_adapter_response_contract_and_no_clone_paths(monkeypatch):

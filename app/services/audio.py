@@ -95,8 +95,6 @@ def applicable_rate(lim, snap):
 
 
 def normalize(doc):
-    if doc.mix != Mix() or doc.dictionary or any(p.pause_ms != 300 for p in doc.paragraphs):
-        raise ValueError('词典、停顿与混音在 S7 开放')
     ids = [p.id for p in doc.paragraphs]
     if len(ids) != len(set(ids)):
         raise ValueError('段落 ID 不可重复')
@@ -104,7 +102,7 @@ def normalize(doc):
         raise ValueError('口播稿总长度超过上限')
     for p in doc.paragraphs:
         if not p.manual_speech:
-            p.speech_text = audio_text.pronounce(p.text, {}, doc.brief.language)
+            p.speech_text = audio_text.pronounce(p.text, doc.dictionary, doc.brief.language)
         if '<' in p.speech_text or '>' in p.speech_text:
             raise ValueError('当前不支持 SSML/情绪标签；请使用纯文本和段间停顿')
     return doc
@@ -159,6 +157,7 @@ def validate_references(aid, doc):
                 raise HTTPException(404, '引用素材不属于本项目')
             if team.enabled() and not team.material_allowed(team.actor.get(), material):
                 raise HTTPException(404, '引用素材没有授权')
+    mix_media(aid, doc)
 
 
 def derive(aid, request):
@@ -331,10 +330,34 @@ def voice_for(aid, doc):
     return {k: profile[k] for k in ('id', 'provider', 'voice_id', 'name', 'authorization')}
 
 
+def mix_media(aid, doc):
+    from ..storage import library
+    result, manifests = {}, {}
+    for kind in ('intro', 'outro', 'music'):
+        mid = getattr(doc.mix, kind + '_id')
+        if not mid:
+            continue
+        m = dao.get_material(mid)
+        if not m or (m['scope'] == 'article' and m['article_id'] != aid) or m.get('deleted_at'):
+            raise HTTPException(404, '混音素材不属于本项目或已归档')
+        if team.enabled() and not team.material_allowed(team.actor.get(), m):
+            raise HTTPException(404, '混音素材没有当前授权')
+        path = library.material_abs_path(m['path'])
+        if not path or path.suffix.lower() not in ('.mp3', '.wav', '.m4a', '.aac', '.ogg', '.flac'):
+            raise ValueError('片头/片尾/背景素材须为已登记的音频文件')
+        if not doc.mix.license_note.strip():
+            raise ValueError('使用背景音频须记录来源/授权说明')
+        if not path.is_file():
+            raise ValueError('音频素材文件缺失')
+        result[kind] = path
+        manifests[kind] = {'material_id': mid, 'sha256': processing.checksum(path), 'title': m.get('title')}
+    return result, manifests
+
+
 def snapshot(aid, row, doc):
     voice = voice_for(aid, doc)
-    media = {}
-    return {'product_id': row['id'], 'revision': row['revision'], 'doc': doc.model_dump(),
+    _, media = mix_media(aid, doc)
+    return {'processing_version': 'audio-mix-v1', 'product_id': row['id'], 'revision': row['revision'], 'doc': doc.model_dump(),
             'voice': voice, 'media': media, 'script_hash': script_hash(doc)}
 
 
@@ -471,7 +494,7 @@ def get(aid):
     project(aid)
     row = db.query_one("SELECT * FROM media_products WHERE article_id=? AND kind='speech'", (aid,))
     if not row:
-        return {'features': {'reviews': True, 'mix': False, 'subtitles': False}, 'product': None, 'voices': profiles(aid), 'batches': [], 'reviews': [], 'limits': limits().model_dump()}
+        return {'features': {'reviews': True, 'mix': True, 'subtitles': False}, 'product': None, 'voices': profiles(aid), 'batches': [], 'reviews': [], 'limits': limits().model_dump()}
     doc = SpeechDoc.model_validate_json(row['doc_json'])
     segments = []
     try:
@@ -483,7 +506,7 @@ def get(aid):
                              'url': f'/api/articles/{aid}/audio/segments/{segment["id"]}' if segment else None})
     except (ValueError, HTTPException):
         segments = [{'paragraph_id': p.id, 'stale': True, 'url': None} for p in doc.paragraphs]
-    return {'features': {'reviews': True, 'mix': False, 'subtitles': False}, 'product': {'id': row['id'], 'revision': row['revision'], 'doc': doc.model_dump(),
+    return {'features': {'reviews': True, 'mix': True, 'subtitles': False}, 'product': {'id': row['id'], 'revision': row['revision'], 'doc': doc.model_dump(),
                         'source_stale': source_stale(aid, doc)}, 'voices': profiles(aid), 'segments': segments,
             'batches': [batch(aid, b['id']) for b in db.query('SELECT id FROM audio_batches WHERE article_id=? ORDER BY created_at DESC LIMIT 30', (aid,))],
             'reviews': reviews(aid), 'rules_review': audio_text.review(doc), 'billing': billing(aid),
@@ -602,7 +625,9 @@ def run_batch(aid, payload):
         if cancelled(bid):
             return finish('cancelled')
         # A local mix uses the immutable batch settings and current ACL of source files.
-        media = {}
+        media, manifest = mix_media(aid, doc)
+        if manifest != snap['media']:
+            return finish('failed', '混音素材在入队后改变，请新建批次')
         directory = root() / aid / 'batches' / bid
         result = processing.compose(segments, doc.mix, media, directory)
         result.update({'cache_hits': hits, 'selected_only': bool(snap.get('selected_ids')), 'provider': snap['voice']['provider'],
