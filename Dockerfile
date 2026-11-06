@@ -13,7 +13,9 @@ ENV PYTHONUNBUFFERED=1 \
     WENSHU_DATA_DIR=/app/resource \
     WENSHU_LOG_DIR=/app/log
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt \
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir -r requirements.txt \
     && python -m playwright install --with-deps chromium \
     && useradd --uid 10001 --create-home wenshu \
     && mkdir -p /app/resource /app/log /app/state \
