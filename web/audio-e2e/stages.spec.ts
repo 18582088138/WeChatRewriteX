@@ -12,6 +12,7 @@ test('stage workbench preserves edits, reuses segments and plays MP3', async ({ 
   await page.getByRole('button', { name: '保存口播与设置', exact: true }).click()
   if (!state.features.reviews) {
     await expect(page.getByRole('button', { name: '提交口播审核', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'AI 口播审阅（产生模型调用）', exact: true })).toHaveCount(0)
   }
   if (!state.features.mix) {
     await expect(page.getByText('段后停顿（毫秒）', { exact: true })).toHaveCount(0)
@@ -35,8 +36,10 @@ test('stage workbench preserves edits, reuses segments and plays MP3', async ({ 
   expect(state.batches[0].attempts).toHaveLength(1)
   expect(state.batches[0].result.cache_hits).toBe(1)
   const player = page.locator('.batch audio').first()
+  const expectedUrl = state.batches[0].files.find((file: any) => file.name === 'audio.mp3').url
+  await expect(player).toHaveAttribute('src', expectedUrl)
   await player.evaluate(async (node: HTMLAudioElement) => { node.load(); await node.play() })
-  await expect.poll(() => player.evaluate((node: HTMLAudioElement) => node.currentTime)).toBeGreaterThan(0)
+  await expect.poll(() => player.evaluate((node: HTMLAudioElement) => node.currentTime), { timeout: 10000 }).toBeGreaterThan(0)
   await player.evaluate((node: HTMLAudioElement) => node.pause())
   await page.setViewportSize({ width: 390, height: 844 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
