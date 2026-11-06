@@ -1,7 +1,7 @@
 import {test,expect} from '@playwright/test'
 
 test('audio edit, cached synthesis, approval, export and mobile playback',async({page,request})=>{
-  const article=(await (await request.get('/api/articles')).json()).articles[0]
+  const article=(await (await request.get('/api/articles')).json()).articles.find((row:any)=>row.title==='音频完整测试主题')
   const aid=article.id,base=`/api/articles/${aid}/audio`
   async function generateFull(){
     const pending=page.waitForResponse(r=>r.url().endsWith(base+'/generate') && r.request().method()==='POST')

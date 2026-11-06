@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 
 test('stage workbench preserves edits, reuses segments and plays MP3', async ({ page, request }) => {
-  const article = (await (await request.get('/api/articles')).json()).articles[0]
+  const article = (await (await request.get('/api/articles')).json()).articles.find((row: any) => row.title === '音频阶段测试主题')
   const base = `/api/articles/${article.id}/audio`
   await page.goto(`/articles/${article.id}`)
   await page.getByText('音频创作', { exact: true }).click()
