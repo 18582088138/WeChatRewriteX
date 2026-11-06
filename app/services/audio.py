@@ -235,7 +235,7 @@ def register_profile(request, profile_id=None):
         if profile_id and not db.query_one('SELECT id FROM voice_profiles WHERE id=?', (profile_id,)):
             raise HTTPException(404, '声音档案不存在')
         pid = profile_id or uid()
-        inventory = store.setting('inventory', {}).get('voices', [])
+        inventory = (store.setting('inventory') or {}).get('voices', [])
         verified = time.time() if any(v['voice_id'] == request.voice_id for v in inventory) and request.provider == 'minimax' else None
         db.execute('INSERT INTO voice_profiles VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider,voice_id=excluded.voice_id,name=excluded.name,authorization=excluded.authorization,projects_json=excluded.projects_json,verified_at=excluded.verified_at,enabled=excluded.enabled',
                    (pid, request.provider, request.voice_id, request.name, request.authorization,
