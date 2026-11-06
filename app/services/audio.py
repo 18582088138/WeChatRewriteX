@@ -14,6 +14,7 @@ from .audio_models import SpeechDoc, Paragraph, VoiceSettings, Limits
 
 from .audio_models import Mix
 from . import audio_text
+from . import tts
 
 
 def uid():
@@ -66,8 +67,6 @@ def script_hash(doc):
 
 
 def normalize(doc):
-    if doc.voice != VoiceSettings():
-        raise ValueError('此阶段尚未开放声音设置')
     if doc.mix != Mix() or doc.dictionary or any(p.pause_ms != 300 for p in doc.paragraphs):
         raise ValueError('词典、停顿与混音在 S7 开放')
     ids = [p.id for p in doc.paragraphs]
@@ -159,6 +158,10 @@ def derive(aid, request):
     if existing:
         old = SpeechDoc.model_validate_json(existing['doc_json'])
         doc.voice, doc.mix, doc.dictionary = old.voice, old.mix, old.dictionary
+    elif config.get_env('MINIMAX_DEFAULT_VOICE_ID') and (not team.enabled() or (team.actor.get() or {}).get('role') == 'admin'):
+        from .audio_models import VoiceProfile
+        default = audio_default_profile(aid)
+        doc.voice.profile_id = default['id']
     if request.use_llm:
         from .llm.router import complete
         from pydantic import BaseModel, Field
@@ -184,6 +187,14 @@ def derive(aid, request):
     return save(aid, request.revision, doc, deriving=True)
 
 
+def audio_default_profile(aid):
+    from .audio_models import VoiceProfile
+    voice_id = config.get_env('MINIMAX_DEFAULT_VOICE_ID')
+    existing = next((p for p in profiles(aid) if p['provider']=='minimax' and p['voice_id']==voice_id),None)
+    return existing or register_profile(VoiceProfile(voice_id=voice_id, name='默认已有音色',
+                         authorization='用户通过服务端配置指定复用的已有音色，未重新克隆', projects=[aid]))
+
+
 def rewrite(aid, request):
     row, doc = product(aid)
     check_revision(row, request.revision)
@@ -205,10 +216,64 @@ def rewrite(aid, request):
     return save(aid, request.revision, doc)
 
 
+def profiles(aid=None):
+    rows = db.query('SELECT * FROM voice_profiles ORDER BY name,id')
+    if aid:
+        project(aid)
+        rows = [r for r in rows if r['enabled'] and aid in json.loads(r['projects_json'])]
+    return [{**{k: v for k, v in r.items() if k != 'projects_json'}, 'projects': json.loads(r['projects_json'])} for r in rows]
+
+
+def register_profile(request, profile_id=None):
+    if team.enabled():
+        team.admin()
+    if request.provider == 'fake' and config.get_env('WENSHU_FAKE_TTS') != '1':
+        raise ValueError('离线测试音未启用')
+    for aid in request.projects:
+        project(aid)
+    with db.transaction():
+        if profile_id and not db.query_one('SELECT id FROM voice_profiles WHERE id=?', (profile_id,)):
+            raise HTTPException(404, '声音档案不存在')
+        pid = profile_id or uid()
+        inventory = store.setting('inventory', {}).get('voices', [])
+        verified = time.time() if any(v['voice_id'] == request.voice_id for v in inventory) and request.provider == 'minimax' else None
+        db.execute('INSERT INTO voice_profiles VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider,voice_id=excluded.voice_id,name=excluded.name,authorization=excluded.authorization,projects_json=excluded.projects_json,verified_at=excluded.verified_at,enabled=excluded.enabled',
+                   (pid, request.provider, request.voice_id, request.name, request.authorization,
+                    store.dumps(request.projects), verified, int(request.enabled)))
+        team.audit('voice.register', pid, detail={'provider': request.provider})
+    return next(p for p in profiles() if p['id'] == pid)
+
+
+def query_inventory():
+    if team.enabled():
+        team.admin()
+    # Persist failed attempts too; explicit cache never refreshes on page reads.
+    with db.transaction():
+        old = store.setting('inventory')
+        if old:
+            return old
+        store.set_setting('inventory', {'state': 'querying', 'attempts': 1, 'voices': [], 'at': time.time()})
+    try:
+        voices = tts.inventory()
+        result = {'state': 'confirmed', 'attempts': 1, 'voices': voices, 'at': time.time()}
+    except tts.TTSError as exc:
+        result = {'state': 'unconfirmed', 'attempts': 1, 'voices': [], 'error': str(exc), 'at': time.time()}
+    with db.transaction():
+        store.set_setting('inventory', result)
+    return result
+
+
+def voice_for(aid, doc):
+    profile = db.query_one('SELECT * FROM voice_profiles WHERE id=? AND enabled=1', (doc.voice.profile_id,))
+    if not profile or aid not in json.loads(profile['projects_json']):
+        raise ValueError('请先选择本项目获准的已有声音档案；音色不可用时不会自动替换')
+    return {k: profile[k] for k in ('id', 'provider', 'voice_id', 'name', 'authorization')}
+
+
 def get(aid):
     project(aid)
     row = db.query_one("SELECT * FROM media_products WHERE article_id=? AND kind='speech'", (aid,))
-    state = {'product': None, 'voices': [], 'batches': [], 'reviews': [],
+    state = {'product': None, 'voices': profiles(aid), 'batches': [], 'reviews': [],
              'features': {'reviews': False, 'mix': False, 'subtitles': False}}
     if row:
         doc = SpeechDoc.model_validate_json(row['doc_json'])

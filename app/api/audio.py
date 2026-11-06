@@ -2,7 +2,7 @@
 from fastapi import APIRouter
 from fastapi.responses import FileResponse
 from pydantic import Field
-from ..services import audio
+from ..services import audio, tts
 from ..services.audio_models import (SaveSpeech, Derive, Rewrite, VoiceProfile, Limits, Generate,
                                     SubmitReview, ReviewAction, Subtitles, Strict)
 
@@ -42,3 +42,26 @@ class Revision(Strict):
 @router.post(BASE + '/confirm-source')
 def confirm(aid: str, request: Revision):
     return audio.confirm_source(aid, request.revision)
+
+
+@router.get('/api/audio/settings')
+def settings():
+    from ..storage import audio_store
+    return {'voices': audio.profiles(), 'default_voice_id': audio.config.get_env('MINIMAX_DEFAULT_VOICE_ID') or '',
+            'key_set': bool(audio.config.get_env('MINIMAX_TTS_API_KEY')), 'inventory': audio_store.setting('inventory'),
+            'capabilities': tts.MiniMaxTTS.capabilities, 'fake_enabled': audio.config.get_env('WENSHU_FAKE_TTS') == '1'}
+
+
+@router.post('/api/audio/voices')
+def voice(request: VoiceProfile):
+    return audio.register_profile(request)
+
+
+@router.put('/api/audio/voices/{pid}')
+def change_voice(pid: str, request: VoiceProfile):
+    return audio.register_profile(request,pid)
+
+
+@router.post('/api/audio/inventory')
+def inventory():
+    return audio.query_inventory()
