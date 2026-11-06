@@ -814,7 +814,7 @@ def export(aid, bid):
                     'revision': b['revision'], 'input_hash': b['input_hash'], 'approval_id': approved['id'],
                     'voice': b['snapshot']['voice'], 'parameters': b['snapshot']['doc']['voice'],
                     'mix': b['snapshot']['doc']['mix'], 'sources': b['snapshot']['doc']['source_hash'],
-                    'duration': b['result']['duration'], 'alignment': 'paragraph', 'loudness': b['result']['loudness'],
+                    'duration': b['result']['duration'], 'alignment': 'paragraph', 'loudness': b['result'].get('loudness'),
                     'files': [f for f in b['files'] if f['name'] in ('audio.mp3','audio.wav','script.txt','pronunciation.txt','subtitles.srt','subtitles.vtt')],
                     'checksums': db.query("SELECT name,sha256 FROM audio_files WHERE batch_id=? AND name IN ('audio.mp3','audio.wav','script.txt','pronunciation.txt','subtitles.srt','subtitles.vtt') ORDER BY name",(bid,))}
         directory = root() / aid / 'batches' / bid
