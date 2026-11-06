@@ -60,6 +60,7 @@ function keepLocalOnLatest(){baseRevision.value=state.value.product.revision;err
 function move(index:number,step:number){const p=doc.value.paragraphs.splice(index,1)[0];doc.value.paragraphs.splice(index+step,0,p)}
 async function generate(ids?:string[]){
   if(dirty.value){error.value='请先保存口播和声音设置';return}
+  estimate.value=null
   await act(()=>api.post(base.value+'/generate',{revision:baseRevision.value,paragraph_ids:ids||null,confirm_unknown_retry:unknownRetry.value}))
 }
 async function getEstimate(){await act(async()=>{estimate.value=await api.get(base.value+'/estimate')})}
@@ -78,6 +79,7 @@ onBeforeRouteLeave(mayLeave);onBeforeRouteUpdate(mayLeave)
 onMounted(()=>{initialize();timer=setInterval(()=>{if(!busy.value)load()},2500);window.addEventListener('beforeunload',beforeUnload)})
 onUnmounted(()=>{generation++;if(timer)clearInterval(timer);window.removeEventListener('beforeunload',beforeUnload)})
 watch(()=>props.articleId,()=>{generation++;state.value=null;doc.value=null;baseRevision.value=0;selectedReview.value='';history.value=[];estimate.value=null;cueText.value='';initialize()})
+watch([dirty,baseRevision],()=>{estimate.value=null})
 </script>
 
 <template>

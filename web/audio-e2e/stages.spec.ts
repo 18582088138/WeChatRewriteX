@@ -10,6 +10,8 @@ test('stage workbench preserves edits, reuses segments and plays MP3', async ({ 
   let state = await (await request.get(base)).json()
   await page.getByLabel('已有音色', { exact: true }).selectOption(state.voices[0].id)
   await page.getByRole('button', { name: '保存口播与设置', exact: true }).click()
+  await page.getByRole('button', { name: '估算本次调用', exact: true }).click()
+  await expect(page.getByText('新请求 2 次', { exact: false })).toBeVisible()
   if (!state.features.reviews) {
     await expect(page.getByRole('button', { name: '提交口播审核', exact: true })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'AI 口播审阅（产生模型调用）', exact: true })).toHaveCount(0)
@@ -27,6 +29,7 @@ test('stage workbench preserves edits, reuses segments and plays MP3', async ({ 
       { timeout: 40000 }).toBe('done')
   }
   await generate()
+  await expect(page.getByText('新请求 2 次', { exact: false })).toHaveCount(0)
   await page.getByLabel('口播段落 1', { exact: true }).fill('保留事实的人工修订，背景轮询不能覆盖这段输入。')
   await page.waitForTimeout(3100)
   await expect(page.getByLabel('口播段落 1', { exact: true })).toHaveValue(/人工修订/)
