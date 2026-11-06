@@ -12,6 +12,7 @@ test('stage workbench preserves edits, reuses segments and plays MP3', async ({ 
   await page.getByRole('button', { name: '保存口播与设置', exact: true }).click()
   if (!state.features.reviews) {
     await expect(page.getByRole('button', { name: '提交口播审核', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'AI 口播审阅（产生模型调用）', exact: true })).toHaveCount(0)
   }
   if (!state.features.mix) {
     await expect(page.getByText('段后停顿（毫秒）', { exact: true })).toHaveCount(0)
