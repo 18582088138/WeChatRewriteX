@@ -14,4 +14,4 @@
 
 官方入口：[同步语音合成](https://platform.minimaxi.com/docs/api-reference/speech-t2a-http)、[已有声音查询](https://platform.minimaxi.com/docs/api-reference/voice-management-get)、[按量计费](https://platform.minimaxi.com/docs/guides/pricing-pay-as-you-go)。完整原始正文和去敏响应保留在本机忽略的 `build/v2-evidence/`，没有重复请求查询或追加付费验证。
 
-账户可用后，短文本及 2～5 分钟主题人声、重点读音/自然度/音色、手机与跨网络试听下载仍待实际验收。
+短文本同步合成和完整解码已由上述 2026-11-06 补验确认；2～5 分钟主题人声、重点读音/自然度/音色、手机与跨网络试听下载仍待实际验收。
