@@ -51,6 +51,9 @@ async def authorize(request, member):
     if path in ADMIN or path.startswith("/api/auth/members"):
         team.admin()
         return ("admin", "manage")
+    if path.startswith('/api/audio/'):
+        team.admin()
+        return ('admin', 'manage')
     if path == "/api/team/audit":
         team.admin()
         return ("admin", "manage")
@@ -119,6 +122,11 @@ async def authorize(request, member):
     capability = "read" if method in ("GET", "HEAD") else "write"
     if method not in ("GET", "HEAD") and suffix in ("finalize", "publish", "publish/retry", "cards"):
         capability = "release"
+    if suffix.startswith('audio/') and method not in ('GET', 'HEAD'):
+        if suffix.startswith('audio/export'):
+            capability = 'release'
+        elif suffix.startswith('audio/reviews/'):
+            capability = 'review'
     if suffix.startswith("access"):
         capability = "read" if method in ("GET", "HEAD") else "manage"
         if suffix == "access/adopt-jobs":

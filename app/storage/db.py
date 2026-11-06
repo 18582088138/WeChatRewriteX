@@ -149,6 +149,8 @@ def init_db() -> None:
         team.migrate()
         from ..services import human_review
         human_review.migrate()
+    from . import audio_store
+    audio_store.migrate()
 
 
 def _init_fts(conn: sqlite3.Connection) -> None:
