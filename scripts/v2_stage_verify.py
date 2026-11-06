@@ -23,7 +23,8 @@ def main():
     subprocess.run(['git', 'diff', '--exit-code'], cwd=ROOT, check=True, capture_output=True)
     output = ROOT / 'build' / 'v2-rebuild-evidence'
     output.mkdir(parents=True, exist_ok=True)
-    log = output / f'{args.stage}.log'
+    identity = f'{args.stage}-{commit[:8]}'
+    log = output / f'{identity}.log'
     started = time.monotonic()
     kwargs = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}
     with log.open('wb') as stream:
@@ -32,7 +33,7 @@ def main():
               'command': command, 'exit_code': result.returncode,
               'elapsed_seconds': round(time.monotonic() - started, 2),
               'log': log.relative_to(ROOT).as_posix(), 'new_paid_requests': 0, 'clone_requests': 0}
-    (output / f'{args.stage}.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+    (output / f'{identity}.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     if result.returncode:
         print(json.dumps(report, ensure_ascii=False))
         raise SystemExit(result.returncode)
