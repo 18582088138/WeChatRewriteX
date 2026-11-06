@@ -31,3 +31,4 @@ app/_assets/
 web/test-results/
 web/playwright-report/
 web/team-test-results/
+web/audio-test-results/
